@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Braided StreamGraph Demo</title>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Braided StreamGraph (D3 + TypeScript)</h1>
+      </header>
+
+      <section class="controls">
+        <label>
+          Dataset
+          <select id="dataset-select">
+            <option value="synthetic">synthetic</option>
+            <option value="covid">covid (SineStream)</option>
+          </select>
+        </label>
+
+        <label>
+          Baseline
+          <select id="baseline-select">
+            <option value="sineStream">sineStream</option>
+            <option value="center">center</option>
+            <option value="zero">zero</option>
+          </select>
+        </label>
+
+        <label>
+          Gap Mode
+          <select id="gapmode-select">
+            <option value="uncGap">uncGap</option>
+            <option value="fixedGap">fixedGap</option>
+            <option value="none">none</option>
+          </select>
+        </label>
+
+        <label>
+          Render Mode
+          <select id="rendermode-select">
+            <option value="mean+uncBandInGap">mean+uncBandInGap</option>
+            <option value="meanOnly">meanOnly</option>
+          </select>
+        </label>
+
+        <label>
+          gapAlphaPx
+          <input id="gap-alpha" type="range" min="0" max="40" step="1" />
+          <span id="gap-alpha-value"></span>
+        </label>
+
+        <label>
+          maxExtraHeightPx
+          <input id="max-extra" type="range" min="0" max="240" step="5" />
+          <span id="max-extra-value"></span>
+        </label>
+
+        <label class="checkbox">
+          <input id="assert-toggle" type="checkbox" checked />
+          Dev Assertions
+        </label>
+
+        <label class="checkbox">
+          <input id="overlay-omega" type="checkbox" />
+          Overlay omega(t)
+        </label>
+
+        <label class="checkbox">
+          <input id="overlay-sumgap" type="checkbox" />
+          Overlay sumGap(t)
+        </label>
+
+        <label class="checkbox">
+          <input id="overlay-sample-gaps" type="checkbox" />
+          Overlay random g_k(t)
+        </label>
+
+        <button id="clear-roi" type="button">Clear ROI</button>
+        <span id="data-note"></span>
+        <span id="roi-label">ROI: none</span>
+      </section>
+
+      <svg id="chart" width="1140" height="620"></svg>
+      <pre id="metrics"></pre>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
