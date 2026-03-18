@@ -15,7 +15,11 @@ const CATEGORICAL = [
   "#c2410c"
 ];
 
-export function layerColor(index: number): string {
+export function layerColor(index: number, layerId?: string): string {
+  const stateKey = extractStateKey(layerId);
+  if (stateKey) {
+    return stateColor(stateKey);
+  }
   return CATEGORICAL[index % CATEGORICAL.length];
 }
 
@@ -29,4 +33,28 @@ export function diffColor(value01: number): string {
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+function extractStateKey(layerId?: string): string | null {
+  if (!layerId) {
+    return null;
+  }
+  const token = layerId.split("|")[0]?.trim();
+  if (!token) {
+    return null;
+  }
+  return token.toUpperCase();
+}
+
+function stateColor(stateKey: string): string {
+  const hue = stableHue(stateKey);
+  return `hsl(${hue}, 62%, 46%)`;
+}
+
+function stableHue(seed: string): number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 360;
 }

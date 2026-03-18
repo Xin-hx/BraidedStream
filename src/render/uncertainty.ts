@@ -31,9 +31,9 @@ export function renderUncertaintyInGaps(args: UncertaintyRenderArgs): void {
   const bands: GapBandDatum[] = [];
 
   for (let k = 0; k < gapCount; k += 1) {
-    const maxBoundaryU =
-      d3.max(times, (_, t) => boundaryUncertaintyAt(orderedLayers[k], orderedLayers[k + 1], t)) ?? 0;
-    if (maxBoundaryU <= 0) {
+    const uncSeries = times.map((_, t) => boundaryUncertaintyAt(orderedLayers[k], orderedLayers[k + 1], t));
+    const robustHigh = percentile(uncSeries, 0.9);
+    if (robustHigh <= 0) {
       continue;
     }
 
@@ -43,8 +43,8 @@ export function renderUncertaintyInGaps(args: UncertaintyRenderArgs): void {
       const gapLower = braided.yTop[k][t];
       const gapUpper = braided.yBottom[k + 1][t];
       const gapSize = Math.max(0, gapUpper - gapLower);
-      const u = boundaryUncertaintyAt(orderedLayers[k], orderedLayers[k + 1], t);
-      const normalized = clamp01(u / maxBoundaryU);
+      const u = uncSeries[t];
+      const normalized = Math.sqrt(clamp01(u / robustHigh));
       const bandThickness = Math.min(gapSize * 0.92, gapSize * normalized);
       const mid = gapLower + gapSize * 0.5;
       bandBottom[t] = mid - bandThickness * 0.5;
@@ -77,4 +77,13 @@ export function renderUncertaintyInGaps(args: UncertaintyRenderArgs): void {
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+function percentile(values: number[], q: number): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = values.slice().sort((a, b) => a - b);
+  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1))));
+  return sorted[idx];
 }

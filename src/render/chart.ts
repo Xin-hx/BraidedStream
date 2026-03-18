@@ -8,6 +8,7 @@ import { orderLayers, validateTimeLengths } from "../core/validate";
 import { createRoiBrush, type RoiBrushController } from "../ui/brush";
 import { createAreaPath } from "./paths";
 import { renderUncertaintyInGaps } from "./uncertainty";
+import { layerColor } from "../styles/palette";
 
 export type DemoDataset = PreparedDataset;
 
@@ -220,7 +221,7 @@ export class BraidedChart {
         (exit) => exit.remove()
       )
       .attr("d", (d) => d.path)
-      .attr("fill", (d) => layerColor(d.index, data.length))
+      .attr("fill", (d) => layerColor(d.index, d.id))
       .attr("fill-opacity", 0.86)
       .attr("stroke", "#f8fafc")
       .attr("stroke-width", 0.7);
@@ -406,11 +407,6 @@ function padExtent(extent: [number, number], ratio: number): [number, number] {
   const span = extent[1] - extent[0];
   const pad = span * ratio;
   return [extent[0] - pad, extent[1] + pad];
-}
-
-function layerColor(index: number, total: number): string {
-  const denom = Math.max(1, total - 1);
-  return d3.interpolateRainbow(index / denom);
 }
 
 function clamp01(v: number): number {

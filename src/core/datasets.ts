@@ -1,5 +1,6 @@
 import { generateSyntheticDataset } from "./synthetic";
-import type { DatasetKind, LayerInput, PreparedDataset } from "./types";
+import type { DatasetKind, LayerInput, PreparedDataset, UncertaintyBandMode } from "./types";
+import * as d3 from "d3";
 
 export interface DatasetBundle {
   kind: DatasetKind;
@@ -8,17 +9,37 @@ export interface DatasetBundle {
   uncNote: string | null;
 }
 
-interface RawLayerSeries {
-  id: string;
-  points: Array<{
-    timeKey: string;
-    sortValue: number;
-    mean: number;
-    unc?: number;
-    lower?: number;
-    upper?: number;
-  }>;
+interface CovidCsvRow {
+  time: string;
+  time_index: string;
+  category: string;
+  location: string;
+  location_level: string;
+  horizon_weeks: string;
+  forecast_date: string;
+  target_end_date: string;
+  median: string;
+  low50: string;
+  high50: string;
+  low95: string;
+  high95: string;
+  uncertainty50: string;
+  uncertainty95: string;
+  stream_size: string;
 }
+
+interface CovidLayerMeta {
+  unc50Series?: number[];
+  unc95Series?: number[];
+  lower50Series?: number[];
+  upper50Series?: number[];
+  lower95Series?: number[];
+  upper95Series?: number[];
+  regionKey?: string;
+  horizonKey?: string;
+}
+
+type CovidLayerInput = LayerInput & CovidLayerMeta;
 
 export function createSyntheticBundle(): DatasetBundle {
   return {
@@ -30,17 +51,23 @@ export function createSyntheticBundle(): DatasetBundle {
 }
 
 export async function loadCovidBundle(layerLimit = 24): Promise<DatasetBundle> {
-  const raw = await fetchCovidRawJson();
-  console.log("[covid-loader] raw json:", raw);
-
-  const series = extractLayerSeries(raw);
-  if (series.length === 0) {
-    throw new Error("covid-data.json has no parseable layer series");
+  const rows = await fetchCovidBraidedRows();
+  if (rows.length === 0) {
+    throw new Error("demo_braided_stream.csv has no parseable rows");
   }
 
-  const normalized = normalizeSeries(series);
+  const normalized = normalizeCovidRows(rows);
   const selected = selectTopLayers(normalized.layers, layerLimit);
-  const proxyApplied = ensureUncertainty(selected.layers);
+  applyCovidUncertaintyBand(
+    {
+      times: normalized.times,
+      layers: selected.layers,
+      order: selected.layers.map((layer) => layer.id)
+    },
+    "95"
+  );
+
+  const uniqueRegions = new Set(selected.layers.map((layer) => ((layer as CovidLayerMeta).regionKey ?? layer.id.split("|")[0] ?? layer.id))).size;
 
   return {
     kind: "covid",
@@ -50,20 +77,41 @@ export async function loadCovidBundle(layerLimit = 24): Promise<DatasetBundle> {
       order: selected.layers.map((layer) => layer.id)
     },
     notes: [
-      `source: covid-data.json`,
+      "source: demo_braided_stream.csv",
       `timeline points: ${normalized.times.length}`,
-      `countries parsed: ${normalized.layers.length}`,
-      `countries shown: ${selected.layers.length} (top by total daily confirmed)`
+      `categories parsed: ${normalized.layers.length}`,
+      `categories shown: ${selected.layers.length} (top by total stream size)`,
+      `regions shown: ${uniqueRegions}`
     ],
-    uncNote: proxyApplied ? "unc is proxy (rollingStd window=7, globally normalized to [0,1])" : null
+    uncNote: "unc mode: uncertainty95 (switchable to uncertainty50)"
   };
 }
 
-async function fetchCovidRawJson(): Promise<unknown> {
+export function applyCovidUncertaintyBand(dataset: PreparedDataset, mode: UncertaintyBandMode): boolean {
+  let changed = false;
+  for (const layer of dataset.layers as CovidLayerInput[]) {
+    const nextUnc = mode === "50" ? layer.unc50Series : layer.unc95Series;
+    if (!nextUnc) {
+      continue;
+    }
+    layer.unc = nextUnc.slice();
+
+    const nextLower = mode === "50" ? layer.lower50Series : layer.lower95Series;
+    const nextUpper = mode === "50" ? layer.upper50Series : layer.upper95Series;
+    if (nextLower && nextUpper) {
+      layer.lower = nextLower.slice();
+      layer.upper = nextUpper.slice();
+    }
+    changed = true;
+  }
+  return changed;
+}
+
+async function fetchCovidBraidedRows(): Promise<CovidCsvRow[]> {
   const urlCandidates = [
-    new URL("../../data/covid-data.json", import.meta.url).toString(),
-    "/data/covid-data.json",
-    "/covid-data.json"
+    new URL("../../data/demo_braided_stream.csv", import.meta.url).toString(),
+    "/data/demo_braided_stream.csv",
+    "/demo_braided_stream.csv"
   ];
   let lastError: unknown = null;
   for (const url of urlCandidates) {
@@ -72,215 +120,109 @@ async function fetchCovidRawJson(): Promise<unknown> {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      return await response.json();
+      const csvText = await response.text();
+      const rows = d3.csvParse(csvText) as unknown as CovidCsvRow[];
+      return rows;
     } catch (error) {
       lastError = error;
     }
   }
-  throw new Error(`Unable to load covid-data.json: ${String(lastError)}`);
+  throw new Error(`Unable to load demo_braided_stream.csv: ${String(lastError)}`);
 }
 
-function extractLayerSeries(raw: unknown): RawLayerSeries[] {
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    return fromObjectMap(raw as Record<string, unknown>);
-  }
-  if (Array.isArray(raw)) {
-    return fromArray(raw);
-  }
-  return [];
-}
+function normalizeCovidRows(rows: CovidCsvRow[]): { times: number[]; layers: CovidLayerInput[] } {
+  const filtered = rows.filter((row) => {
+    const idx = toFiniteNumber(row.time_index);
+    const category = row.category?.trim();
+    const horizon = toFiniteNumber(row.horizon_weeks);
+    const level = row.location_level?.trim().toLowerCase();
+    const location = row.location?.trim().toUpperCase();
+    return (
+      idx !== null &&
+      Boolean(category) &&
+      level === "state" &&
+      location !== "US" &&
+      horizon !== null &&
+      horizon >= 1 &&
+      horizon <= 4
+    );
+  });
 
-function fromObjectMap(raw: Record<string, unknown>): RawLayerSeries[] {
-  const out: RawLayerSeries[] = [];
-  for (const [id, value] of Object.entries(raw)) {
-    if (!Array.isArray(value) || value.length === 0) {
-      continue;
-    }
-    const points = parseRows(value);
-    if (points.length > 2) {
-      out.push({ id, points });
-    }
-  }
-  return out;
-}
+  const orderedTimeIndices = Array.from(
+    new Set(
+      filtered
+        .map((row) => toFiniteNumber(row.time_index))
+        .filter((v): v is number => v !== null)
+    )
+  ).sort((a, b) => a - b);
+  const indexByTime = new Map<number, number>(orderedTimeIndices.map((value, i) => [value, i]));
 
-function fromArray(raw: unknown[]): RawLayerSeries[] {
-  const out: RawLayerSeries[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") {
-      continue;
+  const byCategory = new Map<string, CovidCsvRow[]>();
+  for (const row of filtered) {
+    const category = row.category.trim();
+    if (!byCategory.has(category)) {
+      byCategory.set(category, []);
     }
-    const obj = item as Record<string, unknown>;
-    const idRaw = obj.id ?? obj.name ?? obj.key;
-    const rowsRaw = obj.rows ?? obj.points ?? obj.values ?? obj.series ?? obj.data;
-    if (!idRaw || !rowsRaw || !Array.isArray(rowsRaw)) {
-      continue;
-    }
-    const points = parseRows(rowsRaw);
-    if (points.length > 2) {
-      out.push({ id: String(idRaw), points });
-    }
-  }
-  return out;
-}
-
-function parseRows(rows: unknown[]): RawLayerSeries["points"] {
-  const out: RawLayerSeries["points"] = [];
-  let previousConfirmed: number | null = null;
-
-  for (let i = 0; i < rows.length; i += 1) {
-    const row = rows[i];
-    if (typeof row === "number" && Number.isFinite(row)) {
-      out.push({
-        timeKey: `i:${i}`,
-        sortValue: i,
-        mean: row
-      });
-      continue;
-    }
-    if (!row || typeof row !== "object") {
-      continue;
-    }
-
-    const obj = row as Record<string, unknown>;
-    const timeRaw = obj.date ?? obj.time ?? obj.t ?? obj.timestamp ?? obj.day ?? i;
-    const parsedTime = parseTimeToken(timeRaw, i);
-
-    let mean: number | null = null;
-    const confirmed = toFiniteNumber(obj.confirmed);
-    if (confirmed !== null) {
-      mean = previousConfirmed === null ? Math.max(0, confirmed) : Math.max(0, confirmed - previousConfirmed);
-      previousConfirmed = confirmed;
-    } else {
-      const directValue =
-        toFiniteNumber(obj.mean) ??
-        toFiniteNumber(obj.value) ??
-        toFiniteNumber(obj.count) ??
-        toFiniteNumber(obj.cases) ??
-        toFiniteNumber(obj.y);
-      mean = directValue ?? firstNumericField(obj, ["date", "time", "t", "timestamp", "day", "id", "name"]);
-    }
-    if (mean === null) {
-      continue;
-    }
-
-    const unc =
-      toFiniteNumber(obj.unc) ??
-      toFiniteNumber(obj.uncertainty) ??
-      toFiniteNumber(obj.std) ??
-      toFiniteNumber(obj.sigma);
-    const lower = toFiniteNumber(obj.lower) ?? toFiniteNumber(obj.low);
-    const upper = toFiniteNumber(obj.upper) ?? toFiniteNumber(obj.high);
-
-    out.push({
-      timeKey: parsedTime.key,
-      sortValue: parsedTime.sortValue,
-      mean,
-      unc: unc === null ? undefined : unc,
-      lower: lower === null ? undefined : lower,
-      upper: upper === null ? undefined : upper
-    });
-  }
-  return out;
-}
-
-function normalizeSeries(series: RawLayerSeries[]): { times: number[]; layers: LayerInput[] } {
-  const keyToSort = new Map<string, number>();
-  for (const layer of series) {
-    for (const point of layer.points) {
-      const prev = keyToSort.get(point.timeKey);
-      if (prev === undefined || point.sortValue < prev) {
-        keyToSort.set(point.timeKey, point.sortValue);
-      }
-    }
+    byCategory.get(category)!.push(row);
   }
 
-  const orderedKeys = Array.from(keyToSort.entries())
-    .sort((a, b) => {
-      const [ka, sa] = a;
-      const [kb, sb] = b;
-      if (Number.isFinite(sa) && Number.isFinite(sb) && sa !== sb) {
-        return sa - sb;
-      }
-      return ka.localeCompare(kb);
-    })
-    .map(([key]) => key);
+  const layers: CovidLayerInput[] = [];
+  for (const [category, groupRows] of byCategory.entries()) {
+    const mean = new Array<number>(orderedTimeIndices.length).fill(0);
+    const unc50 = new Array<number>(orderedTimeIndices.length).fill(0);
+    const unc95 = new Array<number>(orderedTimeIndices.length).fill(0);
+    const lower50 = new Array<number>(orderedTimeIndices.length).fill(0);
+    const upper50 = new Array<number>(orderedTimeIndices.length).fill(0);
+    const lower95 = new Array<number>(orderedTimeIndices.length).fill(0);
+    const upper95 = new Array<number>(orderedTimeIndices.length).fill(0);
 
-  const indexByKey = new Map<string, number>(orderedKeys.map((key, i) => [key, i]));
-  const tLength = orderedKeys.length;
-  const layers: LayerInput[] = [];
+    let regionKey = "";
+    let horizonKey = "";
 
-  for (const layer of series) {
-    const mean = new Array<number>(tLength).fill(0);
-    const unc = new Array<number>(tLength).fill(0);
-    const lower = new Array<number>(tLength).fill(0);
-    const upper = new Array<number>(tLength).fill(0);
-
-    let hasUnc = false;
-    let hasLowerUpper = false;
-
-    for (const point of layer.points) {
-      const index = indexByKey.get(point.timeKey);
-      if (index === undefined) {
+    for (const row of groupRows) {
+      const rawTime = toFiniteNumber(row.time_index);
+      if (rawTime === null) {
         continue;
       }
-      mean[index] = sanitizeNumber(point.mean, 0);
-      if (point.unc !== undefined) {
-        unc[index] = Math.max(0, point.unc);
-        hasUnc = true;
+      const timeIndex = indexByTime.get(rawTime);
+      if (timeIndex === undefined) {
+        continue;
       }
-      if (point.lower !== undefined && point.upper !== undefined) {
-        lower[index] = point.lower;
-        upper[index] = point.upper;
-        hasLowerUpper = true;
-      }
+
+      mean[timeIndex] = Math.max(0, toFiniteNumber(row.stream_size) ?? toFiniteNumber(row.median) ?? 0);
+      unc50[timeIndex] = Math.max(0, toFiniteNumber(row.uncertainty50) ?? 0);
+      unc95[timeIndex] = Math.max(0, toFiniteNumber(row.uncertainty95) ?? 0);
+      lower50[timeIndex] = Math.max(0, toFiniteNumber(row.low50) ?? mean[timeIndex]);
+      upper50[timeIndex] = Math.max(lower50[timeIndex], toFiniteNumber(row.high50) ?? mean[timeIndex]);
+      lower95[timeIndex] = Math.max(0, toFiniteNumber(row.low95) ?? lower50[timeIndex]);
+      upper95[timeIndex] = Math.max(lower95[timeIndex], toFiniteNumber(row.high95) ?? upper50[timeIndex]);
+
+      regionKey = row.location?.trim() || category.split("|")[0] || "unknown";
+      const horizonParsed = Math.round(toFiniteNumber(row.horizon_weeks) ?? 0);
+      horizonKey = horizonParsed > 0 ? `h${horizonParsed}` : category.split("|")[1] ?? "h0";
     }
 
-    normalizeNonNegative(mean, `layer ${layer.id} mean contains negative values; shifted up`);
-    const output: LayerInput = { id: layer.id, mean };
-    if (hasUnc) {
-      output.unc = unc;
-    }
-    if (hasLowerUpper) {
-      output.lower = lower.map((v) => Math.max(0, v));
-      output.upper = upper.map((v) => Math.max(0, v));
-    }
-    layers.push(output);
+    layers.push({
+      id: category,
+      mean,
+      unc: unc95.slice(),
+      lower: lower95.slice(),
+      upper: upper95.slice(),
+      unc50Series: unc50,
+      unc95Series: unc95,
+      lower50Series: lower50,
+      upper50Series: upper50,
+      lower95Series: lower95,
+      upper95Series: upper95,
+      regionKey,
+      horizonKey
+    });
   }
 
   return {
-    times: Array.from({ length: tLength }, (_, i) => i),
+    times: Array.from({ length: orderedTimeIndices.length }, (_, i) => i),
     layers
   };
-}
-
-function ensureUncertainty(layers: LayerInput[]): boolean {
-  const hasExplicitUncertainty = layers.some((layer) => {
-    const hasUnc = layer.unc && layer.unc.some((v) => v > 0);
-    const hasBand = layer.lower && layer.upper;
-    return Boolean(hasUnc || hasBand);
-  });
-  if (hasExplicitUncertainty) {
-    return false;
-  }
-
-  const proxies = layers.map((layer) => rollingStd(layer.mean, 7));
-  let globalMax = 0;
-  for (const arr of proxies) {
-    for (const v of arr) {
-      globalMax = Math.max(globalMax, v);
-    }
-  }
-  const denom = globalMax > 0 ? globalMax : 1;
-
-  for (let i = 0; i < layers.length; i += 1) {
-    const unc = proxies[i].map((v) => v / denom);
-    const mean = layers[i].mean;
-    layers[i].unc = unc;
-    layers[i].lower = mean.map((m, t) => Math.max(0, m - unc[t]));
-    layers[i].upper = mean.map((m, t) => m + unc[t]);
-  }
-  return true;
 }
 
 function selectTopLayers(layers: LayerInput[], limit: number): { layers: LayerInput[] } {
@@ -298,50 +240,6 @@ function selectTopLayers(layers: LayerInput[], limit: number): { layers: LayerIn
   return { layers: selected };
 }
 
-function rollingStd(values: number[], window: number): number[] {
-  const out = new Array<number>(values.length).fill(0);
-  const radius = Math.max(1, Math.floor(window / 2));
-  for (let i = 0; i < values.length; i += 1) {
-    const left = Math.max(0, i - radius);
-    const right = Math.min(values.length - 1, i + radius);
-    const n = right - left + 1;
-    if (n <= 1) {
-      out[i] = 0;
-      continue;
-    }
-    let mean = 0;
-    for (let t = left; t <= right; t += 1) {
-      mean += values[t];
-    }
-    mean /= n;
-    let acc = 0;
-    for (let t = left; t <= right; t += 1) {
-      const d = values[t] - mean;
-      acc += d * d;
-    }
-    out[i] = Math.sqrt(acc / n);
-  }
-  return out;
-}
-
-function parseTimeToken(value: unknown, fallback: number): { key: string; sortValue: number } {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return { key: `n:${value}`, sortValue: value };
-  }
-  if (typeof value === "string") {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric)) {
-      return { key: `s:${value}`, sortValue: numeric };
-    }
-    const date = Date.parse(value);
-    if (Number.isFinite(date)) {
-      return { key: `s:${value}`, sortValue: date };
-    }
-    return { key: `s:${value}`, sortValue: fallback };
-  }
-  return { key: `i:${fallback}`, sortValue: fallback };
-}
-
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -355,42 +253,10 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function firstNumericField(obj: Record<string, unknown>, exclude: string[]): number | null {
-  for (const [key, value] of Object.entries(obj)) {
-    if (exclude.includes(key)) {
-      continue;
-    }
-    const n = toFiniteNumber(value);
-    if (n !== null) {
-      return n;
-    }
-  }
-  return null;
-}
-
 function sum(values: number[]): number {
   let out = 0;
   for (const v of values) {
     out += v;
   }
   return out;
-}
-
-function sanitizeNumber(value: number, fallback: number): number {
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function normalizeNonNegative(values: number[], warningMessage: string): void {
-  let minValue = Number.POSITIVE_INFINITY;
-  for (const v of values) {
-    minValue = Math.min(minValue, v);
-  }
-  if (!Number.isFinite(minValue) || minValue >= 0) {
-    return;
-  }
-  const shift = -minValue;
-  for (let i = 0; i < values.length; i += 1) {
-    values[i] += shift;
-  }
-  console.warn(`[covid-loader] ${warningMessage}; shift=${shift.toFixed(4)}`);
 }

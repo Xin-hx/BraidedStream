@@ -13,11 +13,11 @@ export interface InsetRenderArgs {
   viewMode: InsetViewMode;
   semanticMode: GapSemanticMode;
   yZoom: number;
-  staticMode: boolean;
 }
 
 export interface InsetRenderResult {
   xScale: d3.ScaleLinear<number, number> | null;
+  yScale: d3.ScaleLinear<number, number> | null;
   roiTimes: number[];
 }
 
@@ -54,7 +54,7 @@ export class InsetChart {
   }
 
   render(args: InsetRenderArgs): InsetRenderResult {
-    const { dataset, before, after, roi, viewMode, semanticMode, yZoom, staticMode } = args;
+    const { dataset, before, after, roi, viewMode, semanticMode, yZoom } = args;
     if (!roi) {
       this.root.selectAll("path, text, line").remove();
       this.axisX.selectAll("*").remove();
@@ -67,7 +67,7 @@ export class InsetChart {
         .attr("y", 0)
         .attr("fill", "#334155")
         .text("ROI Local View (select ROI in overview)");
-      return { xScale: null, roiTimes: [] };
+      return { xScale: null, yScale: null, roiTimes: [] };
     }
 
     const left = Math.max(0, roi.t0Index);
@@ -84,14 +84,14 @@ export class InsetChart {
 
     const yScale = d3.scaleLinear().domain([center - half * 1.06, center + half * 1.06]).range([this.innerHeight, 0]);
 
-    this.drawTitle(viewMode, staticMode, semanticMode);
+    this.drawTitle(viewMode, semanticMode);
     this.drawBeforeAfter(dataset, before, after, left, right, xScale, yScale, viewMode);
     this.drawDiffAndGapSemantic(dataset, before, after, left, right, xScale, yScale, viewMode, semanticMode);
 
     this.axisX.attr("transform", `translate(0,${this.innerHeight})`).call(d3.axisBottom(xScale).ticks(7).tickFormat(d3.format("d")));
     this.axisY.call(d3.axisLeft(yScale).ticks(6));
 
-    return { xScale, roiTimes };
+    return { xScale, yScale, roiTimes };
   }
 
   setHover(timeValue: number | null, xScale: d3.ScaleLinear<number, number> | null): void {
@@ -111,9 +111,9 @@ export class InsetChart {
       .attr("stroke-dasharray", "4,2");
   }
 
-  private drawTitle(viewMode: InsetViewMode, staticMode: boolean, semanticMode: GapSemanticMode): void {
+  private drawTitle(viewMode: InsetViewMode, semanticMode: GapSemanticMode): void {
     const modeText = viewMode.toUpperCase();
-    const staticText = staticMode ? "publication/static" : "interactive";
+    const staticText = "interactive";
     const text = `ROI Local View | mode=${modeText} | gap=${semanticMode} | ${staticText}`;
     this.titleGroup
       .selectAll<SVGTextElement, number>("text.title")
@@ -145,12 +145,12 @@ export class InsetChart {
     const pathsBefore = dataset.layers.map((layer, k) => ({
       id: layer.id,
       path: createAreaPath(dataset.times.slice(left, right + 1), before.yBottom[k].slice(left, right + 1), before.yTop[k].slice(left, right + 1), xScale, yScale),
-      color: layerColor(k)
+      color: layerColor(k, layer.id)
     }));
     const pathsAfter = dataset.layers.map((layer, k) => ({
       id: layer.id,
       path: createAreaPath(dataset.times.slice(left, right + 1), after.yBottom[k].slice(left, right + 1), after.yTop[k].slice(left, right + 1), xScale, yScale),
-      color: layerColor(k)
+      color: layerColor(k, layer.id)
     }));
 
     this.beforeGroup
@@ -211,12 +211,15 @@ export class InsetChart {
       const gapLower = after.yTop[k].slice(left, right + 1);
       const gapUpper = after.yBottom[k + 1].slice(left, right + 1);
       const unc = dataset.times.slice(left, right + 1).map((_, i) => boundaryUncertaintyAt(dataset.layers[k], dataset.layers[k + 1], left + i));
-      const maxUnc = d3.max(unc) ?? 1;
-      const meanUnc = (d3.mean(unc) ?? 0) / Math.max(1e-9, maxUnc);
+      const robustHigh = percentile(unc, 0.9);
+      const meanUnc = robustHigh > 0 ? (d3.mean(unc) ?? 0) / robustHigh : 0;
 
       if (semanticMode === "uncBand") {
         const mid = gapLower.map((v, i) => 0.5 * (v + gapUpper[i]));
-        const half = gapLower.map((v, i) => Math.max(0, (gapUpper[i] - v) * 0.5 * (unc[i] / Math.max(1e-9, maxUnc))));
+        const half = gapLower.map((v, i) => {
+          const ratio = robustHigh > 0 ? Math.sqrt(clamp01(unc[i] / robustHigh)) : 0;
+          return Math.max(0, (gapUpper[i] - v) * 0.5 * ratio);
+        });
         const lo = mid.map((v, i) => v - half[i]);
         const hi = mid.map((v, i) => v + half[i]);
         data.push({
@@ -294,4 +297,17 @@ function extentCrop(layout: StackLayout, left: number, right: number): [number, 
     return [minV - 1, maxV + 1];
   }
   return [minV, maxV];
+}
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+function percentile(values: number[], q: number): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = values.slice().sort((a, b) => a - b);
+  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1))));
+  return sorted[idx];
 }

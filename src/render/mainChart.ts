@@ -10,7 +10,6 @@ export interface MainChartRenderArgs {
   roi: ROI | null;
   insetRoi: ROI | null;
   onInsetRoiChange: (roi: ROI | null) => void;
-  staticMode: boolean;
 }
 
 export class MainChart {
@@ -58,7 +57,7 @@ export class MainChart {
   }
 
   render(args: MainChartRenderArgs): { xScale: d3.ScaleLinear<number, number>; yScale: d3.ScaleLinear<number, number> } {
-    const { dataset, layout, roi, insetRoi, onInsetRoiChange, staticMode } = args;
+    const { dataset, layout, roi, insetRoi, onInsetRoiChange } = args;
     const domainStart = roi ? dataset.times[Math.max(0, roi.t0Index)] : dataset.times[0];
     const domainEnd = roi ? dataset.times[Math.min(dataset.times.length - 1, roi.t1Index)] : dataset.times[dataset.times.length - 1];
     const xScale = d3
@@ -75,7 +74,7 @@ export class MainChart {
     const paths = dataset.layers.map((layer, k) => ({
       id: layer.id,
       path: createAreaPath(dataset.times, layout.yBottom[k], layout.yTop[k], xScale, yScale),
-      color: layerColor(k)
+      color: layerColor(k, layer.id)
     }));
 
     this.layersGroup
@@ -88,7 +87,7 @@ export class MainChart {
       .attr("stroke", "#f8fafc")
       .attr("stroke-width", 0.7);
 
-    this.drawRoi(null, dataset.times, xScale, staticMode);
+    this.drawRoi(null, dataset.times, xScale);
     this.drawInsetRoi(insetRoi, dataset.times, xScale);
     this.lastOnInsetRoiChange = onInsetRoiChange;
     this.insetBrush.updateContext(dataset.times, xScale);
@@ -148,7 +147,7 @@ export class MainChart {
       .attr("stroke-dasharray", "4,3");
   }
 
-  private drawRoi(roi: ROI | null, times: number[], xScale: d3.ScaleLinear<number, number>, staticMode: boolean): void {
+  private drawRoi(roi: ROI | null, times: number[], xScale: d3.ScaleLinear<number, number>): void {
     if (!roi) {
       this.roiGroup.selectAll("*").remove();
       return;
@@ -163,7 +162,7 @@ export class MainChart {
       .attr("y", 0)
       .attr("width", width)
       .attr("height", this.innerHeight)
-      .attr("fill", staticMode ? "rgba(14, 116, 144, 0.14)" : "rgba(14, 165, 233, 0.13)")
+      .attr("fill", "rgba(14, 165, 233, 0.13)")
       .attr("stroke", "#0369a1")
       .attr("stroke-width", 1.2);
 

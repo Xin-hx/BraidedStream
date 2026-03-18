@@ -14,6 +14,8 @@ export type RoiRecommendStrategy = "highest uncertainty" | "highest mean slope" 
 export type AggregationMode = "none" | "mean" | "sum" | "rollingAvg";
 export type GapSemanticMode = "uncBand" | "hatch" | "ruler" | "heatStrip";
 export type PresetMode = "Readability" | "Uncertainty" | "Compact" | "Presentation";
+export type UncertaintyBandMode = "50" | "95";
+export type HorizonFilterMode = "h1" | "h2" | "h3" | "h4";
 
 export interface LayerInput {
   id: string;

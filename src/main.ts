@@ -1,6 +1,6 @@
 import "./styles.css";
 import * as d3 from "d3";
-import { createSyntheticBundle, loadCovidBundle, type DatasetBundle } from "./core/datasets";
+import { applyCovidUncertaintyBand, createSyntheticBundle, loadCovidBundle, type DatasetBundle } from "./core/datasets";
 import { computeBaseline } from "./core/baseline";
 import { computeBraidLayout } from "./core/braid";
 import { runInvariantChecks } from "./core/assertions";
@@ -10,16 +10,21 @@ import { layerUncertaintyAt, orderLayers } from "./core/validate";
 import type {
   AggregationMode,
   BaselineMode,
+  BraidLayout,
   DatasetKind,
   GapMode,
   GapSemanticMode,
+  HorizonFilterMode,
   InsetViewMode,
+  LayerInput,
   MetricScope,
   PreparedDataset,
   PresetMode,
   RenderMode,
   ROI,
-  RoiRecommendStrategy
+  RoiRecommendStrategy,
+  StackLayout,
+  UncertaintyBandMode
 } from "./core/types";
 import { createInitialState } from "./state/appState";
 import { preprocessDataset } from "./data/transforms";
@@ -42,12 +47,28 @@ async function bootstrap(): Promise<void> {
   const datasetCache = new Map<DatasetKind, DatasetBundle>();
   const syntheticBundle = createSyntheticBundle();
   datasetCache.set("synthetic", syntheticBundle);
-  let activeKind: DatasetKind = "synthetic";
+  let activeKind: DatasetKind = state.datasetKind;
   let activeBundle = syntheticBundle;
+  if (activeKind === "covid") {
+    try {
+      const covidBundle = await loadCovidBundle(24);
+      datasetCache.set("covid", covidBundle);
+      activeBundle = covidBundle;
+    } catch {
+      activeKind = "synthetic";
+      state.datasetKind = "synthetic";
+      activeBundle = syntheticBundle;
+    }
+  }
   let pendingToken = 0;
   let recommendList: ReturnType<typeof recommendRoiWindows> = [];
   let lastMainXScale: d3.ScaleLinear<number, number> | null = null;
+  let lastMainYScale: d3.ScaleLinear<number, number> | null = null;
   let lastInsetXScale: d3.ScaleLinear<number, number> | null = null;
+  let lastInsetYScale: d3.ScaleLinear<number, number> | null = null;
+  let lastBaseLayout: StackLayout | null = null;
+  let lastBraidLayout: BraidLayout | null = null;
+  let lastOrderedLayers: LayerInput[] = [];
   let cachedPreprocessed: ReturnType<typeof preprocessDataset> | null = null;
 
   const overviewSvg = byId<SVGSVGElement>("overview-chart");
@@ -61,6 +82,8 @@ async function bootstrap(): Promise<void> {
   const datasetSelect = byId<HTMLSelectElement>("dataset-select");
   const baselineSelect = byId<HTMLSelectElement>("baseline-select");
   const gapModeSelect = byId<HTMLSelectElement>("gapmode-select");
+  const uncertaintyBandSelect = byId<HTMLSelectElement>("uncertainty-band-select");
+  const horizonSelect = byId<HTMLSelectElement>("horizon-select");
   const renderModeSelect = byId<HTMLSelectElement>("rendermode-select");
   const insetModeSelect = byId<HTMLSelectElement>("insetmode-select");
   const gapSemanticSelect = byId<HTMLSelectElement>("gapsemantic-select");
@@ -79,8 +102,6 @@ async function bootstrap(): Promise<void> {
   const overlayOmegaToggle = byId<HTMLInputElement>("overlay-omega");
   const overlaySumGapToggle = byId<HTMLInputElement>("overlay-sumgap");
   const overlaySampleToggle = byId<HTMLInputElement>("overlay-sample-gaps");
-  const staticModeToggle = byId<HTMLInputElement>("static-mode-toggle");
-  const publicationModeToggle = byId<HTMLInputElement>("publication-mode-toggle");
   const recommendStrategySelect = byId<HTMLSelectElement>("recommend-strategy-select");
   const recommendButton = byId<HTMLButtonElement>("recommend-roi");
   const recommendCandidateSelect = byId<HTMLSelectElement>("recommend-candidate-select");
@@ -101,6 +122,8 @@ async function bootstrap(): Promise<void> {
   state.insetROI = recommendHighUncertaintyRoi(activeBundle.dataset, state.ROI);
   baselineSelect.value = state.baseline;
   gapModeSelect.value = state.gapMode;
+  uncertaintyBandSelect.value = state.covidUncertaintyBand;
+  horizonSelect.value = state.covidHorizonFilter;
   renderModeSelect.value = state.renderMode;
   insetModeSelect.value = state.insetViewMode;
   gapSemanticSelect.value = state.gapSemanticMode;
@@ -115,8 +138,6 @@ async function bootstrap(): Promise<void> {
   overlayOmegaToggle.checked = false;
   overlaySumGapToggle.checked = false;
   overlaySampleToggle.checked = false;
-  staticModeToggle.checked = state.staticMode;
-  publicationModeToggle.checked = state.publicationMode;
   recommendStrategySelect.value = state.recommendStrategy;
   syncSliderLabels();
   updateDatasetNote();
@@ -132,6 +153,8 @@ async function bootstrap(): Promise<void> {
       }
       activeKind = nextKind;
       activeBundle = nextBundle;
+      state.datasetKind = nextKind;
+      syncActiveCovidUncertainty();
       state.ROI = defaultWindow(nextBundle.dataset.times.length);
       state.insetROI = recommendHighUncertaintyRoi(nextBundle.dataset, state.ROI);
       redraw();
@@ -148,6 +171,17 @@ async function bootstrap(): Promise<void> {
 
   gapModeSelect.addEventListener("change", () => {
     state.gapMode = gapModeSelect.value as GapMode;
+    redraw();
+  });
+
+  uncertaintyBandSelect.addEventListener("change", () => {
+    state.covidUncertaintyBand = uncertaintyBandSelect.value as UncertaintyBandMode;
+    syncActiveCovidUncertainty();
+    redraw();
+  });
+
+  horizonSelect.addEventListener("change", () => {
+    state.covidHorizonFilter = horizonSelect.value as HorizonFilterMode;
     redraw();
   });
 
@@ -220,23 +254,6 @@ async function bootstrap(): Promise<void> {
   });
 
   overlaySampleToggle.addEventListener("change", () => {
-    redraw();
-  });
-
-  staticModeToggle.addEventListener("change", () => {
-    state.staticMode = staticModeToggle.checked;
-    redraw();
-  });
-
-  publicationModeToggle.addEventListener("change", () => {
-    state.publicationMode = publicationModeToggle.checked;
-    if (state.publicationMode) {
-      state.staticMode = true;
-      state.insetViewMode = "diff";
-      state.renderMode = "mean+gapSemantic";
-      state.gapSemanticMode = "uncBand";
-      syncControlsFromState();
-    }
     redraw();
   });
 
@@ -313,10 +330,15 @@ async function bootstrap(): Promise<void> {
     const data = getCurrentDataset();
     const x = pointerX(mainSvg, event);
     const i = nearestByPixel(data.times, x, Number(mainSvg.getAttribute("width") ?? "1140"));
+    const y = pointerY(mainSvg, event);
+    const focusLayerId =
+      lastBaseLayout && lastMainYScale
+        ? selectLayerIdAtPosition(i, lastMainYScale.invert(y), lastOrderedLayers, lastBaseLayout.yBottom, lastBaseLayout.yTop)
+        : null;
     if (lastMainXScale) {
       mainChart.setHover(data.times[i], lastMainXScale);
     }
-    showTooltip(event.clientX, event.clientY, tooltipText(buildHoverInfo(i, data.times, data.layers), ["main"]));
+    showTooltip(event.clientX, event.clientY, tooltipText(buildHoverInfo(i, data.times, data.layers, focusLayerId), ["main"]));
   });
 
   insetSvg.addEventListener("mousemove", (event) => {
@@ -333,10 +355,15 @@ async function bootstrap(): Promise<void> {
     }
     const localIndex = nearestByPixel(roiTimes, x, width);
     const i = activeInset.t0Index + localIndex;
+    const y = pointerY(insetSvg, event);
+    const focusLayerId =
+      lastBraidLayout && lastInsetYScale
+        ? selectLayerIdAtPosition(i, lastInsetYScale.invert(y), lastOrderedLayers, lastBraidLayout.yBottom, lastBraidLayout.yTop)
+        : null;
     if (lastInsetXScale) {
       insetChart.setHover(data.times[i], lastInsetXScale);
     }
-    showTooltip(event.clientX, event.clientY, tooltipText(buildHoverInfo(i, data.times, data.layers), ["inset local"]));
+    showTooltip(event.clientX, event.clientY, tooltipText(buildHoverInfo(i, data.times, data.layers, focusLayerId), ["inset local"]));
   });
 
   [overviewSvg, mainSvg, insetSvg].forEach((el) => {
@@ -366,6 +393,7 @@ async function bootstrap(): Promise<void> {
   }
 
   function redraw(): void {
+    syncActiveCovidUncertainty();
     cachedPreprocessed = preprocessDataset(
       activeBundle.dataset,
       state.smoothingWindow,
@@ -373,8 +401,9 @@ async function bootstrap(): Promise<void> {
       state.aggregationMode
     );
     const preprocessed = cachedPreprocessed;
-    const dataset = preprocessed.dataset;
+    const dataset = applyHorizonFilter(preprocessed.dataset, activeKind, state.covidHorizonFilter);
     const orderedLayers = orderLayers(dataset.layers, dataset.order);
+    lastOrderedLayers = orderedLayers;
     const activeRoi = normalizeROI(state.ROI, dataset.times.length) ?? defaultWindow(dataset.times.length);
     state.ROI = activeRoi;
     const insetRoi =
@@ -395,6 +424,8 @@ async function bootstrap(): Promise<void> {
       smoothKernel: state.smoothKernel,
       yScale: yScaleProbe
     });
+    lastBaseLayout = base;
+    lastBraidLayout = braided;
     const invariant = runInvariantChecks(orderedLayers, base, braided, insetRoi, {
       enabled: state.assertEnabled,
       throwOnError: false
@@ -418,10 +449,10 @@ async function bootstrap(): Promise<void> {
       onInsetRoiChange: (roi) => {
         state.insetROI = clampRoiToParent(normalizeROI(roi, dataset.times.length), activeRoi) ?? insetRoi;
         redraw();
-      },
-      staticMode: state.staticMode
+      }
     });
     lastMainXScale = mainResult.xScale;
+    lastMainYScale = mainResult.yScale;
     const insetResult = insetChart.render({
       dataset,
       before: base,
@@ -429,10 +460,10 @@ async function bootstrap(): Promise<void> {
       roi: insetRoi,
       viewMode: state.insetViewMode,
       semanticMode: state.gapSemanticMode,
-      yZoom: state.yZoomInset,
-      staticMode: state.staticMode
+      yZoom: state.yZoomInset
     });
     lastInsetXScale = insetResult.xScale;
+    lastInsetYScale = insetResult.yScale;
 
     const metricResult = computeMetrics(
       dataset,
@@ -458,7 +489,7 @@ async function bootstrap(): Promise<void> {
         state.aggregationMode
       );
     }
-    return cachedPreprocessed.dataset;
+    return applyHorizonFilter(cachedPreprocessed.dataset, activeKind, state.covidHorizonFilter);
   }
 
   function updateDatasetNote(): void {
@@ -484,13 +515,25 @@ async function bootstrap(): Promise<void> {
   function syncControlsFromState(): void {
     baselineSelect.value = state.baseline;
     gapModeSelect.value = state.gapMode;
+    uncertaintyBandSelect.value = state.covidUncertaintyBand;
+    horizonSelect.value = state.covidHorizonFilter;
     renderModeSelect.value = state.renderMode;
     insetModeSelect.value = state.insetViewMode;
     gapSemanticSelect.value = state.gapSemanticMode;
     gapAlphaSlider.value = String(state.gapAlphaPx);
     maxExtraSlider.value = String(state.maxExtraHeightPx);
-    staticModeToggle.checked = state.staticMode;
     syncSliderLabels();
+  }
+
+  function syncActiveCovidUncertainty(): void {
+    if (activeKind !== "covid") {
+      return;
+    }
+    applyCovidUncertaintyBand(activeBundle.dataset, state.covidUncertaintyBand);
+    activeBundle.uncNote =
+      state.covidUncertaintyBand === "50"
+        ? "unc mode: uncertainty50 (q75-q25)"
+        : "unc mode: uncertainty95 (q975-q025)";
   }
 
   function showTooltip(clientX: number, clientY: number, text: string): void {
@@ -558,12 +601,54 @@ function pointerX(svg: SVGSVGElement, event: MouseEvent): number {
   return Math.max(0, Math.min(rect.width, event.clientX - rect.left));
 }
 
+function pointerY(svg: SVGSVGElement, event: MouseEvent): number {
+  const rect = svg.getBoundingClientRect();
+  return Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+}
+
 function nearestByPixel(times: number[], xPixel: number, width: number): number {
   if (times.length <= 1) {
     return 0;
   }
   const ratio = Math.max(0, Math.min(1, xPixel / Math.max(1, width)));
   return Math.max(0, Math.min(times.length - 1, Math.round(ratio * (times.length - 1))));
+}
+
+function selectLayerIdAtPosition(
+  timeIndex: number,
+  yValue: number,
+  orderedLayers: LayerInput[],
+  yBottom: number[][],
+  yTop: number[][]
+): string | null {
+  for (let k = orderedLayers.length - 1; k >= 0; k -= 1) {
+    const lo = yBottom[k][timeIndex];
+    const hi = yTop[k][timeIndex];
+    if (yValue >= lo && yValue <= hi) {
+      return orderedLayers[k].id;
+    }
+  }
+  return null;
+}
+
+function applyHorizonFilter(
+  dataset: PreparedDataset,
+  kind: DatasetKind,
+  horizon: HorizonFilterMode
+): PreparedDataset {
+  if (kind !== "covid") {
+    return dataset;
+  }
+  const layers = dataset.layers.filter((layer) => layer.id.endsWith(`|${horizon}`));
+  if (layers.length === 0) {
+    return dataset;
+  }
+  const selected = new Set(layers.map((layer) => layer.id));
+  return {
+    times: dataset.times,
+    layers,
+    order: dataset.order.filter((id) => selected.has(id))
+  };
 }
 
 function byId<T extends Element>(id: string): T {

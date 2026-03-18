@@ -16,7 +16,7 @@
           Dataset
           <select id="dataset-select">
             <option value="synthetic">synthetic</option>
-            <option value="covid">covid (SineStream)</option>
+            <option value="covid">covid ensemble</option>
           </select>
         </label>
 
@@ -35,6 +35,24 @@
             <option value="uncGap">uncGap</option>
             <option value="fixedGap">fixedGap</option>
             <option value="none">none</option>
+          </select>
+        </label>
+
+        <label>
+          Uncertainty Band
+          <select id="uncertainty-band-select">
+            <option value="95">95% (q975-q025)</option>
+            <option value="50">50% (q75-q25)</option>
+          </select>
+        </label>
+
+        <label>
+          Horizon (category)
+          <select id="horizon-select">
+            <option value="h1">h1</option>
+            <option value="h2">h2</option>
+            <option value="h3">h3</option>
+            <option value="h4">h4</option>
           </select>
         </label>
 
@@ -138,16 +156,6 @@
         <label class="checkbox">
           <input id="overlay-sample-gaps" type="checkbox" />
           Overlay random g_k(t)
-        </label>
-
-        <label class="checkbox">
-          <input id="static-mode-toggle" type="checkbox" />
-          Static mode
-        </label>
-
-        <label class="checkbox">
-          <input id="publication-mode-toggle" type="checkbox" />
-          Publication mode
         </label>
 
         <label>

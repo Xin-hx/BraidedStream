@@ -4,13 +4,15 @@ import type {
   DatasetKind,
   GapMode,
   GapSemanticMode,
+  HorizonFilterMode,
   InsetViewMode,
   MetricScope,
   PresetMode,
   ROI,
   RenderMode,
   RoiRecommendStrategy,
-  SmoothKernel
+  SmoothKernel,
+  UncertaintyBandMode
 } from "../core/types";
 
 export interface AppState {
@@ -27,19 +29,19 @@ export interface AppState {
   maxExtraHeightPx: number;
   smoothKernel: SmoothKernel;
   assertEnabled: boolean;
-  staticMode: boolean;
-  publicationMode: boolean;
   smoothingWindow: number;
   downsamplingStep: number;
   aggregationMode: AggregationMode;
   yZoomInset: number;
   preset: PresetMode;
   recommendStrategy: RoiRecommendStrategy;
+  covidUncertaintyBand: UncertaintyBandMode;
+  covidHorizonFilter: HorizonFilterMode;
 }
 
 export function createInitialState(): AppState {
   return {
-    datasetKind: "synthetic",
+    datasetKind: "covid",
     baseline: "center",
     gapMode: "uncGap",
     renderMode: "mean+gapSemantic",
@@ -52,13 +54,13 @@ export function createInitialState(): AppState {
     maxExtraHeightPx: 110,
     smoothKernel: "cubic",
     assertEnabled: true,
-    staticMode: false,
-    publicationMode: false,
     smoothingWindow: 1,
     downsamplingStep: 1,
     aggregationMode: "none",
     yZoomInset: 1.1,
     preset: "Readability",
-    recommendStrategy: "highest uncertainty"
+    recommendStrategy: "highest uncertainty",
+    covidUncertaintyBand: "95",
+    covidHorizonFilter: "h1"
   };
 }
