@@ -1,8 +1,19 @@
 export type BaselineMode = "sineStream" | "center" | "zero";
 export type GapMode = "none" | "uncGap" | "fixedGap";
 export type SmoothKernel = "cubic";
-export type RenderMode = "meanOnly" | "mean+uncBandInGap";
+export type RenderMode =
+  | "meanOnly"
+  | "mean+gapSemantic"
+  | "mean+uncBand"
+  | "diffOnly"
+  | "mean+uncBandInGap";
 export type DatasetKind = "synthetic" | "covid";
+export type InsetViewMode = "before" | "after" | "diff" | "split";
+export type MetricScope = "roi" | "global";
+export type RoiRecommendStrategy = "highest uncertainty" | "highest mean slope" | "highest wiggle" | "largest local change";
+export type AggregationMode = "none" | "mean" | "sum" | "rollingAvg";
+export type GapSemanticMode = "uncBand" | "hatch" | "ruler" | "heatStrip";
+export type PresetMode = "Readability" | "Uncertainty" | "Compact" | "Presentation";
 
 export interface LayerInput {
   id: string;
@@ -10,6 +21,12 @@ export interface LayerInput {
   unc?: number[];
   lower?: number[];
   upper?: number[];
+}
+
+export interface PreparedDataset {
+  times: number[];
+  layers: LayerInput[];
+  order: string[];
 }
 
 export interface ROI {

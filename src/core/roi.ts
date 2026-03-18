@@ -17,6 +17,17 @@ export function isOutsideROI(t: number, roi: ROI | null): boolean {
   return !roi || t < roi.t0Index || t > roi.t1Index;
 }
 
+export function clampRoiToParent(roi: ROI | null, parent: ROI | null): ROI | null {
+  if (!roi || !parent) {
+    return null;
+  }
+  const left = clamp(roi.t0Index, parent.t0Index, parent.t1Index);
+  const right = clamp(roi.t1Index, parent.t0Index, parent.t1Index);
+  return left <= right
+    ? { t0Index: left, t1Index: right }
+    : { t0Index: right, t1Index: left };
+}
+
 function clamp(v: number, low: number, high: number): number {
   return Math.max(low, Math.min(high, v));
 }

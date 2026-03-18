@@ -8,7 +8,7 @@
   <body>
     <div id="app">
       <header>
-        <h1>Braided StreamGraph (D3 + TypeScript)</h1>
+        <h1>Braided StreamGraph Research Prototype</h1>
       </header>
 
       <section class="controls">
@@ -41,8 +41,38 @@
         <label>
           Render Mode
           <select id="rendermode-select">
-            <option value="mean+uncBandInGap">mean+uncBandInGap</option>
             <option value="meanOnly">meanOnly</option>
+            <option value="mean+gapSemantic">mean+gapSemantic</option>
+            <option value="mean+uncBand">mean+uncBand</option>
+            <option value="diffOnly">diffOnly</option>
+          </select>
+        </label>
+
+        <label>
+          Inset View
+          <select id="insetmode-select">
+            <option value="before">before</option>
+            <option value="after" selected>after</option>
+            <option value="diff">diff</option>
+            <option value="split">split</option>
+          </select>
+        </label>
+
+        <label>
+          Gap Semantic
+          <select id="gapsemantic-select">
+            <option value="uncBand">uncBand</option>
+            <option value="hatch">hatch</option>
+            <option value="ruler">ruler</option>
+            <option value="heatStrip">heatStrip</option>
+          </select>
+        </label>
+
+        <label>
+          Metric Scope
+          <select id="metric-scope-select">
+            <option value="roi">ROI</option>
+            <option value="global">global</option>
           </select>
         </label>
 
@@ -56,6 +86,38 @@
           maxExtraHeightPx
           <input id="max-extra" type="range" min="0" max="240" step="5" />
           <span id="max-extra-value"></span>
+        </label>
+
+        <label>
+          smoothWindow
+          <input id="smooth-window" type="range" min="1" max="21" step="2" />
+          <span id="smooth-window-value"></span>
+        </label>
+
+        <label>
+          downsample
+          <input id="downsample-step" type="range" min="1" max="8" step="1" />
+          <span id="downsample-step-value"></span>
+        </label>
+
+        <label>
+          aggregation
+          <select id="aggregation-select">
+            <option value="none">none</option>
+            <option value="mean">mean</option>
+            <option value="sum">sum</option>
+            <option value="rollingAvg">rolling avg</option>
+          </select>
+        </label>
+
+        <label>
+          preset
+          <select id="preset-select">
+            <option value="Readability">Readability</option>
+            <option value="Uncertainty">Uncertainty</option>
+            <option value="Compact">Compact</option>
+            <option value="Presentation">Presentation</option>
+          </select>
         </label>
 
         <label class="checkbox">
@@ -78,13 +140,60 @@
           Overlay random g_k(t)
         </label>
 
+        <label class="checkbox">
+          <input id="static-mode-toggle" type="checkbox" />
+          Static mode
+        </label>
+
+        <label class="checkbox">
+          <input id="publication-mode-toggle" type="checkbox" />
+          Publication mode
+        </label>
+
+        <label>
+          Recommend ROI
+          <select id="recommend-strategy-select">
+            <option value="highest uncertainty">highest uncertainty</option>
+            <option value="highest mean slope">highest mean slope</option>
+            <option value="highest wiggle">highest wiggle</option>
+            <option value="largest local change">largest local change</option>
+          </select>
+        </label>
+
+        <button id="recommend-roi" type="button">Recommend ROI</button>
+        <select id="recommend-candidate-select" title="Recommended ROI candidates" aria-label="Recommended ROI candidates"></select>
+        <button id="apply-recommend-roi" type="button">Apply Suggested ROI</button>
+        <button id="recommend-inset-roi" type="button">Recommend Inset ROI (unc)</button>
+
         <button id="clear-roi" type="button">Clear ROI</button>
+        <button id="export-svg" type="button">Export SVG</button>
+        <button id="export-png" type="button">Export PNG</button>
+        <button id="export-json" type="button">Export JSON</button>
         <span id="data-note"></span>
         <span id="roi-label">ROI: none</span>
+        <span id="inset-roi-label">Inset ROI: none</span>
       </section>
 
-      <svg id="chart" width="1140" height="620"></svg>
-      <pre id="metrics"></pre>
+      <section class="panel">
+        <h2>Main Streamgraph (Global Context)</h2>
+        <svg id="main-chart" width="1140" height="360"></svg>
+        <div class="main-overview-strip">
+          <div class="strip-title">Overview Timeline</div>
+          <svg id="overview-chart" width="1140" height="118"></svg>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Inset ROI Local View</h2>
+        <svg id="inset-chart" width="1140" height="300"></svg>
+        <div id="gap-legend"></div>
+      </section>
+
+      <section class="panel">
+        <div id="metrics"></div>
+      </section>
+
+      <div id="hover-tooltip"></div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

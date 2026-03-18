@@ -3,17 +3,13 @@ import { computeBaseline } from "../core/baseline";
 import { computeBraidLayout } from "../core/braid";
 import { runInvariantChecks } from "../core/assertions";
 import { computeStackedBoundaries } from "../core/stack";
-import type { BaselineMode, GapMode, InvariantSummary, LayerInput, RenderMode, ROI, SmoothKernel } from "../core/types";
+import type { BaselineMode, GapMode, InvariantSummary, PreparedDataset, RenderMode, ROI, SmoothKernel } from "../core/types";
 import { orderLayers, validateTimeLengths } from "../core/validate";
 import { createRoiBrush, type RoiBrushController } from "../ui/brush";
 import { createAreaPath } from "./paths";
 import { renderUncertaintyInGaps } from "./uncertainty";
 
-export interface DemoDataset {
-  times: number[];
-  layers: LayerInput[];
-  order: string[];
-}
+export type DemoDataset = PreparedDataset;
 
 export interface DemoState {
   baseline: BaselineMode;

@@ -9,7 +9,8 @@ export interface RoiBrushController {
 export function createRoiBrush(
   host: d3.Selection<SVGGElement, unknown, null, undefined>,
   extent: [[number, number], [number, number]],
-  onChange: (roi: ROI | null) => void
+  onChange: (roi: ROI | null) => void,
+  eventNames = "end"
 ): RoiBrushController {
   let times: number[] = [];
   let xScale = d3.scaleLinear().domain([0, 1]).range([extent[0][0], extent[1][0]]);
@@ -18,7 +19,7 @@ export function createRoiBrush(
   const brush = d3
     .brushX<unknown>()
     .extent(extent)
-    .on("end", (event: d3.D3BrushEvent<unknown>) => {
+    .on(eventNames, (event: d3.D3BrushEvent<unknown>) => {
       if (suppressEvent) {
         return;
       }

@@ -1,11 +1,5 @@
 import { generateSyntheticDataset } from "./synthetic";
-import type { DatasetKind, LayerInput } from "./types";
-
-export interface PreparedDataset {
-  times: number[];
-  layers: LayerInput[];
-  order: string[];
-}
+import type { DatasetKind, LayerInput, PreparedDataset } from "./types";
 
 export interface DatasetBundle {
   kind: DatasetKind;

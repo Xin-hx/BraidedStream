@@ -22,7 +22,7 @@ export interface UncertaintyRenderArgs {
 
 export function renderUncertaintyInGaps(args: UncertaintyRenderArgs): void {
   const { group, mode, times, orderedLayers, braided, xScale, yScale } = args;
-  if (mode !== "mean+uncBandInGap") {
+  if (mode !== "mean+uncBandInGap" && mode !== "mean+uncBand" && mode !== "mean+gapSemantic") {
     group.selectAll("*").remove();
     return;
   }
