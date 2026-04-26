@@ -1,6 +1,6 @@
-import { generateSyntheticDataset } from "./synthetic";
-import type { DatasetKind, LayerInput, PreparedDataset, UncertaintyBandMode } from "./types";
 import * as d3 from "d3";
+import { generateSyntheticDataset } from "./synthetic";
+import type { DatasetKind, LayerInput, PreparedDataset, QuantileBands, UncertaintyBandMode } from "./types";
 
 export interface DatasetBundle {
   kind: DatasetKind;
@@ -9,32 +9,25 @@ export interface DatasetBundle {
   uncNote: string | null;
 }
 
-interface CovidCsvRow {
-  time: string;
-  time_index: string;
-  category: string;
-  location: string;
-  location_level: string;
-  horizon_weeks: string;
-  forecast_date: string;
+interface EnsembleCovidRow {
   target_end_date: string;
-  median: string;
-  low50: string;
-  high50: string;
-  low95: string;
-  high95: string;
-  uncertainty50: string;
-  uncertainty95: string;
-  stream_size: string;
+  quantile: string;
+  value: string;
+  abbreviation: string;
+  population?: string;
+  poportion?: string;
+  poportion_minmax?: string;
 }
 
 interface CovidLayerMeta {
   unc50Series?: number[];
   unc95Series?: number[];
+  poportionUncSeries?: number[];
   lower50Series?: number[];
   upper50Series?: number[];
   lower95Series?: number[];
   upper95Series?: number[];
+  quantiles?: QuantileBands;
   regionKey?: string;
   horizonKey?: string;
 }
@@ -50,14 +43,14 @@ export function createSyntheticBundle(): DatasetBundle {
   };
 }
 
-export async function loadCovidBundle(layerLimit = 24): Promise<DatasetBundle> {
-  const rows = await fetchCovidBraidedRows();
+export async function loadCovidBundle(): Promise<DatasetBundle> {
+  const rows = await fetchEnsembleCovidRows();
   if (rows.length === 0) {
-    throw new Error("demo_braided_stream.csv has no parseable rows");
+    throw new Error("ensemble_covid.csv has no parseable rows");
   }
 
-  const normalized = normalizeCovidRows(rows);
-  const selected = selectTopLayers(normalized.layers, layerLimit);
+  const normalized = normalizeEnsembleCovidRows(rows);
+  const selected = selectAllLayers(normalized.layers);
   applyCovidUncertaintyBand(
     {
       times: normalized.times,
@@ -67,7 +60,9 @@ export async function loadCovidBundle(layerLimit = 24): Promise<DatasetBundle> {
     "95"
   );
 
-  const uniqueRegions = new Set(selected.layers.map((layer) => ((layer as CovidLayerMeta).regionKey ?? layer.id.split("|")[0] ?? layer.id))).size;
+  const uniqueRegions = new Set(
+    selected.layers.map((layer) => ((layer as CovidLayerMeta).regionKey ?? layer.id.split("|")[0] ?? layer.id))
+  ).size;
 
   return {
     kind: "covid",
@@ -77,13 +72,14 @@ export async function loadCovidBundle(layerLimit = 24): Promise<DatasetBundle> {
       order: selected.layers.map((layer) => layer.id)
     },
     notes: [
-      "source: demo_braided_stream.csv",
+      "source: Covid Ensemble",
+      "uncertainty method: q75-q25 (IQR) and q97.5-q2.5 (95% spread)",
       `timeline points: ${normalized.times.length}`,
       `categories parsed: ${normalized.layers.length}`,
-      `categories shown: ${selected.layers.length} (top by total stream size)`,
+      `categories shown: ${selected.layers.length} (full state set, no top-k)`,
       `regions shown: ${uniqueRegions}`
     ],
-    uncNote: "unc mode: uncertainty95 (switchable to uncertainty50)"
+    uncNote: "unc mode: 95% spread (q97.5-q2.5), switchable to IQR (q75-q25)"
   };
 }
 
@@ -107,11 +103,12 @@ export function applyCovidUncertaintyBand(dataset: PreparedDataset, mode: Uncert
   return changed;
 }
 
-async function fetchCovidBraidedRows(): Promise<CovidCsvRow[]> {
+async function fetchEnsembleCovidRows(): Promise<EnsembleCovidRow[]> {
   const urlCandidates = [
-    new URL("../../data/demo_braided_stream.csv", import.meta.url).toString(),
-    "/data/demo_braided_stream.csv",
-    "/demo_braided_stream.csv"
+    new URL("../../Data/ensemble_covid.csv", import.meta.url).toString(),
+    "/Data/ensemble_covid.csv",
+    "/data/ensemble_covid.csv",
+    "/ensemble_covid.csv"
   ];
   let lastError: unknown = null;
   for (const url of urlCandidates) {
@@ -121,112 +118,188 @@ async function fetchCovidBraidedRows(): Promise<CovidCsvRow[]> {
         throw new Error(`HTTP ${response.status}`);
       }
       const csvText = await response.text();
-      const rows = d3.csvParse(csvText) as unknown as CovidCsvRow[];
-      return rows;
+      const normalizedCsvText = csvText.charCodeAt(0) === 0xfeff ? csvText.slice(1) : csvText;
+      return d3.csvParse(normalizedCsvText) as unknown as EnsembleCovidRow[];
     } catch (error) {
       lastError = error;
     }
   }
-  throw new Error(`Unable to load demo_braided_stream.csv: ${String(lastError)}`);
+  throw new Error(`Unable to load ensemble_covid.csv: ${String(lastError)}`);
 }
 
-function normalizeCovidRows(rows: CovidCsvRow[]): { times: number[]; layers: CovidLayerInput[] } {
+function normalizeEnsembleCovidRows(rows: EnsembleCovidRow[]): { times: number[]; layers: CovidLayerInput[] } {
   const filtered = rows.filter((row) => {
-    const idx = toFiniteNumber(row.time_index);
-    const category = row.category?.trim();
-    const horizon = toFiniteNumber(row.horizon_weeks);
-    const level = row.location_level?.trim().toLowerCase();
-    const location = row.location?.trim().toUpperCase();
-    return (
-      idx !== null &&
-      Boolean(category) &&
-      level === "state" &&
-      location !== "US" &&
-      horizon !== null &&
-      horizon >= 1 &&
-      horizon <= 4
-    );
+    const abbreviation = String(row.abbreviation ?? "").trim().toUpperCase();
+    const time = Date.parse(String(row.target_end_date ?? ""));
+    const quantile = toFiniteNumber(row.quantile);
+    const value = toFiniteNumber(row.value);
+    return abbreviation !== "" && abbreviation !== "US" && Number.isFinite(time) && quantile !== null && value !== null;
   });
 
-  const orderedTimeIndices = Array.from(
+  const dates = Array.from(
     new Set(
       filtered
-        .map((row) => toFiniteNumber(row.time_index))
-        .filter((v): v is number => v !== null)
+        .map((row) => Date.parse(String(row.target_end_date)))
+        .filter((v): v is number => Number.isFinite(v))
     )
   ).sort((a, b) => a - b);
-  const indexByTime = new Map<number, number>(orderedTimeIndices.map((value, i) => [value, i]));
+  const indexByDate = new Map<number, number>(dates.map((value, i) => [value, i]));
 
-  const byCategory = new Map<string, CovidCsvRow[]>();
+  const byLocation = new Map<string, EnsembleCovidRow[]>();
   for (const row of filtered) {
-    const category = row.category.trim();
-    if (!byCategory.has(category)) {
-      byCategory.set(category, []);
+    const abbreviation = String(row.abbreviation ?? "").trim().toUpperCase();
+    if (!byLocation.has(abbreviation)) {
+      byLocation.set(abbreviation, []);
     }
-    byCategory.get(category)!.push(row);
+    byLocation.get(abbreviation)!.push(row);
   }
 
   const layers: CovidLayerInput[] = [];
-  for (const [category, groupRows] of byCategory.entries()) {
-    const mean = new Array<number>(orderedTimeIndices.length).fill(0);
-    const unc50 = new Array<number>(orderedTimeIndices.length).fill(0);
-    const unc95 = new Array<number>(orderedTimeIndices.length).fill(0);
-    const lower50 = new Array<number>(orderedTimeIndices.length).fill(0);
-    const upper50 = new Array<number>(orderedTimeIndices.length).fill(0);
-    const lower95 = new Array<number>(orderedTimeIndices.length).fill(0);
-    const upper95 = new Array<number>(orderedTimeIndices.length).fill(0);
+  for (const [abbreviation, locationRows] of byLocation.entries()) {
+    const q025 = filledSeries(dates.length);
+    const q10 = filledSeries(dates.length);
+    const q25 = filledSeries(dates.length);
+    const q50 = filledSeries(dates.length);
+    const q75 = filledSeries(dates.length);
+    const q90 = filledSeries(dates.length);
+    const q975 = filledSeries(dates.length);
+    const poportionQ025 = filledSeries(dates.length);
+    const poportionQ10 = filledSeries(dates.length);
+    const poportionQ25 = filledSeries(dates.length);
+    const poportionQ50 = filledSeries(dates.length);
+    const poportionQ75 = filledSeries(dates.length);
+    const poportionQ90 = filledSeries(dates.length);
+    const poportionQ975 = filledSeries(dates.length);
 
-    let regionKey = "";
-    let horizonKey = "";
-
-    for (const row of groupRows) {
-      const rawTime = toFiniteNumber(row.time_index);
-      if (rawTime === null) {
+    for (const row of locationRows) {
+      const time = Date.parse(String(row.target_end_date));
+      const index = indexByDate.get(time);
+      if (index === undefined) {
         continue;
       }
-      const timeIndex = indexByTime.get(rawTime);
-      if (timeIndex === undefined) {
+      const quantile = toFiniteNumber(row.quantile);
+      const value = toFiniteNumber(row.value);
+      if (quantile === null || value === null) {
         continue;
       }
-
-      mean[timeIndex] = Math.max(0, toFiniteNumber(row.stream_size) ?? toFiniteNumber(row.median) ?? 0);
-      unc50[timeIndex] = Math.max(0, toFiniteNumber(row.uncertainty50) ?? 0);
-      unc95[timeIndex] = Math.max(0, toFiniteNumber(row.uncertainty95) ?? 0);
-      lower50[timeIndex] = Math.max(0, toFiniteNumber(row.low50) ?? mean[timeIndex]);
-      upper50[timeIndex] = Math.max(lower50[timeIndex], toFiniteNumber(row.high50) ?? mean[timeIndex]);
-      lower95[timeIndex] = Math.max(0, toFiniteNumber(row.low95) ?? lower50[timeIndex]);
-      upper95[timeIndex] = Math.max(lower95[timeIndex], toFiniteNumber(row.high95) ?? upper50[timeIndex]);
-
-      regionKey = row.location?.trim() || category.split("|")[0] || "unknown";
-      const horizonParsed = Math.round(toFiniteNumber(row.horizon_weeks) ?? 0);
-      horizonKey = horizonParsed > 0 ? `h${horizonParsed}` : category.split("|")[1] ?? "h0";
+      const poportionValue = toFiniteNumber(row.poportion_minmax) ?? toFiniteNumber(row.poportion);
+      const v = Math.max(0, value);
+      if (nearlyEqual(quantile, 0.025)) {
+        q025[index] = v;
+        if (poportionValue !== null) {
+          poportionQ025[index] = poportionValue;
+        }
+      } else if (nearlyEqual(quantile, 0.1)) {
+        q10[index] = v;
+        if (poportionValue !== null) {
+          poportionQ10[index] = poportionValue;
+        }
+      } else if (nearlyEqual(quantile, 0.25)) {
+        q25[index] = v;
+        if (poportionValue !== null) {
+          poportionQ25[index] = poportionValue;
+        }
+      } else if (nearlyEqual(quantile, 0.5)) {
+        q50[index] = v;
+        if (poportionValue !== null) {
+          poportionQ50[index] = poportionValue;
+        }
+      } else if (nearlyEqual(quantile, 0.75)) {
+        q75[index] = v;
+        if (poportionValue !== null) {
+          poportionQ75[index] = poportionValue;
+        }
+      } else if (nearlyEqual(quantile, 0.9)) {
+        q90[index] = v;
+        if (poportionValue !== null) {
+          poportionQ90[index] = poportionValue;
+        }
+      } else if (nearlyEqual(quantile, 0.975)) {
+        q975[index] = v;
+        if (poportionValue !== null) {
+          poportionQ975[index] = poportionValue;
+        }
+      }
     }
 
+    const q025Series = interpolateFinite(q025);
+    const q10Series = interpolateFinite(q10);
+    const q25Series = interpolateFinite(q25);
+    const q50Series = interpolateFinite(q50);
+    const q75Series = interpolateFinite(q75);
+    const q90Series = interpolateFinite(q90);
+    const q975Series = interpolateFinite(q975);
+    const poportionQ025Series = interpolateFinite(poportionQ025);
+    const poportionQ10Series = interpolateFinite(poportionQ10);
+    const poportionQ25Series = interpolateFinite(poportionQ25);
+    const poportionQ50Series = interpolateFinite(poportionQ50);
+    const poportionQ75Series = interpolateFinite(poportionQ75);
+    const poportionQ90Series = interpolateFinite(poportionQ90);
+    const poportionQ975Series = interpolateFinite(poportionQ975);
+
+    enforceMonotonicQuantiles([q025Series, q10Series, q25Series, q50Series, q75Series, q90Series, q975Series]);
+    enforceMonotonicQuantiles([
+      poportionQ025Series,
+      poportionQ10Series,
+      poportionQ25Series,
+      poportionQ50Series,
+      poportionQ75Series,
+      poportionQ90Series,
+      poportionQ975Series
+    ]);
+
+    const hasQ025 = hasFinite(q025);
+    const hasQ975 = hasFinite(q975);
+    const lower95Series = hasQ025 ? q025Series : q10Series;
+    const upper95Series = hasQ975 ? q975Series : q90Series;
+    const hasPoportionQ025 = hasFinite(poportionQ025);
+    const hasPoportionQ975 = hasFinite(poportionQ975);
+    const poportionLowerSeries = hasPoportionQ025 ? poportionQ025Series : poportionQ10Series;
+    const poportionUpperSeries = hasPoportionQ975 ? poportionQ975Series : poportionQ90Series;
+
+    const iqrSeries = q50Series.map((_, i) => Math.max(0, q75Series[i] - q25Series[i]));
+    const wideSeries = q50Series.map((_, i) => Math.max(0, upper95Series[i] - lower95Series[i]));
+    const poportionUncSeries = poportionQ50Series.map((_, i) => Math.max(0, poportionUpperSeries[i] - poportionLowerSeries[i]));
+
     layers.push({
-      id: category,
-      mean,
-      unc: unc95.slice(),
-      lower: lower95.slice(),
-      upper: upper95.slice(),
-      unc50Series: unc50,
-      unc95Series: unc95,
-      lower50Series: lower50,
-      upper50Series: upper50,
-      lower95Series: lower95,
-      upper95Series: upper95,
-      regionKey,
-      horizonKey
+      id: `${abbreviation}|h1`,
+      mean: q50Series.slice(),
+      unc: wideSeries.slice(),
+      poportionUnc: poportionUncSeries.slice(),
+      lower: lower95Series.slice(),
+      upper: upper95Series.slice(),
+      unc50Series: iqrSeries.slice(),
+      unc95Series: wideSeries.slice(),
+      poportionUncSeries: poportionUncSeries.slice(),
+      lower50Series: q25Series.slice(),
+      upper50Series: q75Series.slice(),
+      lower95Series: lower95Series.slice(),
+      upper95Series: upper95Series.slice(),
+      quantiles: {
+        // Keep legacy keys for compatibility, and include full quantile set for spaghetti.
+        p05: lower95Series.slice(),
+        p25: q25Series.slice(),
+        p50: q50Series.slice(),
+        p75: q75Series.slice(),
+        p95: upper95Series.slice(),
+        p025: lower95Series.slice(),
+        p10: q10Series.slice(),
+        p90: q90Series.slice(),
+        p975: upper95Series.slice()
+      },
+      regionKey: abbreviation,
+      horizonKey: "h1"
     });
   }
 
   return {
-    times: Array.from({ length: orderedTimeIndices.length }, (_, i) => i),
+    times: dates.slice(),
     layers
   };
 }
 
-function selectTopLayers(layers: LayerInput[], limit: number): { layers: LayerInput[] } {
-  const selected = layers
+function selectAllLayers(layers: LayerInput[]): { layers: LayerInput[] } {
+  const sorted = layers
     .slice()
     .sort((a, b) => {
       const sa = sum(a.mean);
@@ -235,9 +308,45 @@ function selectTopLayers(layers: LayerInput[], limit: number): { layers: LayerIn
         return sb - sa;
       }
       return a.id.localeCompare(b.id);
-    })
-    .slice(0, Math.max(1, limit));
-  return { layers: selected };
+    });
+  return { layers: sorted };
+}
+
+function filledSeries(length: number, fill = Number.NaN): number[] {
+  return new Array<number>(length).fill(fill);
+}
+
+function interpolateFinite(values: number[]): number[] {
+  const out = values.slice();
+  let firstFinite = -1;
+  for (let i = 0; i < out.length; i += 1) {
+    if (Number.isFinite(out[i])) {
+      firstFinite = i;
+      break;
+    }
+  }
+  if (firstFinite < 0) {
+    return new Array<number>(out.length).fill(0);
+  }
+  for (let i = 0; i < firstFinite; i += 1) {
+    out[i] = out[firstFinite];
+  }
+  let lastFinite = firstFinite;
+  for (let i = firstFinite + 1; i < out.length; i += 1) {
+    if (Number.isFinite(out[i])) {
+      const start = out[lastFinite];
+      const end = out[i];
+      const span = i - lastFinite;
+      for (let j = 1; j < span; j += 1) {
+        out[lastFinite + j] = start + (end - start) * (j / span);
+      }
+      lastFinite = i;
+    }
+  }
+  for (let i = lastFinite + 1; i < out.length; i += 1) {
+    out[i] = out[lastFinite];
+  }
+  return out.map((v) => (Number.isFinite(v) ? Math.max(0, v) : 0));
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -251,6 +360,26 @@ function toFiniteNumber(value: unknown): number | null {
     }
   }
   return null;
+}
+
+function nearlyEqual(a: number, b: number, eps = 1e-6): boolean {
+  return Math.abs(a - b) <= eps;
+}
+
+function hasFinite(values: number[]): boolean {
+  return values.some((v) => Number.isFinite(v));
+}
+
+function enforceMonotonicQuantiles(series: number[][]): void {
+  if (series.length === 0) {
+    return;
+  }
+  const tLength = series[0].length;
+  for (let t = 0; t < tLength; t += 1) {
+    for (let i = 1; i < series.length; i += 1) {
+      series[i][t] = Math.max(series[i][t], series[i - 1][t]);
+    }
+  }
 }
 
 function sum(values: number[]): number {

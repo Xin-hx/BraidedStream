@@ -1,66 +1,99 @@
 import type {
-  AggregationMode,
   BaselineMode,
   DatasetKind,
+  EnhanceTab,
   GapMode,
-  GapSemanticMode,
   HorizonFilterMode,
   InsetViewMode,
-  MetricScope,
-  PresetMode,
+  OptimizeMethod,
   ROI,
-  RenderMode,
+  LayoutOptimizationConfig,
   RoiRecommendStrategy,
   SmoothKernel,
   UncertaintyBandMode
 } from "../core/types";
+import { FIXED_SEED } from "../core/seed";
 
 export interface AppState {
   datasetKind: DatasetKind;
+  enhanceTab: EnhanceTab;
+  metricsExpanded: boolean;
+  optimizeMethod: OptimizeMethod;
+  optimizeWithinROI: boolean;
+  spaghettiAllStates: boolean;
+  spaghettiSelectedStates: string[];
+  fixedSeed: number;
   baseline: BaselineMode;
   gapMode: GapMode;
-  renderMode: RenderMode;
   insetViewMode: InsetViewMode;
-  metricScope: MetricScope;
-  gapSemanticMode: GapSemanticMode;
   ROI: ROI | null;
   insetROI: ROI | null;
   gapAlphaPx: number;
   maxExtraHeightPx: number;
   smoothKernel: SmoothKernel;
   assertEnabled: boolean;
-  smoothingWindow: number;
-  downsamplingStep: number;
-  aggregationMode: AggregationMode;
   yZoomInset: number;
-  preset: PresetMode;
   recommendStrategy: RoiRecommendStrategy;
   covidUncertaintyBand: UncertaintyBandMode;
   covidHorizonFilter: HorizonFilterMode;
+  optimization: LayoutOptimizationConfig;
+  enableUncertaintyGap: boolean;
+  enableJaggedEdge: boolean;
+  insetJaggedAmplitude: number;
+  insetJaggedFrequency: number;
 }
 
 export function createInitialState(): AppState {
   return {
     datasetKind: "covid",
-    baseline: "center",
+    enhanceTab: "optimize",
+    metricsExpanded: false,
+    optimizeMethod: "sineStream",
+    optimizeWithinROI: true,
+    spaghettiAllStates: false,
+    spaghettiSelectedStates: [],
+    fixedSeed: FIXED_SEED,
+    baseline: "sineStream",
     gapMode: "uncGap",
-    renderMode: "mean+gapSemantic",
-    insetViewMode: "after",
-    metricScope: "roi",
-    gapSemanticMode: "uncBand",
+    insetViewMode: "split",
     ROI: null,
     insetROI: null,
-    gapAlphaPx: 15,
-    maxExtraHeightPx: 110,
+    gapAlphaPx: 22,
+    maxExtraHeightPx: 160,
     smoothKernel: "cubic",
     assertEnabled: true,
-    smoothingWindow: 1,
-    downsamplingStep: 1,
-    aggregationMode: "none",
     yZoomInset: 1.1,
-    preset: "Readability",
     recommendStrategy: "highest uncertainty",
     covidUncertaintyBand: "95",
-    covidHorizonFilter: "h1"
+    covidHorizonFilter: "h1",
+    optimization: {
+      spacingBudgetPx: 320,
+      spacingUncertaintyWeight: 1.6,
+      spacingSlopeWeight: 0.65,
+      spacingTemporalWeight: 0.1,
+      spacingIterations: 2,
+      clusterAutoCutScale: 1,
+      clusterBoundaryPenalty: 0.5,
+      orderSimilaritySigma: 0.75,
+      orderMaxSwapPasses: 20,
+      wiggleWeightL1: 1,
+      wiggleWeightL2: 1,
+      centerAnchorWeight: 0.35,
+      irlsIterations: 12,
+      irlsEps: 1e-3,
+      // SineStream configuration
+      baselineCenterType: "median",
+      orderWeightType: "max",
+      orderUseThicknessWeight: true,
+      orderUseLengthWeight: true,
+      orderLengthWeightThreshold: 9,
+      orderUncertaintyWeight: 0.35,
+      baselineUncertaintyWeight: 0.45
+    },
+    enableUncertaintyGap: true,
+    // Keep the knob for future extension, but current release keeps jagged disabled.
+    enableJaggedEdge: false,
+    insetJaggedAmplitude: 2.4,
+    insetJaggedFrequency: 1.6
   };
 }

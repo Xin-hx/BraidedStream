@@ -13,11 +13,23 @@ export function validateTimeLengths(times: number[], layers: LayerInput[]): void
     if (layer.unc && layer.unc.length !== times.length) {
       throw new Error(`Layer ${layer.id} unc length mismatch: expected ${times.length}`);
     }
+    if (layer.poportionUnc && layer.poportionUnc.length !== times.length) {
+      throw new Error(`Layer ${layer.id} poportionUnc length mismatch: expected ${times.length}`);
+    }
     if (layer.lower && layer.lower.length !== times.length) {
       throw new Error(`Layer ${layer.id} lower length mismatch: expected ${times.length}`);
     }
     if (layer.upper && layer.upper.length !== times.length) {
       throw new Error(`Layer ${layer.id} upper length mismatch: expected ${times.length}`);
+    }
+    if (layer.quantiles) {
+      for (const [quantileKey, series] of Object.entries(layer.quantiles)) {
+        if (series.length !== times.length) {
+          throw new Error(
+            `Layer ${layer.id} quantile length mismatch (${quantileKey}): expected ${times.length}, got ${series.length}`
+          );
+        }
+      }
     }
   }
 }
@@ -44,6 +56,16 @@ export function orderLayers(layers: LayerInput[], order: string[]): LayerInput[]
 }
 
 export function layerUncertaintyAt(layer: LayerInput, t: number): number {
+  if (layer.quantiles) {
+    const values = Object.values(layer.quantiles)
+      .map((series) => series[t])
+      .filter((v): v is number => Number.isFinite(v));
+    if (values.length >= 2) {
+      const minV = Math.min(...values);
+      const maxV = Math.max(...values);
+      return Math.max(0, maxV - minV);
+    }
+  }
   if (layer.unc) {
     return Math.max(0, layer.unc[t] ?? 0);
   }

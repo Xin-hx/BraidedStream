@@ -11,7 +11,7 @@ export interface OverviewRenderArgs {
 export class OverviewChart {
   private readonly width: number;
   private readonly height: number;
-  private readonly margin = { top: 10, right: 12, bottom: 22, left: 52 };
+  private readonly margin = { top: 10, right: 12, bottom: 34, left: 52 };
   private readonly innerWidth: number;
   private readonly innerHeight: number;
   private readonly root: d3.Selection<SVGGElement, unknown, null, undefined>;
@@ -62,7 +62,8 @@ export class OverviewChart {
       .x((_, i) => xScale(dataset.times[i]))
       .y0(this.innerHeight)
       .y1((v) => yScale(v))
-      .curve(d3.curveMonotoneX);
+      // Keep overview aligned with raw sampling cadence.
+      .curve(d3.curveLinear);
 
     this.trendGroup
       .selectAll<SVGPathElement, number[]>("path.overview-area")
@@ -73,11 +74,31 @@ export class OverviewChart {
       .attr("stroke", "#0f766e")
       .attr("stroke-width", 1);
 
-    this.axisX.attr("transform", `translate(0,${this.innerHeight})`).call(d3.axisBottom(xScale).ticks(10).tickFormat(d3.format("d")));
+    this.axisX
+      .attr("transform", `translate(0,${this.innerHeight})`)
+      .call(
+        d3
+          .axisBottom(xScale)
+          .ticks(Math.max(4, Math.floor(this.innerWidth / 140)))
+          .tickFormat((value) => formatTimeTick(Number(value)))
+      );
+    this.axisX
+      .selectAll<SVGTextElement, unknown>("text")
+      .attr("text-anchor", "end")
+      .attr("dx", "-0.45em")
+      .attr("dy", "0.35em")
+      .attr("transform", "rotate(-35)");
 
     this.lastOnRoiChange = onRoiChange;
     this.roiBrush.updateContext(dataset.times, xScale);
     this.roiBrush.sync(roi);
     return xScale;
   }
+}
+
+function formatTimeTick(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  return d3.utcFormat("%Y-%m-%d")(new Date(value));
 }

@@ -1,11 +1,12 @@
 import * as d3 from "d3";
 import { createAreaPath } from "./paths";
 import { layerColor } from "../styles/palette";
-import type { PreparedDataset, ROI, StackLayout } from "../core/types";
+import type { LayerInput, PreparedDataset, ROI, StackLayout } from "../core/types";
 import { createRoiBrush, type RoiBrushController } from "../ui/brush";
 
 export interface MainChartRenderArgs {
   dataset: PreparedDataset;
+  orderedLayers: LayerInput[];
   layout: StackLayout;
   roi: ROI | null;
   insetRoi: ROI | null;
@@ -15,7 +16,7 @@ export interface MainChartRenderArgs {
 export class MainChart {
   private readonly width: number;
   private readonly height: number;
-  private readonly margin = { top: 22, right: 16, bottom: 30, left: 52 };
+  private readonly margin = { top: 22, right: 16, bottom: 44, left: 52 };
   private readonly innerWidth: number;
   private readonly innerHeight: number;
   private readonly root: d3.Selection<SVGGElement, unknown, null, undefined>;
@@ -57,9 +58,11 @@ export class MainChart {
   }
 
   render(args: MainChartRenderArgs): { xScale: d3.ScaleLinear<number, number>; yScale: d3.ScaleLinear<number, number> } {
-    const { dataset, layout, roi, insetRoi, onInsetRoiChange } = args;
-    const domainStart = roi ? dataset.times[Math.max(0, roi.t0Index)] : dataset.times[0];
-    const domainEnd = roi ? dataset.times[Math.min(dataset.times.length - 1, roi.t1Index)] : dataset.times[dataset.times.length - 1];
+    const { dataset, orderedLayers, layout, insetRoi, onInsetRoiChange } = args;
+    const left = args.roi ? Math.max(0, Math.min(dataset.times.length - 1, args.roi.t0Index)) : 0;
+    const right = args.roi ? Math.max(0, Math.min(dataset.times.length - 1, args.roi.t1Index)) : dataset.times.length - 1;
+    const domainStart = dataset.times[Math.min(left, right)];
+    const domainEnd = dataset.times[Math.max(left, right)];
     const xScale = d3
       .scaleLinear()
       .domain([domainStart, domainEnd])
@@ -71,9 +74,19 @@ export class MainChart {
       .domain([extent[0] - (extent[1] - extent[0]) * 0.04, extent[1] + (extent[1] - extent[0]) * 0.04])
       .range([this.innerHeight, 0]);
 
-    const paths = dataset.layers.map((layer, k) => ({
+    const paths = orderedLayers.map((layer, k) => ({
       id: layer.id,
-      path: createAreaPath(dataset.times, layout.yBottom[k], layout.yTop[k], xScale, yScale),
+      path: createAreaPath(
+        dataset.times.slice(Math.min(left, right), Math.max(left, right) + 1),
+        layout.yBottom[k].slice(Math.min(left, right), Math.max(left, right) + 1),
+        layout.yTop[k].slice(Math.min(left, right), Math.max(left, right) + 1),
+        xScale,
+        yScale,
+        {
+        smoothInterpolation: true,
+        interpolationSubsteps: 8
+      }
+      ),
       color: layerColor(k, layer.id)
     }));
 
@@ -93,7 +106,20 @@ export class MainChart {
     this.insetBrush.updateContext(dataset.times, xScale);
     this.insetBrush.sync(insetRoi);
 
-    this.axisX.attr("transform", `translate(0,${this.innerHeight})`).call(d3.axisBottom(xScale).ticks(10).tickFormat(d3.format("d")));
+    this.axisX
+      .attr("transform", `translate(0,${this.innerHeight})`)
+      .call(
+        d3
+          .axisBottom(xScale)
+          .ticks(Math.max(4, Math.floor(this.innerWidth / 140)))
+          .tickFormat((value) => formatTimeTick(Number(value)))
+      );
+    this.axisX
+      .selectAll<SVGTextElement, unknown>("text")
+      .attr("text-anchor", "end")
+      .attr("dx", "-0.45em")
+      .attr("dy", "0.35em")
+      .attr("transform", "rotate(-35)");
     this.axisY.call(d3.axisLeft(yScale).ticks(7));
 
     return { xScale, yScale };
@@ -212,4 +238,11 @@ function extentLayout(layout: StackLayout): [number, number] {
     return [minV - 1, maxV + 1];
   }
   return [minV, maxV];
+}
+
+function formatTimeTick(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  return d3.utcFormat("%Y-%m-%d")(new Date(value));
 }

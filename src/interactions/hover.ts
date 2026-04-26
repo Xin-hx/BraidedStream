@@ -3,6 +3,7 @@ import type { LayerInput } from "../core/types";
 export interface HoverInfo {
   timeIndex: number;
   timeValue: number;
+  timeLabel: string;
   total: number;
   focusLayerId: string | null;
   layerValues: Array<{ id: string; label: string; mean: number; unc: number }>;
@@ -20,6 +21,7 @@ export function buildHoverInfo(timeIndex: number, times: number[], layers: Layer
   return {
     timeIndex: clamped,
     timeValue: times[clamped],
+    timeLabel: formatTimeValue(times[clamped]),
     total: allValues.reduce((acc, item) => acc + item.mean, 0),
     focusLayerId: focusLayerId ?? null,
     layerValues
@@ -28,8 +30,8 @@ export function buildHoverInfo(timeIndex: number, times: number[], layers: Layer
 
 export function tooltipText(info: HoverInfo, extra: string[]): string {
   const header = info.focusLayerId
-    ? `t=${info.timeValue} total=${info.total.toFixed(2)} | focused substream`
-    : `t=${info.timeValue} total=${info.total.toFixed(2)}`;
+    ? `t=${info.timeLabel} total=${info.total.toFixed(2)} | focused substream`
+    : `t=${info.timeLabel} total=${info.total.toFixed(2)}`;
   const top = info.layerValues
     .slice()
     .sort((a, b) => b.mean - a.mean)
@@ -39,6 +41,13 @@ export function tooltipText(info: HoverInfo, extra: string[]): string {
     top.push("no substream at cursor");
   }
   return [header, ...top, ...extra].join("\n");
+}
+
+function formatTimeValue(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+  return new Date(value).toISOString().slice(0, 10);
 }
 
 function formatLayerLabel(layerId: string): string {

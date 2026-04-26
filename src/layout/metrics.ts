@@ -1,5 +1,6 @@
 import * as d3 from "d3";
-import type { BraidLayout, InvariantSummary, PreparedDataset, ROI, StackLayout } from "../core/types";
+import { computePidOrdering } from "../core/pidOrdering";
+import type { BraidLayout, InvariantSummary, LayerInput, PreparedDataset, ROI, StackLayout } from "../core/types";
 
 export interface MetricRow {
   key: string;
@@ -14,6 +15,28 @@ export interface MetricResult {
   rows: MetricRow[];
   invariant: InvariantSummary;
   scopeText: string;
+  multiscale?: MultiscaleDiagnosticsSummary | null;
+}
+
+export interface MultiscaleDiagnosticsSummary {
+  method: string;
+  verified: boolean;
+  fallbackUsed: boolean;
+  effectiveScaleCount: number;
+  threshold: number;
+  scaleBands: Array<{ scale: number; ratio: number }>;
+}
+
+export interface MetricsComputeOptions {
+  semantic?: MetricsSemanticOptions;
+  multiscale?: MultiscaleDiagnosticsSummary | null;
+}
+
+interface MetricsSemanticOptions {
+  enableTpidCenterAlignment?: boolean;
+  baselineShiftBeforeAbs?: number[];
+  baselineShiftAfterAbs?: number[];
+  uncertaintySaliency?: number[];
 }
 
 export function computeMetrics(
@@ -21,12 +44,14 @@ export function computeMetrics(
   beforeLayout: StackLayout,
   afterLayout: BraidLayout,
   roi: ROI | null,
-  useGlobal: boolean,
-  invariant: InvariantSummary
+  invariant: InvariantSummary,
+  orderedLayersForAfter?: LayerInput[],
+  options: MetricsComputeOptions = {}
 ): MetricResult {
-  const idx = computeIndices(dataset.times.length, roi, useGlobal);
+  const idx = computeIndices(dataset.times.length, roi);
   const centersBefore = centers(beforeLayout);
   const centersAfter = centers(afterLayout);
+  const referenceLayers = orderedLayersForAfter ?? dataset.layers;
 
   const rows: MetricRow[] = [
     row("meanSlope", "Mean slope in ROI", meanSlope(centersBefore, idx), meanSlope(centersAfter, idx), "down"),
@@ -38,14 +63,47 @@ export function computeMetrics(
     row("extraSpace", "Extra space used", 0, mean(afterLayout.sumGapPx, idx), "down"),
     row("compact", "Compactness loss", compactness(beforeLayout, idx), compactness(afterLayout, idx), "down"),
     row("boundary", "ROI boundary distortion", 0, roiBoundaryDistortion(beforeLayout, afterLayout, idx), "down"),
-    row("thickness", "Thickness invariance error", 0, thicknessError(dataset, afterLayout, idx), "down"),
+    row("thickness", "Thickness invariance error", 0, thicknessError(referenceLayers, afterLayout, idx), "down"),
     row("order", "Order stability", 1, orderStability(afterLayout, idx), "up")
   ];
+
+  const semantic = options.semantic ?? {};
+  if (semantic.enableTpidCenterAlignment === true) {
+    rows.push(
+      row(
+        "tpidCenterAlignment",
+        "TPID Center Alignment",
+        tpidCenterAlignment(referenceLayers, beforeLayout, idx),
+        tpidCenterAlignment(referenceLayers, afterLayout, idx),
+        "up"
+      )
+    );
+  }
+
+  if (
+    semantic.baselineShiftBeforeAbs &&
+    semantic.baselineShiftAfterAbs &&
+    semantic.uncertaintySaliency &&
+    semantic.baselineShiftBeforeAbs.length > 1 &&
+    semantic.baselineShiftAfterAbs.length > 1 &&
+    semantic.uncertaintySaliency.length > 1
+  ) {
+    rows.push(
+      row(
+        "uncShiftCoherence",
+        "Uncertainty-Shift Coherence",
+        uncertaintyShiftCoherence(semantic.baselineShiftBeforeAbs, semantic.uncertaintySaliency, idx),
+        uncertaintyShiftCoherence(semantic.baselineShiftAfterAbs, semantic.uncertaintySaliency, idx),
+        "up"
+      )
+    );
+  }
 
   return {
     rows,
     invariant,
-    scopeText: useGlobal ? "Global" : "ROI"
+    scopeText: "ROI",
+    multiscale: options.multiscale ?? null
   };
 }
 
@@ -53,8 +111,8 @@ function row(key: string, label: string, before: number, after: number, better: 
   return { key, label, before, after, delta: after - before, better };
 }
 
-function computeIndices(length: number, roi: ROI | null, globalMode: boolean): number[] {
-  if (globalMode || !roi) {
+function computeIndices(length: number, roi: ROI | null): number[] {
+  if (!roi) {
     return d3.range(0, length);
   }
   const left = Math.max(0, roi.t0Index);
@@ -162,12 +220,13 @@ function roiBoundaryDistortion(before: StackLayout, after: StackLayout, idx: num
   return mean(values);
 }
 
-function thicknessError(dataset: PreparedDataset, after: StackLayout, idx: number[]): number {
+function thicknessError(referenceLayers: LayerInput[], after: StackLayout, idx: number[]): number {
   let maxErr = 0;
-  for (let k = 0; k < dataset.layers.length; k += 1) {
+  const layers = referenceLayers;
+  for (let k = 0; k < layers.length; k += 1) {
     for (const t of idx) {
       const thickness = after.yTop[k][t] - after.yBottom[k][t];
-      maxErr = Math.max(maxErr, Math.abs(thickness - dataset.layers[k].mean[t]));
+      maxErr = Math.max(maxErr, Math.abs(thickness - layers[k].mean[t]));
     }
   }
   return maxErr;
@@ -188,6 +247,104 @@ function orderStability(layout: StackLayout, idx: number[]): number {
     }
   }
   return 1 - overlaps / Math.max(1, total);
+}
+
+function tpidCenterAlignment(layers: LayerInput[], layout: StackLayout, idx: number[]): number {
+  if (layers.length <= 1 || layout.yBottom.length !== layers.length) {
+    return 1;
+  }
+  const pid = computePidOrdering(layers, {
+    excludeSelf: true,
+    widthPenaltyPower: 1,
+    minComparators: 2
+  });
+  const depthByLayer = pid.depthByLayerId;
+  const depth: number[] = [];
+  const centerCloseness: number[] = [];
+
+  for (let k = 0; k < layers.length; k += 1) {
+    const layerId = layers[k].id;
+    const d = depthByLayer.get(layerId);
+    if (!Number.isFinite(d)) {
+      continue;
+    }
+    const centerSeries = idx.map((t) => 0.5 * (layout.yBottom[k][t] + layout.yTop[k][t]));
+    const meanAbs = mean(centerSeries.map((v) => Math.abs(v)));
+    depth.push(d as number);
+    centerCloseness.push(-meanAbs);
+  }
+
+  return spearman(depth, centerCloseness);
+}
+
+function uncertaintyShiftCoherence(shiftAbs: number[], saliency: number[], idx: number[]): number {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const limit = Math.min(shiftAbs.length, saliency.length);
+  for (const t of idx) {
+    if (t < 0 || t >= limit) {
+      continue;
+    }
+    const x = shiftAbs[t];
+    const y = saliency[t];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue;
+    }
+    xs.push(x);
+    ys.push(y);
+  }
+  return pearson(xs, ys);
+}
+
+function spearman(x: number[], y: number[]): number {
+  if (x.length !== y.length || x.length <= 1) {
+    return 1;
+  }
+  const rx = averageRanks(x);
+  const ry = averageRanks(y);
+  return pearson(rx, ry);
+}
+
+function averageRanks(values: number[]): number[] {
+  const pairs = values.map((value, index) => ({ value, index }));
+  pairs.sort((a, b) => a.value - b.value);
+  const ranks = new Array<number>(values.length).fill(0);
+  let i = 0;
+  while (i < pairs.length) {
+    let j = i;
+    while (j + 1 < pairs.length && pairs[j + 1].value === pairs[i].value) {
+      j += 1;
+    }
+    const avgRank = 0.5 * (i + j) + 1;
+    for (let k = i; k <= j; k += 1) {
+      ranks[pairs[k].index] = avgRank;
+    }
+    i = j + 1;
+  }
+  return ranks;
+}
+
+function pearson(x: number[], y: number[]): number {
+  if (x.length !== y.length || x.length <= 1) {
+    return 0;
+  }
+  const mx = mean(x);
+  const my = mean(y);
+  let cov = 0;
+  let vx = 0;
+  let vy = 0;
+  for (let i = 0; i < x.length; i += 1) {
+    const dx = x[i] - mx;
+    const dy = y[i] - my;
+    cov += dx * dy;
+    vx += dx * dx;
+    vy += dy * dy;
+  }
+  const denom = Math.sqrt(vx * vy);
+  if (!Number.isFinite(denom) || denom <= 1e-12) {
+    return 0;
+  }
+  return cov / denom;
 }
 
 function mean(values: number[], idx?: number[]): number {

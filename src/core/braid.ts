@@ -10,6 +10,12 @@ export interface BraidArgs {
   gapMode: GapMode;
   gapAlphaPx: number;
   maxExtraHeightPx: number;
+  spacingBudgetPx?: number;
+  spacingUncertaintyWeight?: number;
+  spacingSlopeWeight?: number;
+  spacingTemporalWeight?: number;
+  spacingIterations?: number;
+  boundaryPenalty?: number[];
   smoothKernel: SmoothKernel;
   yScale: (v: number) => number;
 }
@@ -20,14 +26,37 @@ export function computeBraidLayout(args: BraidArgs): BraidLayout {
   const gapCount = Math.max(0, orderedLayers.length - 1);
   const normalizedROI = normalizeROI(roi, tLength);
 
+  // Omega acts as a soft mask: spacing is concentrated in ROI and smoothly decays outside.
   const omegaResult = computeOmega(tLength, normalizedROI, smoothKernel);
   const omega = omegaResult.omega;
   const roiSupport = omegaResult.roiSupport;
 
+  // Gap arrays are stored in pixel space first because spacing constraints are screen-space budgets.
   const gapsPx = Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0));
   const sumGapPx = new Array<number>(tLength).fill(0);
+  const spacingBudgetPx = Math.max(0, args.spacingBudgetPx ?? maxExtraHeightPx);
+  const spacingUncertaintyWeight = Math.max(0, args.spacingUncertaintyWeight ?? 1);
+  const spacingSlopeWeight = Math.max(0, args.spacingSlopeWeight ?? 0);
+  const spacingTemporalWeight = Math.max(0, Math.min(0.95, args.spacingTemporalWeight ?? 0));
+  const spacingIterations = Math.max(1, Math.floor(args.spacingIterations ?? 1));
+  const boundaryPenalty = args.boundaryPenalty ?? [];
+  const spacingTerms = {
+    uncertainty: 0,
+    slope: 0,
+    temporal: 0
+  };
+  let spacingSamples = 0;
+  let temporalSamples = 0;
+  const targetPx = Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0));
+  const spacingObjectiveHistory: number[] = [];
+  // Robust quantile scales prevent outliers from dominating uncertainty/slope normalization.
+  const uncScale = gapMode === "uncGap" ? robustTermScale(orderedLayers, tLength, roiSupport, "uncertainty") : 1;
+  const slopeScale = gapMode === "uncGap" ? robustTermScale(orderedLayers, tLength, roiSupport, "slope") : 1;
+  const boundaryThicknessScale = gapMode === "uncGap" ? robustBoundaryThicknessScale(orderedLayers, tLength, roiSupport) : 1;
+  const minVisibleGapPx = gapMode === "uncGap" ? Math.max(1.2, 0.22 * gapAlphaPx) : 0;
 
   if (gapMode !== "none" && roiSupport) {
+    // Stage 1: estimate target gaps from local uncertainty/slope and apply one-step temporal damping.
     for (let t = 0; t < tLength; t += 1) {
       let totalGapPx = 0;
       for (let k = 0; k < gapCount; k += 1) {
@@ -36,28 +65,93 @@ export function computeBraidLayout(args: BraidArgs): BraidLayout {
           rawGapPx = omega[t] * gapAlphaPx;
         } else if (gapMode === "uncGap") {
           const u = boundaryUncertaintyAt(orderedLayers[k], orderedLayers[k + 1], t);
-          rawGapPx = omega[t] * gapAlphaPx * u;
+          const slopeA = t > 0 ? Math.abs(orderedLayers[k].mean[t] - orderedLayers[k].mean[t - 1]) : 0;
+          const slopeB = t > 0 ? Math.abs(orderedLayers[k + 1].mean[t] - orderedLayers[k + 1].mean[t - 1]) : 0;
+          const slopeTerm = 0.5 * (slopeA + slopeB);
+          const localThickness =
+            0.5 * (Math.max(1e-9, orderedLayers[k].mean[t]) + Math.max(1e-9, orderedLayers[k + 1].mean[t]));
+          const uNorm = clamp01(u / uncScale);
+          const slopeNorm = clamp01(slopeTerm / slopeScale);
+          const thinnessNorm = clamp01(boundaryThicknessScale / Math.max(1e-9, localThickness));
+          const edgeBoost = boundaryPenalty[k] ?? 1;
+          // Aggressive uncertainty spacing: high-uncertainty thin layers receive stronger outward drift.
+          const aggressiveUncertainty = Math.pow(uNorm, 1.35);
+          const thinDriftBoost = 1 + 1.1 * aggressiveUncertainty * thinnessNorm;
+          const slopeDrive = 0.6 * slopeNorm;
+          const signal =
+            spacingUncertaintyWeight * aggressiveUncertainty * thinDriftBoost + spacingSlopeWeight * slopeDrive;
+          const visibility = clamp01(0.2 + 0.8 * aggressiveUncertainty + 0.6 * thinnessNorm);
+          rawGapPx = omega[t] * edgeBoost * (gapAlphaPx * signal + minVisibleGapPx * visibility);
+          spacingTerms.uncertainty += spacingUncertaintyWeight * u;
+          spacingTerms.slope += spacingSlopeWeight * slopeTerm;
+          spacingSamples += 1;
         }
-        gapsPx[k][t] = Math.max(0, rawGapPx);
+        targetPx[k][t] = Math.max(0, rawGapPx);
+        const prev = t > 0 ? gapsPx[k][t - 1] : rawGapPx;
+        gapsPx[k][t] = Math.max(0, (1 - spacingTemporalWeight) * rawGapPx + spacingTemporalWeight * prev);
+        if (t > 0) {
+          const dt = gapsPx[k][t] - gapsPx[k][t - 1];
+          spacingTerms.temporal += dt * dt;
+          temporalSamples += 1;
+        }
         totalGapPx += gapsPx[k][t];
       }
-      if (totalGapPx > maxExtraHeightPx && totalGapPx > 0) {
-        const s = maxExtraHeightPx / totalGapPx;
+      const cap = Math.min(maxExtraHeightPx, spacingBudgetPx);
+      if (totalGapPx > cap && totalGapPx > 0) {
+        const s = cap / totalGapPx;
         for (let k = 0; k < gapCount; k += 1) {
           gapsPx[k][t] *= s;
         }
-        totalGapPx = maxExtraHeightPx;
+        totalGapPx = cap;
       }
       sumGapPx[t] = totalGapPx;
     }
+
+    // Stage 2: iterative temporal smoothing under per-time total extra-height cap.
+    for (let iter = 0; iter < spacingIterations; iter += 1) {
+      const nextGaps = gapsPx.map((row) => row.slice());
+      for (let k = 0; k < gapCount; k += 1) {
+        for (let t = 0; t < tLength; t += 1) {
+          const prev = t > 0 ? gapsPx[k][t - 1] : gapsPx[k][t];
+          const next = t < tLength - 1 ? gapsPx[k][t + 1] : gapsPx[k][t];
+          const smoothTarget = 0.5 * (prev + next);
+          const blended =
+            (1 - spacingTemporalWeight) * targetPx[k][t] + spacingTemporalWeight * smoothTarget;
+          nextGaps[k][t] = Math.max(0, blended);
+        }
+      }
+
+      for (let t = 0; t < tLength; t += 1) {
+        let total = 0;
+        for (let k = 0; k < gapCount; k += 1) {
+          total += nextGaps[k][t];
+        }
+        const cap = Math.min(maxExtraHeightPx, spacingBudgetPx);
+        if (total > cap && total > 0) {
+          const scale = cap / total;
+          for (let k = 0; k < gapCount; k += 1) {
+            nextGaps[k][t] *= scale;
+          }
+        }
+      }
+
+      for (let k = 0; k < gapCount; k += 1) {
+        for (let t = 0; t < tLength; t += 1) {
+          gapsPx[k][t] = nextGaps[k][t];
+        }
+      }
+      spacingObjectiveHistory.push(computeSpacingObjective(gapsPx, targetPx, spacingTemporalWeight));
+    }
   }
 
+  // Convert spacing back to data units and reconstruct top/bottom envelopes.
   const pxPerValue = estimatePixelsPerValue(yScale);
   const gapsValue = gapsPx.map((row) => row.map((v) => v / pxPerValue));
   const yBottom = base.yBottom.map((row) => row.slice());
   const yTop = base.yTop.map((row) => row.slice());
 
   for (let t = 0; t < tLength; t += 1) {
+    // Center baseline keeps the added spacing visually balanced around the stream centerline.
     const totalExtraValue = sumGapPx[t] / pxPerValue;
     const centerShift = baselineMode === "center" ? -0.5 * totalExtraValue : 0;
     let extra = 0;
@@ -78,8 +172,48 @@ export function computeBraidLayout(args: BraidArgs): BraidLayout {
     gapsPx,
     gapsValue,
     sumGapPx,
-    roiSupport
+    roiSupport,
+    diagnostics: {
+      orderObjectiveBefore: 0,
+      orderObjectiveAfter: 0,
+      clusterCount: 1,
+      trunkCluster: 0,
+      crossClusterBoundaries: 0,
+      spacingObjective:
+        (spacingTerms.uncertainty + spacingTerms.slope) / Math.max(1, spacingSamples) +
+        spacingTemporalWeight * spacingTerms.temporal / Math.max(1, temporalSamples),
+      spacingUncertaintyTerm: spacingTerms.uncertainty / Math.max(1, spacingSamples),
+      spacingSlopeTerm: spacingTerms.slope / Math.max(1, spacingSamples),
+      spacingTemporalTerm: spacingTerms.temporal / Math.max(1, temporalSamples),
+      spacingIterations,
+      spacingObjectiveHistory
+    }
   };
+}
+
+function computeSpacingObjective(gapsPx: number[][], targetPx: number[][], temporalWeight: number): number {
+  const kLength = gapsPx.length;
+  if (kLength === 0) {
+    return 0;
+  }
+  const tLength = gapsPx[0].length;
+  let fit = 0;
+  let smooth = 0;
+  let fitN = 0;
+  let smoothN = 0;
+  for (let k = 0; k < kLength; k += 1) {
+    for (let t = 0; t < tLength; t += 1) {
+      const d = gapsPx[k][t] - targetPx[k][t];
+      fit += d * d;
+      fitN += 1;
+      if (t > 0) {
+        const dt = gapsPx[k][t] - gapsPx[k][t - 1];
+        smooth += dt * dt;
+        smoothN += 1;
+      }
+    }
+  }
+  return fit / Math.max(1, fitN) + temporalWeight * smooth / Math.max(1, smoothN);
 }
 
 export function computeOmega(
@@ -99,6 +233,7 @@ export function computeOmega(
   const supportStart = clamp(Math.floor(roi.t0Index - tau), 0, tLength - 1);
   const supportEnd = clamp(Math.ceil(roi.t1Index + tau), 0, tLength - 1);
 
+  // Raised-cosine ramps reduce visual discontinuities at ROI support boundaries.
   for (let t = supportStart; t <= supportEnd; t += 1) {
     omega[t] = raisedCosineWindow(t, roi.t0Index, roi.t1Index, tau, smoothKernel);
   }
@@ -153,4 +288,57 @@ function clamp(v: number, low: number, high: number): number {
 
 function clamp01(v: number): number {
   return clamp(v, 0, 1);
+}
+
+function robustTermScale(
+  orderedLayers: LayerInput[],
+  tLength: number,
+  roiSupport: RoiSupportWindow | null,
+  term: "uncertainty" | "slope"
+): number {
+  const values: number[] = [];
+  const gapCount = Math.max(0, orderedLayers.length - 1);
+  const tStart = roiSupport ? roiSupport.supportStart : 0;
+  const tEnd = roiSupport ? roiSupport.supportEnd : Math.max(0, tLength - 1);
+  for (let t = tStart; t <= tEnd; t += 1) {
+    for (let k = 0; k < gapCount; k += 1) {
+      if (term === "uncertainty") {
+        values.push(boundaryUncertaintyAt(orderedLayers[k], orderedLayers[k + 1], t));
+      } else {
+        const slopeA = t > 0 ? Math.abs(orderedLayers[k].mean[t] - orderedLayers[k].mean[t - 1]) : 0;
+        const slopeB = t > 0 ? Math.abs(orderedLayers[k + 1].mean[t] - orderedLayers[k + 1].mean[t - 1]) : 0;
+        values.push(0.5 * (slopeA + slopeB));
+      }
+    }
+  }
+  if (values.length === 0) {
+    return 1;
+  }
+  const sorted = values.slice().sort((a, b) => a - b);
+  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.9 * (sorted.length - 1))));
+  return Math.max(1e-6, sorted[idx]);
+}
+
+function robustBoundaryThicknessScale(
+  orderedLayers: LayerInput[],
+  tLength: number,
+  roiSupport: RoiSupportWindow | null
+): number {
+  const values: number[] = [];
+  const gapCount = Math.max(0, orderedLayers.length - 1);
+  const tStart = roiSupport ? roiSupport.supportStart : 0;
+  const tEnd = roiSupport ? roiSupport.supportEnd : Math.max(0, tLength - 1);
+  for (let t = tStart; t <= tEnd; t += 1) {
+    for (let k = 0; k < gapCount; k += 1) {
+      const meanA = Math.max(0, orderedLayers[k].mean[t]);
+      const meanB = Math.max(0, orderedLayers[k + 1].mean[t]);
+      values.push(0.5 * (meanA + meanB));
+    }
+  }
+  if (values.length === 0) {
+    return 1;
+  }
+  const sorted = values.slice().sort((a, b) => a - b);
+  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.5 * (sorted.length - 1))));
+  return Math.max(1e-6, sorted[idx]);
 }

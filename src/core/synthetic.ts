@@ -7,7 +7,9 @@ export interface SyntheticDataset {
 }
 
 export function generateSyntheticDataset(tLength = 180, kLength = 8): SyntheticDataset {
-  const times = Array.from({ length: tLength }, (_, i) => i);
+  const startUtc = Date.UTC(2020, 0, 1);
+  const stepMs = 24 * 60 * 60 * 1000;
+  const times = Array.from({ length: tLength }, (_, i) => startUtc + i * stepMs);
   const layers: LayerInput[] = [];
 
   for (let k = 0; k < kLength; k += 1) {

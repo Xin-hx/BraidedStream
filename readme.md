@@ -34,18 +34,19 @@ npm run preview
 - `appState.ts`: 全局运行状态结构与默认值（baseline、gapMode、ROI、insetMode 等）。
 
 ### `src/core`
-- `types.ts`: 核心类型定义（`PreparedDataset`、`StackLayout`、`BraidLayout`、`ROI`）。
-- `datasets.ts`: synthetic/covid 数据构建与归一化，缺失不确定性时自动生成代理不确定性。
+- `types.ts`: 核心类型定义（`PreparedDataset`、`StackLayout`、`BraidLayout`、`ROI`、优化诊断）。
+- `datasets.ts`: synthetic/covid 数据构建与归一化，covid 使用真实分位数据（p05/p25/p50/p75/p95）。
 - `synthetic.ts`: 合成数据生成器。
 - `baseline.ts`: `computeBaseline()`，支持 `zero/center/sineStream`。
 - `stack.ts`: `computeStackedBoundaries()`，把 baseline + layer mean 变成上下边界。
-- `braid.ts`: `computeBraidLayout()`，在 ROI 支撑区计算 `omega/gap` 并生成 braided 边界。
+- `braid.ts`: `computeBraidLayout()`，在 ROI 支撑区计算 `omega/gap` 并执行 uncertainty gap 迭代优化。
+- `optimizeOrder.ts`: 基于分布相似性的层次聚类与顺序优化（主流/支流组织、局部交换改进）。
 - `roi.ts`: ROI 规范化与父窗约束。
 - `validate.ts`: 时序长度校验、层顺序校验、不确定性读取。
 - `assertions.ts`: 不变量检查（厚度守恒、ROI 外不变、无重叠、omega 合法等）。
 
 ### `src/data`
-- `transforms.ts`: 预处理（平滑、聚合、降采样）。
+- `transforms.ts`: 当前为轻量复制与数据结构规范化（不再包含平滑/聚合/降采样控件路径）。
 - `loadCovid.ts`: covid 数据加载封装。
 
 ### `src/render`
@@ -63,7 +64,6 @@ npm run preview
 - `roiRecommend.ts`: ROI 候选窗口推荐。
 
 ### `src/interactions`
-- `presets.ts`: 预设参数组合（Readability/Uncertainty/Compact/Presentation）。
 - `hover.ts`: tooltip 数据与文案。
 - `export.ts`: 导出 SVG/PNG/JSON。
 - `files.ts`: 浏览器端文件下载。
@@ -89,3 +89,75 @@ npm run preview
 1. 新数据源：从 `src/core/datasets.ts` 增加 loader 并输出 `PreparedDataset`。
 2. 新 gap 语义：在 `src/render/insetChart.ts` 与 `src/render/uncertainty.ts` 扩展。
 3. 新指标：在 `src/layout/metrics.ts` 增加行，并由 `MetricsPanel` 自动展示。
+
+## 8. Uncertainty Gap 与优化目标（当前实现）
+
+### 8.1 独立选项
+页面中 `uncertainty gap` 与 `jagged edge` 是两个独立开关：
+1. `Enable uncertainty gap` 只控制是否注入不确定性间隙。
+2. `Enable jagged edge` 只控制 inset 轮廓是否锯齿化。
+
+二者互不依赖，可单独开启或关闭。
+
+### 8.2 uncertainty gap 的目标函数（离散实现）
+在 ROI 支撑区，先构造每个边界的目标间隙：
+$$
+\hat g_{k,t}=\omega_t\cdot\alpha\cdot b_k\cdot\big(w_u\,u_{k,t}+w_s\,s_{k,t}\big)
+$$
+其中：
+1. $\omega_t$ 为 raised-cosine 支撑窗。
+2. $\alpha$ 为 `gapAlphaPx`。
+3. $b_k$ 为聚类边界惩罚（跨簇边界更大）。
+4. $u_{k,t}$ 为相邻层不确定性。
+5. $s_{k,t}$ 为相邻层斜率项。
+
+然后通过迭代平滑求解实际间隙 $g_{k,t}$，并满足总预算约束：
+$$
+\sum_k g_{k,t} \le \min(\text{maxExtraHeightPx},\,\text{spacingBudgetPx})
+$$
+
+每轮迭代最小化的离散代理目标可写为：
+$$
+J_{gap}=\underbrace{\frac{1}{N}\sum_{k,t}(g_{k,t}-\hat g_{k,t})^2}_{\text{fit term}}
++\lambda_t\underbrace{\frac{1}{M}\sum_{k,t>0}(g_{k,t}-g_{k,t-1})^2}_{\text{temporal smooth term}}
+$$
+其中 $\lambda_t$ 对应 `spacingTemporalWeight`。
+
+### 8.3 顺序优化目标（与 gap 联动）
+层顺序先通过层次聚类 + 局部交换优化，目标为：
+$$
+J_{order}(\pi)=\sum_i\big(1-\exp(-D_{\pi_i,\pi_{i+1}}/\sigma)\big)
++\lambda_c\,\#\{\text{cross-cluster boundaries}\}
+$$
+其中：
+1. $D$ 为分布特征距离。
+2. $\sigma$ 对应 `orderSimilaritySigma`。
+3. $\lambda_c$ 对应 `clusterBoundaryPenalty`。
+
+顺序结果会影响 boundary penalty，再进入 uncertainty gap 求解。
+
+### 8.4 迭代与可视披露
+当前页面披露了以下诊断：
+1. `Gap objective` 当前值。
+2. `iterations` 当前迭代次数。
+3. 目标历史 sparkline（小折线）。
+
+可通过两种方式继续迭代：
+1. 修改 `spacingIterations` 数值输入。
+2. 点击 `Iterate Uncertainty Gap +1` 按钮逐步增加迭代。
+
+### 8.5 关键参数速查
+1. `spacingBudgetPx`: 每个时刻可分配的总 gap 预算上限。
+2. `spacingUncertaintyWeight`: 不确定性项权重。
+3. `spacingSlopeWeight`: 斜率项权重。
+4. `spacingTemporalWeight`: 时间平滑权重。
+5. `spacingIterations`: gap 迭代次数。
+6. `clusterAutoCutScale`: 层次聚类自动切分尺度。
+7. `clusterBoundaryPenalty`: 跨簇边界惩罚。
+8. `orderSimilaritySigma`: 顺序目标的相似度尺度。
+9. `orderMaxSwapPasses`: 局部交换最大轮数。
+
+### 8.6 稳定配色说明
+每个 state（以及 fallback 的 layer id）使用稳定哈希映射到固定 hue，因此：
+1. 刷新页面不会变色。
+2. 重新排序（主/支流重排）不会打乱同一 state 的颜色语义。

@@ -15,10 +15,69 @@ const CATEGORICAL = [
   "#c2410c"
 ];
 
+const US_STATE_KEYS = [
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
+  "DC"
+];
+
+const FIXED_STATE_COLOR = buildFixedStateColorMap();
+
 export function layerColor(index: number, layerId?: string): string {
   const stateKey = extractStateKey(layerId);
   if (stateKey) {
     return stateColor(stateKey);
+  }
+  if (layerId && layerId.trim() !== "") {
+    return stateColor(layerId.trim());
   }
   return CATEGORICAL[index % CATEGORICAL.length];
 }
@@ -47,8 +106,23 @@ function extractStateKey(layerId?: string): string | null {
 }
 
 function stateColor(stateKey: string): string {
+  const fixed = FIXED_STATE_COLOR.get(stateKey);
+  if (fixed) {
+    return fixed;
+  }
   const hue = stableHue(stateKey);
   return `hsl(${hue}, 62%, 46%)`;
+}
+
+function buildFixedStateColorMap(): Map<string, string> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < US_STATE_KEYS.length; i += 1) {
+    const hue = Math.round((i * 137.508 + 18) % 360);
+    const saturation = i % 2 === 0 ? 64 : 60;
+    const lightness = i % 3 === 0 ? 43 : i % 3 === 1 ? 47 : 40;
+    out.set(US_STATE_KEYS[i], `hsl(${hue}, ${saturation}%, ${lightness}%)`);
+  }
+  return out;
 }
 
 function stableHue(seed: string): number {

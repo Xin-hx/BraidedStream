@@ -7,6 +7,7 @@ export function computeStackedBoundaries(baseline: number[], orderedLayers: Laye
   const yTop = Array.from({ length: kLength }, () => new Array<number>(tLength).fill(0));
 
   for (let t = 0; t < tLength; t += 1) {
+    // Build a vertical stack at each time sample: baseline + cumulative layer thickness.
     let cumulative = 0;
     for (let k = 0; k < kLength; k += 1) {
       const mean = orderedLayers[k].mean[t];
@@ -18,5 +19,6 @@ export function computeStackedBoundaries(baseline: number[], orderedLayers: Laye
     }
   }
 
+  // Keep baseline immutable to avoid accidental downstream mutation.
   return { baseline: baseline.slice(), yBottom, yTop };
 }
