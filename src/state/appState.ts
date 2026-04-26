@@ -6,6 +6,7 @@ import type {
   HorizonFilterMode,
   InsetViewMode,
   OptimizeMethod,
+  PidBaselineMode,
   ROI,
   LayoutOptimizationConfig,
   RoiRecommendStrategy,
@@ -19,6 +20,7 @@ export interface AppState {
   enhanceTab: EnhanceTab;
   metricsExpanded: boolean;
   optimizeMethod: OptimizeMethod;
+  pidBaselineMode: PidBaselineMode;
   optimizeWithinROI: boolean;
   spaghettiAllStates: boolean;
   spaghettiSelectedStates: string[];
@@ -49,6 +51,7 @@ export function createInitialState(): AppState {
     enhanceTab: "optimize",
     metricsExpanded: false,
     optimizeMethod: "sineStream",
+    pidBaselineMode: "multiscale",
     optimizeWithinROI: true,
     spaghettiAllStates: false,
     spaghettiSelectedStates: [],

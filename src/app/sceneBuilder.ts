@@ -1,5 +1,5 @@
 import { runInvariantChecks } from "../core/assertions";
-import { computeBaseline, computeMultiscaleDistributedBaseline, computeUncertaintyAwareBaseline } from "../core/baseline";
+import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
 import { computeBraidLayout } from "../core/braid";
 import type { DatasetBundle } from "../core/datasets";
 import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/optimizeOrder";
@@ -11,6 +11,7 @@ import type {
   DatasetKind,
   HorizonFilterMode,
   LayerInput,
+  OptimizeMethod,
   PreparedDataset,
   ROI,
   StackLayout
@@ -89,17 +90,23 @@ export function buildScene(bundle: DatasetBundle, state: AppState): SceneBuildRe
 export function buildOptimizeComparisonScene(
   bundle: DatasetBundle,
   state: AppState,
-  baselineMode: BaselineMode
+  optimizeMethod: OptimizeMethod
 ): SceneBuildResult {
+  const useMultiscale = optimizeMethod === "multiscale";
   const context = prepareSceneContext(bundle, state, {
-    optimizeScope: state.optimizeWithinROI ? "roi" : "full"
+    optimizeScope: state.optimizeWithinROI ? "roi" : "full",
+    orderWithUncertainty: useMultiscale
   });
-  const beforeLayers = orderLayers(context.dataset.layers, context.dataset.order);
-  const beforeBaseline = computeBaseline(context.dataset.times, beforeLayers, baselineMode, baselineHooksFromState(state));
-  const beforeLayoutRaw = computeStackedBoundaries(beforeBaseline, beforeLayers);
-  const beforeLayout = reorderLayoutRows(beforeLayoutRaw, beforeLayers, context.orderedLayers);
-
-  const afterBaseline = computeBaseline(context.dataset.times, context.orderedLayers, baselineMode, baselineHooksFromState(state));
+  const hooks = baselineHooksFromState(state);
+  const uncStrength = Math.max(0, state.optimization.baselineUncertaintyWeight ?? 0.45);
+  const beforeBaseline = computeBaseline(context.dataset.times, context.orderedLayers, "sineStream", hooks);
+  const beforeLayout = computeStackedBoundaries(beforeBaseline, context.orderedLayers);
+  let afterBaseline = beforeBaseline.slice();
+  let multiscale: ReturnType<typeof computeMultiscaleDistributedBaseline> | null = null;
+  if (useMultiscale) {
+    multiscale = computeMultiscaleDistributedBaseline(context.dataset.times, context.orderedLayers, uncStrength, hooks, 0.08);
+    afterBaseline = multiscale.baseline;
+  }
   const afterLayoutStack = computeStackedBoundaries(afterBaseline, context.orderedLayers);
   const afterLayout = stackToBraidLayout(afterLayoutStack);
 
@@ -108,62 +115,33 @@ export function buildOptimizeComparisonScene(
     violations: [],
     maxThicknessError: 0
   };
-  const metrics = computeMetrics(context.dataset, beforeLayout, afterLayout, context.insetRoi, invariant, context.orderedLayers);
-  return {
-    dataset: context.dataset,
-    orderedLayers: context.orderedLayers,
-    baseLayout: beforeLayout,
-    braidedLayout: afterLayout,
-    roi: context.activeRoi,
-    insetRoi: context.insetRoi,
-    metrics,
-    notes: context.preprocessedNotes,
-    diagnosticsNotes: orderDiagnosticsNotes(context.optimized)
-  };
-}
-
-export function buildOptimizeUncertaintyComparisonScene(
-  bundle: DatasetBundle,
-  state: AppState,
-  baselineMode: BaselineMode
-): SceneBuildResult {
-  const context = prepareSceneContext(bundle, state, {
-    optimizeScope: state.optimizeWithinROI ? "roi" : "full",
-    orderWithUncertainty: true
-  });
-  const uncStrength = Math.max(0, state.optimization.baselineUncertaintyWeight ?? 0.45);
-  const localBaseline = computeUncertaintyAwareBaseline(context.dataset.times, context.orderedLayers, uncStrength);
-  const beforeLayout = computeStackedBoundaries(localBaseline, context.orderedLayers);
-  const multiscale = computeMultiscaleDistributedBaseline(
-    context.dataset.times,
-    context.orderedLayers,
-    uncStrength,
-    baselineHooksFromState(state)
-  );
-  const afterLayoutStack = computeStackedBoundaries(multiscale.baseline, context.orderedLayers);
-  const afterLayout = stackToBraidLayout(afterLayoutStack);
-
-  const invariant = {
-    checked: false,
-    violations: [],
-    maxThicknessError: 0
-  };
   const metrics = computeMetrics(context.dataset, beforeLayout, afterLayout, context.insetRoi, invariant, context.orderedLayers, {
-    semantic: {
-      enableTpidCenterAlignment: true,
-      baselineShiftBeforeAbs: multiscale.diagnostics.localShiftAbs,
-      baselineShiftAfterAbs: multiscale.diagnostics.distributedShiftAbs,
-      uncertaintySaliency: multiscale.diagnostics.uncertaintySaliency
-    },
-    multiscale: {
-      method: multiscale.diagnostics.method,
-      verified: multiscale.diagnostics.verifiedMultiscale,
-      fallbackUsed: multiscale.diagnostics.fallbackUsed,
-      effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
-      threshold: multiscale.diagnostics.energyThreshold,
-      scaleBands: multiscale.diagnostics.scaleBands.map((band) => ({ scale: band.scale, ratio: band.ratio }))
-    }
+    semantic:
+      multiscale === null
+        ? undefined
+        : {
+            enableTpidCenterAlignment: true,
+            baselineShiftBeforeAbs: new Array<number>(context.dataset.times.length).fill(0),
+            baselineShiftAfterAbs: multiscale.diagnostics.distributedShiftAbs,
+            uncertaintySaliency: multiscale.diagnostics.uncertaintySaliency
+          },
+    multiscale:
+      multiscale === null
+        ? null
+        : {
+            method: multiscale.diagnostics.method,
+            verified: multiscale.diagnostics.verifiedMultiscale,
+            fallbackUsed: multiscale.diagnostics.fallbackUsed,
+            effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
+            threshold: multiscale.diagnostics.energyThreshold,
+            scaleBands: multiscale.diagnostics.scaleBands.map((band) => ({ scale: band.scale, ratio: band.ratio }))
+          }
   });
+  const diagnosticsNotes = [...orderDiagnosticsNotes(context.optimized)];
+  if (multiscale !== null) {
+    diagnosticsNotes.push(`baseline uncertainty weight: ${uncStrength.toFixed(3)}`);
+    diagnosticsNotes.push(...multiscaleDiagnosticsNotes(multiscale.diagnostics));
+  }
   return {
     dataset: context.dataset,
     orderedLayers: context.orderedLayers,
@@ -173,11 +151,7 @@ export function buildOptimizeUncertaintyComparisonScene(
     insetRoi: context.insetRoi,
     metrics,
     notes: context.preprocessedNotes,
-    diagnosticsNotes: [
-      ...orderDiagnosticsNotes(context.optimized),
-      `baseline uncertainty weight: ${uncStrength.toFixed(3)}`,
-      ...multiscaleDiagnosticsNotes(multiscale.diagnostics)
-    ]
+    diagnosticsNotes
   };
 }
 
@@ -431,29 +405,5 @@ function stackToBraidLayout(layout: StackLayout): BraidLayout {
       spacingIterations: 0,
       spacingObjectiveHistory: []
     }
-  };
-}
-
-function reorderLayoutRows(layout: StackLayout, fromLayers: LayerInput[], toLayers: LayerInput[]): StackLayout {
-  const byId = new Map<string, number>();
-  for (let i = 0; i < fromLayers.length; i += 1) {
-    byId.set(fromLayers[i].id, i);
-  }
-  return {
-    baseline: layout.baseline.slice(),
-    yBottom: toLayers.map((layer) => {
-      const sourceIndex = byId.get(layer.id);
-      if (sourceIndex === undefined) {
-        return new Array<number>(layout.baseline.length).fill(0);
-      }
-      return layout.yBottom[sourceIndex].slice();
-    }),
-    yTop: toLayers.map((layer) => {
-      const sourceIndex = byId.get(layer.id);
-      if (sourceIndex === undefined) {
-        return new Array<number>(layout.baseline.length).fill(0);
-      }
-      return layout.yTop[sourceIndex].slice();
-    })
   };
 }

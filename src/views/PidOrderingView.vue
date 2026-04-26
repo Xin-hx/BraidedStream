@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import * as d3 from "d3";
 import { onMounted, ref, watch } from "vue";
-import { computeBaseline } from "../core/baseline";
+import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
 import { normalizeOrderForComparison } from "../core/orderCompare";
 import { buildPidCenterOutOrder, computePidOrdering } from "../core/pidOrdering";
 import { computeStackedBoundaries } from "../core/stack";
-import type { BaselineMode, LayerInput, OptimizeMethod, PreparedDataset, ROI, StackLayout } from "../core/types";
+import type { BaselineMode, LayerInput, PidBaselineMode, PreparedDataset, ROI, StackLayout } from "../core/types";
 import type { AppState } from "../state/appState";
 import { orderLayers } from "../core/validate";
 import { layerColor } from "../styles/palette";
@@ -31,9 +31,11 @@ const panelGap = 58;
 const slopeRowHeight = 18;
 const slopeHeaderPadding = 96;
 const slopePanelGap = 46;
+const baselinePanelHeight = 132;
 // Reserve a fixed header band in slope panels so titles never collide with lines/labels.
 const slopeHeaderTop = 62;
 const slopeFooterPad = 16;
+type MultiscaleDiagnostics = ReturnType<typeof computeMultiscaleDistributedBaseline>["diagnostics"];
 
 interface StreamPanelState {
   key: "basic" | "optimized";
@@ -42,6 +44,11 @@ interface StreamPanelState {
   height: number;
   layout: StackLayout;
   yScale: d3.ScaleLinear<number, number>;
+}
+
+interface PidBaselineResult {
+  baseline: number[];
+  multiscaleDiagnostics: MultiscaleDiagnostics | null;
 }
 
 interface SlopeLineState {
@@ -151,7 +158,8 @@ watch(
     props.dataset,
     props.sineOrder,
     props.roi,
-    props.state.optimizeMethod,
+    props.state.pidBaselineMode,
+    props.state.optimization.baselineUncertaintyWeight,
     props.state.optimization.wiggleWeightL1,
     props.state.optimization.wiggleWeightL2,
     props.state.optimization.centerAnchorWeight,
@@ -194,9 +202,10 @@ function renderChart(): void {
   const slopeHeight = Math.max(180, dataset.layers.length * slopeRowHeight + slopeHeaderPadding);
   const streamTop = 0;
   const optimizedTop = streamTop + streamPanelHeight + panelGap;
-  const slopeOrderTop = optimizedTop + streamPanelHeight + panelGap;
+  const baselineSlopeTop = optimizedTop + streamPanelHeight + panelGap;
+  const slopeOrderTop = baselineSlopeTop + baselinePanelHeight + panelGap;
   const slopeYTop = slopeOrderTop + slopeHeight + slopePanelGap;
-  const innerHeight = streamPanelHeight * 2 + panelGap * 2 + slopeHeight * 2 + slopePanelGap;
+  const innerHeight = streamPanelHeight * 2 + panelGap * 3 + baselinePanelHeight + slopeHeight * 2 + slopePanelGap;
   const canvasHeight = innerHeight + margin.top + margin.bottom;
   currentCanvasHeight = canvasHeight;
   svg.attr("viewBox", `0 0 ${width} ${canvasHeight}`).attr("height", canvasHeight);
@@ -219,11 +228,21 @@ function renderChart(): void {
   const orderedLayers = orderLayers(dataset.layers, pidDisplayOrder);
   const colorIndexById = new Map<string, number>(dataset.order.map((id, index) => [id, index]));
 
-  const centerBaseline = computeBaseline(dataset.times, orderedLayers, "center");
-  const centerLayout = computeStackedBoundaries(centerBaseline, orderedLayers);
-  const optimizeMode = optimizeMethodToBaselineMode(props.state.optimizeMethod);
-  const optimizedBaseline = computeBaseline(dataset.times, orderedLayers, optimizeMode, baselineHooksFromState(props.state));
+  const hooks = baselineHooksFromState(props.state);
+  const referenceBaseline = computeBaseline(dataset.times, orderedLayers, "sineStream", hooks);
+  const referenceLayout = computeStackedBoundaries(referenceBaseline, orderedLayers);
+  const selectedMode = props.state.pidBaselineMode;
+  const uncStrength = Math.max(0, props.state.optimization.baselineUncertaintyWeight ?? 0.45);
+  const pidBaseline = computePidBaseline(dataset.times, orderedLayers, selectedMode, hooks, uncStrength);
+  const optimizedBaseline = pidBaseline.baseline;
   const optimizedLayout = computeStackedBoundaries(optimizedBaseline, orderedLayers);
+  const [sharedMin, sharedMax] = layoutExtentCombined([referenceLayout, optimizedLayout], activeIndices);
+  const sharedPad = (sharedMax - sharedMin) * 0.06 + 1e-6;
+  const sharedYDomain: [number, number] = [sharedMin - sharedPad, sharedMax + sharedPad];
+  const optimizedSubtitle =
+    selectedMode === "multiscale" && pidBaseline.multiscaleDiagnostics
+      ? multiscaleSubtitle(pidBaseline.multiscaleDiagnostics)
+      : undefined;
 
   const xScale = d3
     .scaleLinear()
@@ -236,11 +255,12 @@ function renderChart(): void {
       key: "basic",
       top: streamTop,
       height: streamPanelHeight,
-      title: "PID ordering: reference river (center baseline)",
+      title: "PID ordering: reference river (Sine baseline)",
       dataset,
       orderedLayers,
       activeIndices,
-      layout: centerLayout,
+      layout: referenceLayout,
+      yDomain: sharedYDomain,
       xScale
     })
   );
@@ -249,14 +269,28 @@ function renderChart(): void {
       key: "optimized",
       top: optimizedTop,
       height: streamPanelHeight,
-      title: `PID ordering: optimized river (${baselineModeLabel(optimizeMode)})`,
+      title: `PID ordering: comparison river (${pidBaselineModeLabel(selectedMode)})`,
       dataset,
       orderedLayers,
       activeIndices,
       layout: optimizedLayout,
+      yDomain: sharedYDomain,
+      subtitle: optimizedSubtitle,
       xScale
     })
   );
+
+  drawBaselineSlopePanel(root, {
+    top: baselineSlopeTop,
+    height: baselinePanelHeight,
+    title: "Baseline local slope comparison (same PID order)",
+    subtitle: "metric: mean |d center/dt| across layers (shared x-axis)",
+    beforeLayout: referenceLayout,
+    afterLayout: optimizedLayout,
+    times: dataset.times,
+    activeIndices,
+    xScale
+  });
 
   const slopePanels: SlopePanelState[] = [];
   slopePanels.push(
@@ -314,10 +348,12 @@ function drawStreamPanel(
     top: number;
     height: number;
     title: string;
+    subtitle?: string;
     dataset: PreparedDataset;
     orderedLayers: LayerInput[];
     activeIndices: number[];
     layout: StackLayout;
+    yDomain: [number, number];
     xScale: d3.ScaleLinear<number, number>;
   }
 ): StreamPanelState {
@@ -332,9 +368,7 @@ function drawStreamPanel(
     .attr("fill", "rgba(248, 250, 252, 0.72)")
     .attr("stroke", "rgba(148, 163, 184, 0.44)");
 
-  const [minValue, maxValue] = layoutExtent(layout, activeIndices);
-  const pad = (maxValue - minValue) * 0.06 + 1e-6;
-  const yScale = d3.scaleLinear().domain([minValue - pad, maxValue + pad]).range([height, 0]);
+  const yScale = d3.scaleLinear().domain(args.yDomain).range([height, 0]);
 
   panel
     .selectAll<SVGPathElement, { id: string; index: number }>("path.pid-layer")
@@ -384,6 +418,17 @@ function drawStreamPanel(
     .attr("font-weight", 700)
     .text(title);
 
+  if (args.subtitle) {
+    panel
+      .append("text")
+      .attr("x", innerWidth)
+      .attr("y", -8)
+      .attr("text-anchor", "end")
+      .attr("fill", "#334155")
+      .attr("font-size", 10.5)
+      .text(args.subtitle);
+  }
+
   return {
     key: args.key,
     title,
@@ -392,6 +437,139 @@ function drawStreamPanel(
     layout,
     yScale
   };
+}
+
+function drawBaselineSlopePanel(
+  root: d3.Selection<SVGGElement, unknown, null, undefined>,
+  args: {
+    top: number;
+    height: number;
+    title: string;
+    subtitle: string;
+    beforeLayout: StackLayout;
+    afterLayout: StackLayout;
+    times: number[];
+    activeIndices: number[];
+    xScale: d3.ScaleLinear<number, number>;
+  }
+): void {
+  const panel = root.append("g").attr("transform", `translate(0,${args.top})`);
+  panel
+    .append("rect")
+    .attr("x", 0)
+    .attr("y", 0)
+    .attr("width", innerWidth)
+    .attr("height", args.height)
+    .attr("fill", "rgba(248, 250, 252, 0.72)")
+    .attr("stroke", "rgba(148, 163, 184, 0.44)");
+
+  const beforeSlope = meanAbsCenterSlopeSeries(args.beforeLayout);
+  const afterSlope = meanAbsCenterSlopeSeries(args.afterLayout);
+  const beforeValues = args.activeIndices.map((t) => beforeSlope[t] ?? 0);
+  const afterValues = args.activeIndices.map((t) => afterSlope[t] ?? 0);
+  const yMax = Math.max(1e-6, d3.max([...beforeValues, ...afterValues]) ?? 1);
+  const yScale = d3.scaleLinear().domain([0, yMax * 1.08]).range([args.height - 18, 46]);
+
+  const line = d3
+    .line<number>()
+    .x((t) => args.xScale(args.times[t]))
+    .y((t) => yScale(afterSlope[t] ?? 0))
+    .curve(d3.curveMonotoneX);
+
+  panel
+    .append("path")
+    .attr("d", line(args.activeIndices) ?? "")
+    .attr("fill", "none")
+    .attr("stroke", "#0ea5e9")
+    .attr("stroke-width", 1.7)
+    .attr("stroke-opacity", 0.95);
+
+  const lineBefore = d3
+    .line<number>()
+    .x((t) => args.xScale(args.times[t]))
+    .y((t) => yScale(beforeSlope[t] ?? 0))
+    .curve(d3.curveMonotoneX);
+
+  panel
+    .append("path")
+    .attr("d", lineBefore(args.activeIndices) ?? "")
+    .attr("fill", "none")
+    .attr("stroke", "#475569")
+    .attr("stroke-width", 1.3)
+    .attr("stroke-dasharray", "4,3")
+    .attr("stroke-opacity", 0.95);
+
+  panel
+    .append("g")
+    .attr("class", "x-axis")
+    .attr("transform", `translate(0,${args.height - 18})`)
+    .call(
+      d3
+        .axisBottom(args.xScale)
+        .ticks(Math.max(3, Math.floor(innerWidth / 220)))
+        .tickFormat((value) => formatTimeTick(Number(value)))
+    );
+  panel
+    .selectAll<SVGTextElement, unknown>(".x-axis text")
+    .attr("text-anchor", "end")
+    .attr("dx", "-0.42em")
+    .attr("dy", "0.34em")
+    .attr("transform", "rotate(-35)");
+  panel.append("g").attr("class", "y-axis").attr("transform", "translate(0,0)").call(d3.axisLeft(yScale).ticks(4));
+
+  const meanBefore = d3.mean(beforeValues) ?? 0;
+  const meanAfter = d3.mean(afterValues) ?? 0;
+  const maxBefore = d3.max(beforeValues) ?? 0;
+  const maxAfter = d3.max(afterValues) ?? 0;
+
+  panel
+    .append("text")
+    .attr("x", 0)
+    .attr("y", 16)
+    .attr("fill", "#0f172a")
+    .attr("font-size", 12)
+    .attr("font-weight", 700)
+    .text(args.title);
+  panel
+    .append("text")
+    .attr("x", 0)
+    .attr("y", 32)
+    .attr("fill", "#475569")
+    .attr("font-size", 10.5)
+    .text(args.subtitle);
+  panel
+    .append("text")
+    .attr("x", innerWidth)
+    .attr("y", 16)
+    .attr("text-anchor", "end")
+    .attr("fill", "#0f172a")
+    .attr("font-size", 11)
+    .text(`mean|slope|: ${formatMetric(meanBefore)} -> ${formatMetric(meanAfter)} (Δ=${signedMetric(meanAfter - meanBefore)})`);
+  panel
+    .append("text")
+    .attr("x", innerWidth)
+    .attr("y", 32)
+    .attr("text-anchor", "end")
+    .attr("fill", "#0f172a")
+    .attr("font-size", 11)
+    .text(`max|slope|: ${formatMetric(maxBefore)} -> ${formatMetric(maxAfter)} (Δ=${signedMetric(maxAfter - maxBefore)})`);
+
+  panel
+    .append("text")
+    .attr("x", innerWidth - 4)
+    .attr("y", 48)
+    .attr("text-anchor", "end")
+    .attr("fill", "#0ea5e9")
+    .attr("font-size", 10.5)
+    .text("solid: selected baseline");
+  panel
+    .append("text")
+    .attr("x", innerWidth - 4)
+    .attr("y", 62)
+    .attr("text-anchor", "end")
+    .attr("fill", "#475569")
+    .attr("font-size", 10.5)
+    .text("dashed: Sine reference");
 }
 
 function drawSlopePanel(
@@ -663,17 +841,27 @@ function onMouseLeave(): void {
   emit("hover", null);
 }
 
-function optimizeMethodToBaselineMode(method: OptimizeMethod): BaselineMode {
-  if (method === "l1") {
-    return "l1";
+function computePidBaseline(
+  times: number[],
+  orderedLayers: LayerInput[],
+  mode: PidBaselineMode,
+  hooks: ReturnType<typeof baselineHooksFromState>,
+  uncertaintyStrength: number
+): PidBaselineResult {
+  if (mode === "multiscale") {
+    const result = computeMultiscaleDistributedBaseline(times, orderedLayers, uncertaintyStrength, hooks, 0.08);
+    return {
+      baseline: result.baseline,
+      multiscaleDiagnostics: result.diagnostics
+    };
   }
-  if (method === "l2") {
-    return "l2";
-  }
-  return "sineStream";
+  return {
+    baseline: computeBaseline(times, orderedLayers, mode as BaselineMode, hooks),
+    multiscaleDiagnostics: null
+  };
 }
 
-function baselineModeLabel(mode: BaselineMode): string {
+function pidBaselineModeLabel(mode: PidBaselineMode): string {
   if (mode === "l1") {
     return "L1 wiggle";
   }
@@ -683,7 +871,7 @@ function baselineModeLabel(mode: BaselineMode): string {
   if (mode === "sineStream") {
     return "SineStream";
   }
-  return mode;
+  return "Multiscale";
 }
 
 function baselineHooksFromState(state: AppState) {
@@ -767,6 +955,70 @@ function layoutExtent(layout: StackLayout, indices: number[]): [number, number] 
     return [-1, 1];
   }
   return [minValue, maxValue];
+}
+
+function layoutExtentCombined(layouts: StackLayout[], indices: number[]): [number, number] {
+  let minValue = Number.POSITIVE_INFINITY;
+  let maxValue = Number.NEGATIVE_INFINITY;
+  for (const layout of layouts) {
+    const [minL, maxL] = layoutExtent(layout, indices);
+    minValue = Math.min(minValue, minL);
+    maxValue = Math.max(maxValue, maxL);
+  }
+  if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || minValue === maxValue) {
+    return [-1, 1];
+  }
+  return [minValue, maxValue];
+}
+
+function meanAbsCenterSlopeSeries(layout: StackLayout): number[] {
+  const tLength = layout.baseline.length;
+  const kLength = layout.yBottom.length;
+  if (tLength === 0 || kLength === 0) {
+    return [];
+  }
+  const out = new Array<number>(tLength).fill(0);
+  for (let t = 1; t < tLength; t += 1) {
+    let acc = 0;
+    for (let k = 0; k < kLength; k += 1) {
+      const c0 = 0.5 * (layout.yBottom[k][t - 1] + layout.yTop[k][t - 1]);
+      const c1 = 0.5 * (layout.yBottom[k][t] + layout.yTop[k][t]);
+      acc += Math.abs(c1 - c0);
+    }
+    out[t] = acc / Math.max(1, kLength);
+  }
+  return out;
+}
+
+function multiscaleSubtitle(diag: MultiscaleDiagnostics): string {
+  const topBands = diag.scaleBands
+    .slice()
+    .sort((a, b) => b.ratio - a.ratio)
+    .slice(0, 2)
+    .map((band) => `${band.scale}:${(band.ratio * 100).toFixed(0)}%`)
+    .join(", ");
+  return `verified=${diag.verifiedMultiscale ? "yes" : "no"} | fallback=${diag.fallbackUsed ? "yes" : "no"} | effective=${diag.effectiveScaleCount} | top=${topBands}`;
+}
+
+function formatMetric(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+  if (Math.abs(value) >= 1_000_000) {
+    return (value / 1_000_000).toFixed(2) + "M";
+  }
+  if (Math.abs(value) >= 1_000) {
+    return (value / 1_000).toFixed(2) + "K";
+  }
+  return value.toFixed(3);
+}
+
+function signedMetric(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+  const formatted = formatMetric(Math.abs(value));
+  return value >= 0 ? `+${formatted}` : `-${formatted}`;
 }
 
 function pickLayerAtY(timeIndex: number, yValue: number, layout: StackLayout, orderedLayers: LayerInput[]): LayerInput | null {

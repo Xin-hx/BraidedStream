@@ -3,7 +3,6 @@ import { computed, onMounted, reactive, ref } from "vue";
 import {
   buildBraidedEnhanceScene,
   buildOptimizeComparisonScene,
-  buildOptimizeUncertaintyComparisonScene,
   buildScene,
   defaultWindow,
   recommendHighUncertaintyRoi,
@@ -71,7 +70,6 @@ const activeBundle = ref<DatasetBundle>(syntheticBundle);
 
 const mainScene = ref<SceneBuildResult | null>(null);
 const optimizeScene = ref<SceneBuildResult | null>(null);
-const optimizeUncertaintyScene = ref<SceneBuildResult | null>(null);
 const braidedScene = ref<SceneBuildResult | null>(null);
 
 const recommendList = ref<RoiCandidate[]>([]);
@@ -86,19 +84,12 @@ const pidOrderingViewRef = ref<PidOrderingViewExpose | null>(null);
 
 const enhanceTabs: Array<{ key: AppState["enhanceTab"]; label: string }> = [
   { key: "optimize", label: "Optimizing" },
-  { key: "optimizeUncertainty", label: "Optimizing with Uncertainty" },
   { key: "braided", label: "Braided" },
   { key: "spaghetti", label: "spaghetti" },
   { key: "pidOrdering", label: "PID ordering" }
 ];
 
-const optimizeBaselineMode = computed<BaselineMode>(() => {
-  if (state.optimizeMethod === "l1") {
-    return "l1";
-  }
-  if (state.optimizeMethod === "l2") {
-    return "l2";
-  }
+const enhanceBaselineMode = computed<BaselineMode>(() => {
   return "sineStream";
 });
 
@@ -170,9 +161,6 @@ const activeMetrics = computed(() => {
   if (state.enhanceTab === "optimize") {
     return optimizeScene.value?.metrics ?? null;
   }
-  if (state.enhanceTab === "optimizeUncertainty") {
-    return optimizeUncertaintyScene.value?.metrics ?? null;
-  }
   if (state.enhanceTab === "braided") {
     return braidedScene.value?.metrics ?? null;
   }
@@ -185,9 +173,6 @@ const activeMetrics = computed(() => {
 const metricsTitle = computed(() => {
   if (state.enhanceTab === "optimize") {
     return "Metrics: Optimizing";
-  }
-  if (state.enhanceTab === "optimizeUncertainty") {
-    return "Metrics: Optimizing with Uncertainty";
   }
   if (state.enhanceTab === "braided") {
     return "Metrics: Braided";
@@ -215,7 +200,7 @@ const pidMetricsBundle = computed(() => {
     dataset,
     roi: scene?.insetRoi ?? null,
     sineOrder: pidSineReferenceOrder.value,
-    baselineMode: optimizeBaselineMode.value,
+    uncertaintyStrength: Math.max(0, state.optimization.baselineUncertaintyWeight ?? 0.45),
     baselineHooks: {
       centerType: state.optimization.baselineCenterType ?? "median",
       wiggleWeightL1: state.optimization.wiggleWeightL1,
@@ -231,14 +216,8 @@ const metricsNotes = computed(() => {
   const notes = [...activeBundle.value.notes];
   if (state.enhanceTab === "optimize" && optimizeScene.value) {
     notes.push(`[optimize method=${state.optimizeMethod}]`, ...optimizeScene.value.diagnosticsNotes, ...optimizeScene.value.notes);
-  } else if (state.enhanceTab === "optimizeUncertainty" && optimizeUncertaintyScene.value) {
-    notes.push(
-      `[optimize uncertainty method=${state.optimizeMethod}]`,
-      ...optimizeUncertaintyScene.value.diagnosticsNotes,
-      ...optimizeUncertaintyScene.value.notes
-    );
   } else if (state.enhanceTab === "braided" && braidedScene.value) {
-    notes.push(`[optimize method=${state.optimizeMethod}]`, ...braidedScene.value.diagnosticsNotes, ...braidedScene.value.notes);
+    notes.push(`[optimize method=${enhanceBaselineMode.value}]`, ...braidedScene.value.diagnosticsNotes, ...braidedScene.value.notes);
   } else if (state.enhanceTab === "pidOrdering") {
     const bundle = pidMetricsBundle.value;
     if (!bundle) {
@@ -247,8 +226,10 @@ const metricsNotes = computed(() => {
       const summary = bundle.summary;
       const topLabel = summary.topPidLayerId ? layerStateLabel(summary.topPidLayerId) : "N/A";
       notes.push(
-        `[pid baseline method=${state.optimizeMethod}]`,
-        "PID metrics share the same ROI/layout formulas as Optimizing",
+        `[pid display baseline=${state.pidBaselineMode}]`,
+        "PID display baseline is selectable: L1 / L2 / SineStream / Multiscale",
+        "PID metrics baseline comparison is fixed: Sine -> Multiscale",
+        `baseline uncertainty weight: ${Math.max(0, state.optimization.baselineUncertaintyWeight ?? 0.45).toFixed(3)}`,
         "PID definition: self-excluded weighted inclusion depth (wide intervals down-weighted)",
         "PID display order: deepest near center, then alternating upper/lower insertion",
         "IEEE-style order agreement: Spearman rho and Kendall tau",
@@ -330,18 +311,13 @@ function recomputeScene(): void {
   };
   const enhanceState = {
     ...state,
-    baseline: optimizeBaselineMode.value,
+    baseline: enhanceBaselineMode.value,
     enableJaggedEdge: false
   };
 
   const nextMain = buildScene(activeBundle.value, mainState);
-  const nextOptimize = buildOptimizeComparisonScene(activeBundle.value, enhanceState, optimizeBaselineMode.value);
-  const nextOptimizeUncertainty = buildOptimizeUncertaintyComparisonScene(
-    activeBundle.value,
-    enhanceState,
-    optimizeBaselineMode.value
-  );
-  const nextBraided = buildBraidedEnhanceScene(activeBundle.value, enhanceState, optimizeBaselineMode.value);
+  const nextOptimize = buildOptimizeComparisonScene(activeBundle.value, enhanceState, state.optimizeMethod);
+  const nextBraided = buildBraidedEnhanceScene(activeBundle.value, enhanceState, enhanceBaselineMode.value);
 
   state.baseline = mainBaselineBranch.value;
   state.ROI = nextMain.roi;
@@ -349,7 +325,6 @@ function recomputeScene(): void {
   state.enableJaggedEdge = false;
   mainScene.value = nextMain;
   optimizeScene.value = nextOptimize;
-  optimizeUncertaintyScene.value = nextOptimizeUncertainty;
   braidedScene.value = nextBraided;
   sanitizeSpaghettiSelection();
 }
@@ -729,16 +704,6 @@ function layerStateLabel(layerId: string): string {
           v-if="state.enhanceTab === 'optimize'"
           ref="insetViewRef"
           :scene="optimizeScene"
-          :state="state"
-          forced-view-mode="after"
-          :forced-uncertainty-gap="false"
-          @hover="onHover"
-        />
-
-        <InsetDetailView
-          v-else-if="state.enhanceTab === 'optimizeUncertainty'"
-          ref="insetViewRef"
-          :scene="optimizeUncertaintyScene"
           :state="state"
           forced-view-mode="after"
           :forced-uncertainty-gap="false"

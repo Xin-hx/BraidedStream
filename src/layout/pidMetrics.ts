@@ -1,17 +1,17 @@
 import type { SineStreamHooks } from "../core/baseline";
-import { computeBaseline } from "../core/baseline";
+import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
 import { normalizeOrderForComparison, rankMap } from "../core/orderCompare";
 import { buildPidCenterOutOrder, computePidOrdering } from "../core/pidOrdering";
 import { computeStackedBoundaries } from "../core/stack";
-import type { BaselineMode, BraidLayout, InvariantSummary, PreparedDataset, ROI, StackLayout } from "../core/types";
+import type { BraidLayout, InvariantSummary, PreparedDataset, ROI, StackLayout } from "../core/types";
 import { orderLayers } from "../core/validate";
-import { computeMetrics, type MetricResult } from "./metrics";
+import { computeMetrics, type MetricResult, type MultiscaleDiagnosticsSummary } from "./metrics";
 
 export interface PidOrderingMetricsInput {
   dataset: PreparedDataset;
   roi: ROI | null;
   sineOrder: string[];
-  baselineMode: BaselineMode;
+  uncertaintyStrength: number;
   baselineHooks?: SineStreamHooks;
 }
 
@@ -44,24 +44,44 @@ export function computePidOrderingMetrics(input: PidOrderingMetricsInput): PidOr
   const pidDepthOrder = normalizeOrderForComparison(pid.order, layerIds, input.dataset.order);
 
   // Use the same center-out placement rule for both layouts to isolate ordering effects.
-  const sineDisplayOrder = buildPidCenterOutOrder(sineBaseOrder);
   const pidDisplayOrder = buildPidCenterOutOrder(pidDepthOrder);
 
-  const beforeLayers = orderLayers(input.dataset.layers, sineDisplayOrder);
-  const afterLayers = orderLayers(input.dataset.layers, pidDisplayOrder);
+  const pidDisplayLayers = orderLayers(input.dataset.layers, pidDisplayOrder);
   const hooks = input.baselineHooks ?? {};
 
-  const beforeBaseline = computeBaseline(input.dataset.times, beforeLayers, input.baselineMode, hooks);
-  const beforeLayout = computeStackedBoundaries(beforeBaseline, beforeLayers);
-  const afterBaseline = computeBaseline(input.dataset.times, afterLayers, input.baselineMode, hooks);
-  const afterLayout = stackToBraidLayout(computeStackedBoundaries(afterBaseline, afterLayers));
+  const beforeBaseline = computeBaseline(input.dataset.times, pidDisplayLayers, "sineStream", hooks);
+  const beforeLayout = computeStackedBoundaries(beforeBaseline, pidDisplayLayers);
+  const multiscale = computeMultiscaleDistributedBaseline(
+    input.dataset.times,
+    pidDisplayLayers,
+    Math.max(0, input.uncertaintyStrength),
+    hooks,
+    0.08
+  );
+  const afterLayout = stackToBraidLayout(computeStackedBoundaries(multiscale.baseline, pidDisplayLayers));
 
   const invariant: InvariantSummary = {
     checked: false,
     violations: [],
     maxThicknessError: 0
   };
-  const core = computeMetrics(input.dataset, beforeLayout, afterLayout, input.roi, invariant, afterLayers);
+  const multiscaleSummary: MultiscaleDiagnosticsSummary = {
+    method: multiscale.diagnostics.method,
+    verified: multiscale.diagnostics.verifiedMultiscale,
+    fallbackUsed: multiscale.diagnostics.fallbackUsed,
+    effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
+    threshold: multiscale.diagnostics.energyThreshold,
+    scaleBands: multiscale.diagnostics.scaleBands.map((band) => ({ scale: band.scale, ratio: band.ratio }))
+  };
+  const core = computeMetrics(input.dataset, beforeLayout, afterLayout, input.roi, invariant, pidDisplayLayers, {
+    semantic: {
+      enableTpidCenterAlignment: true,
+      baselineShiftBeforeAbs: multiscale.diagnostics.localShiftAbs,
+      baselineShiftAfterAbs: multiscale.diagnostics.distributedShiftAbs,
+      uncertaintySaliency: multiscale.diagnostics.uncertaintySaliency
+    },
+    multiscale: multiscaleSummary
+  });
   const summary = summarizeOrderShift(layerIds, sineBaseOrder, pidDepthOrder, pid, input.dataset.times.length);
 
   const rows = core.rows.concat([
@@ -75,7 +95,7 @@ export function computePidOrderingMetrics(input: PidOrderingMetricsInput): PidOr
     metrics: {
       ...core,
       rows,
-      scopeText: "ROI (same formulas as Optimizing)"
+      scopeText: "ROI (PID baseline metric: Sine -> Multiscale)"
     },
     summary
   };
