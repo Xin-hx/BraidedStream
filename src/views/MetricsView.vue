@@ -26,6 +26,19 @@ const invariantText = computed(() => {
 });
 
 const multiscaleBandCount = computed(() => props.metrics?.multiscale?.scaleBands.length ?? 0);
+const hasGlobalRows = computed(
+  () => !!props.metrics?.globalRows && Array.isArray(props.metrics.globalRows) && props.metrics.globalRows.length > 0
+);
+const scopeText = computed(() => {
+  if (!props.metrics) {
+    return "N/A";
+  }
+  if (!hasGlobalRows.value) {
+    return props.metrics.scopeText;
+  }
+  const globalScope = props.metrics.globalScopeText ?? "Global";
+  return `${props.metrics.scopeText} + ${globalScope}`;
+});
 
 function trendTag(delta: number, better: "up" | "down"): "same" | "improved" | "worse" {
   if (delta === 0) {
@@ -61,10 +74,11 @@ function pct(value: number): number {
     <div id="metrics">
       <div class="metrics-header">
         <strong>{{ title }}</strong>
-        <span>Scope: {{ metrics?.scopeText ?? "N/A" }}</span>
+        <span>Scope: {{ scopeText }}</span>
         <span>Invariant: {{ invariantText }}</span>
       </div>
 
+      <div v-if="metrics && hasGlobalRows" class="metrics-scope-title">ROI</div>
       <table v-if="metrics">
         <thead>
           <tr>
@@ -89,6 +103,34 @@ function pct(value: number): number {
           </tr>
         </tbody>
       </table>
+
+      <template v-if="metrics && hasGlobalRows">
+        <div class="metrics-scope-title">{{ metrics?.globalScopeText ?? "Global" }}</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Before</th>
+              <th>After</th>
+              <th>Delta</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in metrics.globalRows"
+              :key="`global-${row.key}`"
+              :class="`metric-${trendTag(row.delta, row.better)}`"
+            >
+              <td>{{ row.label }}</td>
+              <td>{{ fmt(row.before) }}</td>
+              <td>{{ fmt(row.after) }}</td>
+              <td>{{ fmt(row.delta, true) }}</td>
+              <td>{{ trendTag(row.delta, row.better) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
 
       <div v-if="metrics?.multiscale" class="multiscale-summary">
         <div class="multiscale-summary__header">

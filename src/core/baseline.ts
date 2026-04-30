@@ -628,83 +628,114 @@ function computeSineStreamBaseline(tLength: number, layers: LayerInput[], hooks:
  * Compute the thickness change metric (C value) based on the specified center type
  */
 function computeThicknessChangeMetric(changes: number[], centerType: string): number {
-  if (changes.length === 0) return 1;
+  if (changes.length === 0) {
+    return 1;
+  }
+
+  let curC = 1;
+  let nonZeroCount = 0;
 
   switch (centerType) {
-    case "mean":
-      return changes.reduce((a, b) => a + b, 0) / changes.length;
+    case "median": {
+      const sorted = changes.slice().sort((a, b) => a - b);
+      if (sorted.length % 2 !== 0) {
+        return sorted[(sorted.length - 1) / 2];
+      }
+      return 0.5 * (sorted[sorted.length / 2] + sorted[sorted.length / 2 - 1]);
+    }
     case "geometric": {
-      const product = changes.reduce((a, b) => a * b, 1);
-      return Math.pow(product, 1 / changes.length);
+      for (const value of changes) {
+        if (value !== 0) {
+          nonZeroCount += 1;
+        }
+      }
+      if (nonZeroCount === 0) {
+        return curC;
+      }
+      for (const value of changes) {
+        if (value !== 0) {
+          curC *= Math.pow(value, 1 / nonZeroCount);
+        }
+      }
+      return curC;
     }
     case "harmonic": {
-      const recipSum = changes.reduce((a, b) => a + (b > 0 ? 1 / b : 0), 0);
-      return changes.length / (recipSum || 1);
-    }
-    case "median":
-    default: {
-      const sorted = [...changes].sort((a, b) => a - b);
-      if (sorted.length % 2 !== 0) {
-        return sorted[Math.floor(sorted.length / 2)];
+      curC = 0;
+      for (const value of changes) {
+        if (value !== 0) {
+          curC += 1 / value;
+          nonZeroCount += 1;
+        }
       }
-      return (sorted[sorted.length / 2] + sorted[sorted.length / 2 - 1]) / 2;
+      if (nonZeroCount === 0 || curC === 0) {
+        // Degenerate all-zero changes: keep the baseline update stable.
+        return 0;
+      }
+      return nonZeroCount / curC;
     }
+    case "mean": {
+      for (const value of changes) {
+        if (value !== 0) {
+          curC += value;
+        }
+      }
+      return curC / changes.length;
+    }
+    default:
+      return curC;
   }
 }
-
 /**
  * Compute Gaussian-weighted baseline adjustment at time step i
  * 
- * Formula: Δg_i = -Σ(w_j × Q_i^j) / Σ(w_j)
+ * Formula: 螖g_i = -危(w_j 脳 Q_i^j) / 危(w_j)
  * where:
- *   w_j = exp(-(dF_i^j)² / (2c²))  [Gaussian weight penalizing large changes]
+ *   w_j = exp(-(dF_i^j)虏 / (2c虏))  [Gaussian weight penalizing large changes]
  *   dF_i^j = thickness change of layer j at time i
  *   Q_i^j = cumulative contribution term
  *   c = thickness change metric
  */
 function computeGaussianWeightedAdjustment(layers: LayerInput[], i: number, c: number): number {
   const n = layers.length;
-  const dFi = new Array<number>(n); // thickness changes
-  const Qi = new Array<number>(n); // cumulative contributions
+  const dFi = new Array<number>(n);
+  const Fi = new Array<number>(n);
+  const Qi = new Array<number>(n);
 
-  // Compute thickness changes and layer sizes
   for (let j = 0; j < n; j += 1) {
-    dFi[j] = layers[j].mean[i] - layers[j].mean[i - 1];
+    const current = layers[j].mean[i];
+    const previous = layers[j].mean[i - 1];
+    Fi[j] = current;
+    dFi[j] = current - previous;
   }
 
-  // Compute cumulative contribution Q_i^j for each layer
-  // Q_i^j = (Σ_{k=0}^{j} 2*dF_k - dF_j) / 2
   for (let j = 0; j < n; j += 1) {
-    let sum = 0;
+    let p = 0;
     for (let k = 0; k <= j; k += 1) {
-      sum += 2 * dFi[k];
+      p += 2 * dFi[k];
     }
-    Qi[j] = (sum - dFi[j]) / 2;
+    Qi[j] = (p - dFi[j]) / 2;
   }
 
-  // Apply Gaussian weighting
   let numerator = 0;
   let denominator = 0;
-  const epsilon = 1e-10;
-
   for (let j = 0; j < n; j += 1) {
-    // Gaussian weight: exp(-(dF_j² / 2c²))
-    let gaussWeight: number;
-    if (Math.abs(c) < epsilon) {
-      gaussWeight = 1;
-    } else {
-      const exponent = -(dFi[j] * dFi[j]) / (2 * c * c);
-      gaussWeight = Math.exp(exponent);
+    let gaussianWeight = 1;
+    if (c !== 0 && Number.isFinite(c)) {
+      gaussianWeight = Math.exp(-((dFi[j] * dFi[j]) / (2 * c * c)));
     }
-
-    const contribution = gaussWeight * layers[j].mean[i];
+    const contribution = gaussianWeight * Fi[j];
     denominator += contribution;
     numerator += contribution * Qi[j];
   }
 
-  if (denominator < epsilon) {
-    return 0;
+  if (Number.isFinite(denominator) === false || Math.abs(denominator) <= 1e-12) {
+    let totalSizePrev = 0;
+    for (let j = 0; j < n; j += 1) {
+      totalSizePrev += layers[j].mean[i - 1];
+    }
+    return totalSizePrev / 2;
   }
 
   return -(numerator / denominator);
 }
+

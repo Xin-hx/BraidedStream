@@ -80,7 +80,8 @@ export function computePidOrderingMetrics(input: PidOrderingMetricsInput): PidOr
       baselineShiftAfterAbs: multiscale.diagnostics.distributedShiftAbs,
       uncertaintySaliency: multiscale.diagnostics.uncertaintySaliency
     },
-    multiscale: multiscaleSummary
+    multiscale: multiscaleSummary,
+    includeGlobalRows: true
   });
   const summary = summarizeOrderShift(layerIds, sineBaseOrder, pidDepthOrder, pid, input.dataset.times.length);
 
@@ -95,7 +96,8 @@ export function computePidOrderingMetrics(input: PidOrderingMetricsInput): PidOr
     metrics: {
       ...core,
       rows,
-      scopeText: "ROI (PID baseline metric: Sine -> Multiscale)"
+      scopeText: "ROI (PID baseline metric: Sine -> Multiscale)",
+      globalScopeText: "Global (PID baseline metric: Sine -> Multiscale)"
     },
     summary
   };

@@ -66,7 +66,13 @@ const US_STATE_KEYS = [
   "WV",
   "WI",
   "WY",
-  "DC"
+  "DC",
+  // US territories commonly appearing in CDC ensemble datasets.
+  "AS",
+  "GU",
+  "MP",
+  "PR",
+  "VI"
 ];
 
 const FIXED_STATE_COLOR = buildFixedStateColorMap();

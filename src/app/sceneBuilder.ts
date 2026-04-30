@@ -71,7 +71,9 @@ export function buildScene(bundle: DatasetBundle, state: AppState): SceneBuildRe
     enabled: state.assertEnabled,
     throwOnError: false
   });
-  const metrics = computeMetrics(context.dataset, baseLayout, braidedLayout, context.insetRoi, invariant, context.orderedLayers);
+  const metrics = computeMetrics(context.dataset, baseLayout, braidedLayout, context.insetRoi, invariant, context.orderedLayers, {
+    includeGlobalRows: true
+  });
   const diagnosticsNotes = [...orderDiagnosticsNotes(context.optimized), ...gapDiagnosticsNotes(braidedLayout)];
 
   return {
@@ -135,7 +137,8 @@ export function buildOptimizeComparisonScene(
             effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
             threshold: multiscale.diagnostics.energyThreshold,
             scaleBands: multiscale.diagnostics.scaleBands.map((band) => ({ scale: band.scale, ratio: band.ratio }))
-          }
+          },
+    includeGlobalRows: true
   });
   const diagnosticsNotes = [...orderDiagnosticsNotes(context.optimized)];
   if (multiscale !== null) {
@@ -195,7 +198,9 @@ export function buildBraidedEnhanceScene(
     enabled: state.assertEnabled,
     throwOnError: false
   });
-  const metrics = computeMetrics(context.dataset, baseLayout, braidedLayout, context.insetRoi, invariant, context.orderedLayers);
+  const metrics = computeMetrics(context.dataset, baseLayout, braidedLayout, context.insetRoi, invariant, context.orderedLayers, {
+    includeGlobalRows: true
+  });
 
   return {
     dataset: context.dataset,
@@ -312,6 +317,7 @@ function prepareSceneContext(bundle: DatasetBundle, state: AppState, options: Sc
       useThicknessWeight: state.optimization.orderUseThicknessWeight !== false,
       useLengthWeight: state.optimization.orderUseLengthWeight !== false,
       lengthWeightThreshold: state.optimization.orderLengthWeightThreshold ?? 9,
+      shuffleSeed: state.fixedSeed,
       useUncertaintyTerm: orderWithUncertainty,
       uncertaintyWeight: orderWithUncertainty ? Math.max(0, state.optimization.orderUncertaintyWeight ?? 0.35) : 0
     },

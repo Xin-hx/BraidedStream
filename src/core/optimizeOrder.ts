@@ -1,14 +1,15 @@
+import { FIXED_SEED } from "./seed";
 import type { LayerInput, ROI } from "./types";
 import { layerUncertaintyAt } from "./validate";
 
 export interface OrderOptimizationConfig {
-  /** Scale factor for automatic cluster count selection */
+  /** Scale factor for automatic cluster count selection (retained for compatibility). */
   clusterAutoCutScale: number;
-  /** Penalty for cross-cluster boundaries */
+  /** Penalty for cross-cluster boundaries (retained for compatibility). */
   clusterBoundaryPenalty: number;
-  /** Sigma for similarity exponential */
+  /** Sigma for similarity exponential (retained for compatibility). */
   similaritySigma: number;
-  /** Maximum local swap improvement passes */
+  /** Maximum local swap improvement passes (retained for compatibility). */
   maxSwapPasses: number;
   /** Weight type for SineStream: "max" | "arithmetic" | "geometric" | "harmonic" | "median" */
   weightType?: "max" | "arithmetic" | "geometric" | "harmonic" | "median";
@@ -22,6 +23,8 @@ export interface OrderOptimizationConfig {
   useUncertaintyTerm?: boolean;
   /** Auxiliary uncertainty term weight in ordering distance */
   uncertaintyWeight?: number;
+  /** Optional shuffle seed for seeded pre-shuffling before hierarchical clustering */
+  shuffleSeed?: number;
 }
 
 export interface OrderOptimizationDiagnostics {
@@ -39,26 +42,41 @@ export interface OrderOptimizationResult {
   diagnostics: OrderOptimizationDiagnostics;
 }
 
-interface ClusterNode {
-  id: number;
-  members: number[];
-  centroid: number[];
-  mass: number;
+type WeightType = "max" | "arithmetic" | "geometric" | "harmonic" | "median";
+
+interface LayerNode {
+  index: number;
+  isLeaf: boolean;
+  layerId: string | null;
+  layerArrayIndex: number;
+  memberCount: number;
+  size: number[];
+  dFi: number[];
+  uncertainty: number[];
+  leftChild?: LayerNode;
+  rightChild?: LayerNode;
 }
 
-interface MergeStep {
-  left: number;
-  right: number;
+interface DistanceOptions {
+  weightType: WeightType;
+  useThicknessWeight: boolean;
+  useLengthWeight: boolean;
+  lengthWeightThreshold: number;
+  useUncertaintyTerm: boolean;
+  uncertaintyWeight: number;
+}
+
+interface DPEntry {
   cost: number;
-  mergedId: number;
+  order: number[];
 }
 
-interface LayerMetadata {
-  thicknessChanges: number[];
-  totalSize: number;
-  maxSize: number;
-  effectiveLength: number;
-}
+const ORIENTATION_ENUM: Array<[number, number, number, number]> = [
+  [0, 0, 1, 1],
+  [0, 1, 1, 0],
+  [1, 0, 0, 1],
+  [1, 1, 0, 0]
+];
 
 export function optimizeLayerOrder(
   layers: LayerInput[],
@@ -68,8 +86,8 @@ export function optimizeLayerOrder(
 ): OrderOptimizationResult {
   if (layers.length <= 1) {
     return {
-      order: layers.map((l) => l.id),
-      clusterByLayerId: new Map(layers.map((l) => [l.id, 0])),
+      order: layers.map((layer) => layer.id),
+      clusterByLayerId: new Map(layers.map((layer) => [layer.id, 0])),
       boundaryPenalty: [],
       diagnostics: {
         objectiveBefore: 0,
@@ -82,95 +100,109 @@ export function optimizeLayerOrder(
   }
 
   const [left, right] = roiBounds(layers[0].mean.length, roi);
-  
-  // Compute SineStream distance metrics
-  const metadata = layers.map((layer) => computeLayerMetadata(layer, left, right));
-  const masses = layers.map((layer) => sum(layer.mean.slice(left, right + 1)));
-  
-  // Compute SineStream distance matrix
-  const dist = computeSineStreamDistances(
-    layers,
-    metadata,
-    left,
-    right,
-    config.weightType ?? "max",
-    config.useThicknessWeight ?? true,
-    config.useLengthWeight ?? true,
-    config.lengthWeightThreshold ?? 9,
-    config.useUncertaintyTerm === true,
-    Math.max(0, config.uncertaintyWeight ?? 0)
-  );
+  const options: DistanceOptions = {
+    weightType: config.weightType ?? "max",
+    useThicknessWeight: config.useThicknessWeight !== false,
+    useLengthWeight: config.useLengthWeight !== false,
+    lengthWeightThreshold: Math.max(1e-9, config.lengthWeightThreshold ?? 9),
+    useUncertaintyTerm: config.useUncertaintyTerm === true,
+    uncertaintyWeight: Math.max(0, config.uncertaintyWeight ?? 0)
+  };
 
-  const mergeSteps = wardHierarchical(dist, masses);
-  const clusterCount = pickClusterCount(mergeSteps, config.clusterAutoCutScale, layers.length);
-  const labels = cutClusters(mergeSteps, layers.length, clusterCount);
-
-  const clusterToMembers = new Map<number, number[]>();
-  for (let i = 0; i < labels.length; i += 1) {
-    const c = labels[i];
-    if (!clusterToMembers.has(c)) {
-      clusterToMembers.set(c, []);
-    }
-    clusterToMembers.get(c)!.push(i);
+  const shuffledLayerIndices = seededShuffleIndices(layers.length, config.shuffleSeed ?? FIXED_SEED);
+  const leafNodes = buildLeafNodes(layers, shuffledLayerIndices);
+  const totalNodeCount = layers.length * 2 - 1;
+  const distanceMatrix = Array.from({ length: totalNodeCount }, () => new Array<number>(totalNodeCount).fill(-1));
+  for (let i = 0; i < totalNodeCount; i += 1) {
+    distanceMatrix[i][i] = 0;
   }
 
-  const trunkCluster = pickTrunkCluster(clusterToMembers, masses);
+  const nodeByIndex = new Map<number, LayerNode>();
+  for (const node of leafNodes) {
+    nodeByIndex.set(node.index, node);
+  }
+  const uncertaintyScale = options.useUncertaintyTerm ? computeUncertaintyScale(layers, left, right) : 1;
 
-  const clusterOrder = Array.from(clusterToMembers.keys()).sort((a, b) => {
-    if (a === trunkCluster) {
-      return -1;
-    }
-    if (b === trunkCluster) {
-      return 1;
-    }
-    const da = minDistanceToCluster(clusterToMembers.get(a) ?? [], clusterToMembers.get(trunkCluster) ?? [], dist);
-    const db = minDistanceToCluster(clusterToMembers.get(b) ?? [], clusterToMembers.get(trunkCluster) ?? [], dist);
-    return da - db;
-  });
+  let activeNodes = leafNodes.slice();
+  let nextIndex = leafNodes.length;
+  while (activeNodes.length > 1) {
+    let pickA = 0;
+    let pickB = 1;
+    let bestDistance = Number.POSITIVE_INFINITY;
 
-  const finalOrderIndices: number[] = [];
-  for (const clusterId of clusterOrder) {
-    const members = clusterToMembers.get(clusterId) ?? [];
-    const localOrder = nearestNeighborOrder(members, dist, masses);
-    finalOrderIndices.push(...localOrder);
+    for (let i = 0; i < activeNodes.length - 1; i += 1) {
+      for (let j = i + 1; j < activeNodes.length; j += 1) {
+        const d = getDistance(activeNodes[i], activeNodes[j], distanceMatrix, left, right, options, uncertaintyScale);
+        if (d < bestDistance) {
+          bestDistance = d;
+          pickA = i;
+          pickB = j;
+        }
+      }
+    }
+
+    const merged = mergeNodes(nextIndex, activeNodes[pickA], activeNodes[pickB]);
+    nodeByIndex.set(nextIndex, merged);
+    nextIndex += 1;
+
+    activeNodes.splice(pickB, 1);
+    activeNodes.splice(pickA, 1);
+    activeNodes.push(merged);
+  }
+
+  const root = activeNodes[0];
+  const orderedLeafIndices = getOrderByOptimalLeafOrdering(
+    root,
+    nodeByIndex,
+    distanceMatrix,
+    left,
+    right,
+    options,
+    uncertaintyScale
+  );
+
+  const leafIndexToLayerId = new Map<number, string>();
+  const layerIdToLeafIndex = new Map<string, number>();
+  for (const node of leafNodes) {
+    if (!node.layerId) {
+      continue;
+    }
+    leafIndexToLayerId.set(node.index, node.layerId);
+    layerIdToLeafIndex.set(node.layerId, node.index);
+  }
+
+  const order: string[] = [];
+  for (const leafIndex of orderedLeafIndices) {
+    const layerId = leafIndexToLayerId.get(leafIndex);
+    if (layerId && !order.includes(layerId)) {
+      order.push(layerId);
+    }
+  }
+  for (const layer of layers) {
+    if (!order.includes(layer.id)) {
+      order.push(layer.id);
+    }
   }
 
   const fallbackOrder = layers.map((layer) => layer.id);
   const initialIds = initialOrder && initialOrder.length > 0 ? initialOrder : fallbackOrder;
-  const idToIndex = new Map<string, number>(layers.map((layer, idx) => [layer.id, idx]));
-  const initialIndices = initialIds
-    .map((id) => idToIndex.get(id))
-    .filter((v): v is number => v !== undefined);
+  const initialLeafOrder = initialIds
+    .map((id) => layerIdToLeafIndex.get(id))
+    .filter((value): value is number => value !== undefined);
 
-  const sigma = Math.max(1e-6, config.similaritySigma);
-  const objectiveBefore = objective(initialIndices, labels, dist, config.clusterBoundaryPenalty, sigma);
-  localSwapImprove(finalOrderIndices, labels, dist, config.clusterBoundaryPenalty, sigma, Math.max(1, Math.floor(config.maxSwapPasses)));
-  const objectiveAfter = objective(finalOrderIndices, labels, dist, config.clusterBoundaryPenalty, sigma);
-
-  const order = finalOrderIndices.map((idx) => layers[idx].id);
-  const clusterByLayerId = new Map<string, number>(finalOrderIndices.map((idx) => [layers[idx].id, labels[idx]]));
-  const boundaryPenalty = new Array<number>(Math.max(0, finalOrderIndices.length - 1)).fill(1);
-  let crossClusterBoundaries = 0;
-  for (let k = 0; k < boundaryPenalty.length; k += 1) {
-    const leftIdx = finalOrderIndices[k];
-    const rightIdx = finalOrderIndices[k + 1];
-    const cross = labels[leftIdx] !== labels[rightIdx];
-    if (cross) {
-      crossClusterBoundaries += 1;
-    }
-    boundaryPenalty[k] = cross ? 1 + config.clusterBoundaryPenalty : 1;
-  }
+  const objectiveBefore = objective(initialLeafOrder, leafNodes, distanceMatrix, left, right, options, uncertaintyScale);
+  const objectiveAfter = objective(orderedLeafIndices, leafNodes, distanceMatrix, left, right, options, uncertaintyScale);
 
   return {
     order,
-    clusterByLayerId,
-    boundaryPenalty,
+    clusterByLayerId: new Map(order.map((id) => [id, 0])),
+    boundaryPenalty: new Array(Math.max(0, order.length - 1)).fill(1),
     diagnostics: {
       objectiveBefore,
       objectiveAfter,
-      clusterCount,
-      trunkCluster,
-      crossClusterBoundaries
+      clusterCount: 1,
+      trunkCluster: 0,
+      crossClusterBoundaries: 0
     }
   };
 }
@@ -185,529 +217,456 @@ function roiBounds(length: number, roi: ROI | null): [number, number] {
   ];
 }
 
-/**
- * Compute layer metadata needed for SineStream distance metric
- */
-function computeLayerMetadata(layer: LayerInput, left: number, right: number): LayerMetadata {
-  const thicknessChanges: number[] = [];
-  
-  // Use mean values for thickness change calculation
-  for (let t = left; t < right; t += 1) {
-    const change = Math.abs(layer.mean[t + 1] - layer.mean[t]);
-    thicknessChanges.push(change);
+function buildLeafNodes(layers: LayerInput[], shuffledIndices: number[]): LayerNode[] {
+  const nodes: LayerNode[] = [];
+  for (let i = 0; i < shuffledIndices.length; i += 1) {
+    const layerIndex = shuffledIndices[i];
+    const layer = layers[layerIndex];
+    const size = layer.mean.slice();
+    const dFi = toDiff(size);
+    const uncertainty = size.map((_v, t) => Math.max(0, layerUncertaintyAt(layer, t)));
+    nodes.push({
+      index: i,
+      isLeaf: true,
+      layerId: layer.id,
+      layerArrayIndex: layerIndex,
+      memberCount: 1,
+      size,
+      dFi,
+      uncertainty
+    });
+  }
+  return nodes;
+}
+
+function mergeNodes(index: number, left: LayerNode, right: LayerNode): LayerNode {
+  const tLength = left.size.length;
+  const size = new Array<number>(tLength).fill(0);
+  const uncertainty = new Array<number>(tLength).fill(0);
+  const memberCount = left.memberCount + right.memberCount;
+
+  for (let t = 0; t < tLength; t += 1) {
+    size[t] = left.size[t] + right.size[t];
+    uncertainty[t] =
+      (left.uncertainty[t] * left.memberCount + right.uncertainty[t] * right.memberCount) / Math.max(1, memberCount);
   }
 
-  // Compute statistics
-  const layerValues = layer.mean.slice(left, right + 1);
-  const totalSize = sum(layerValues);
-  const maxSize = Math.max(...layerValues);
-  
-  // Effective length: count how many points exceed max/9 threshold
-  const threshold = maxSize / 9;
-  const effectiveLength = layerValues.filter((v) => v > threshold).length;
-
   return {
-    thicknessChanges,
-    totalSize,
-    maxSize,
-    effectiveLength
+    index,
+    isLeaf: false,
+    layerId: null,
+    layerArrayIndex: -1,
+    memberCount,
+    size,
+    dFi: toDiff(size),
+    uncertainty,
+    leftChild: left,
+    rightChild: right
   };
 }
 
-/**
- * Compute SineStream-based distance matrix between all layers
- * 
- * Distance formula incorporates:
- * 1. Angle similarity: |ΔA + ΔB| / (|ΔA| + |ΔB|)
- * 2. Size weighting: Combined layer thickness (max/arithmetic/geometric/etc)
- * 3. Length weighting: Penalty for thin/short-lived layers
- */
-function computeSineStreamDistances(
-  layers: LayerInput[],
-  metadata: LayerMetadata[],
-  left: number,
-  right: number,
-  weightType: string,
-  useThicknessWeight: boolean,
-  useLengthWeight: boolean,
-  lengthThreshold: number,
-  useUncertaintyTerm: boolean,
-  uncertaintyWeight: number
-): number[][] {
-  const n = layers.length;
-  const dist = Array.from({ length: n }, () => new Array<number>(n).fill(0));
-  const uncertaintyScale = useUncertaintyTerm ? globalUncertaintyScale(layers, left, right) : 1;
-
-  for (let i = 0; i < n; i += 1) {
-    for (let j = i + 1; j < n; j += 1) {
-      const d = computeSineStreamDistance(
-        layers[i],
-        layers[j],
-        metadata[i],
-        metadata[j],
-        left,
-        right,
-        weightType,
-        useThicknessWeight,
-        useLengthWeight,
-        lengthThreshold,
-        useUncertaintyTerm,
-        uncertaintyWeight,
-        uncertaintyScale
-      );
-      dist[i][j] = d;
-      dist[j][i] = d;
-    }
+function toDiff(values: number[]): number[] {
+  const out = new Array<number>(Math.max(0, values.length - 1)).fill(0);
+  for (let i = 1; i < values.length; i += 1) {
+    out[i - 1] = values[i] - values[i - 1];
   }
-
-  return dist;
+  return out;
 }
 
-/**
- * Compute SineStream distance between two layers
- */
-function computeSineStreamDistance(
-  layerA: LayerInput,
-  layerB: LayerInput,
-  metaA: LayerMetadata,
-  metaB: LayerMetadata,
+function getOrderByOptimalLeafOrdering(
+  root: LayerNode,
+  nodeByIndex: Map<number, LayerNode>,
+  distanceMatrix: number[][],
   left: number,
   right: number,
-  weightType: string,
-  useThicknessWeight: boolean,
-  useLengthWeight: boolean,
-  lengthThreshold: number,
-  useUncertaintyTerm: boolean,
-  uncertaintyWeight: number,
+  options: DistanceOptions,
+  uncertaintyScale: number
+): number[] {
+  const memoLeaves = new Map<number, number[]>();
+  const memoDp = new Map<number, Map<string, DPEntry>>();
+
+  const recurse = (node: LayerNode): void => {
+    if (node.isLeaf) {
+      const table = new Map<string, DPEntry>();
+      table.set(pairKey(node.index, node.index), { cost: 0, order: [node.index] });
+      memoDp.set(node.index, table);
+      return;
+    }
+
+    const leftChild = node.leftChild!;
+    const rightChild = node.rightChild!;
+    recurse(leftChild);
+    recurse(rightChild);
+
+    const leftTable = memoDp.get(leftChild.index)!;
+    const rightTable = memoDp.get(rightChild.index)!;
+    const [nodesLeftLeft, nodesLeftRight] = boundaryLeaves(leftChild, memoLeaves);
+    const [nodesRightLeft, nodesRightRight] = boundaryLeaves(rightChild, memoLeaves);
+    const nodesLeft = [nodesLeftLeft, nodesLeftRight] as const;
+    const nodesRight = [nodesRightLeft, nodesRightRight] as const;
+
+    const table = new Map<string, DPEntry>();
+    for (const [leftOuter, rightOuter, leftInner, rightInner] of ORIENTATION_ENUM) {
+      const nodesLL = nodesLeft[leftOuter];
+      const nodesRR = nodesRight[rightOuter];
+      const nodesLR = nodesLeft[leftInner];
+      const nodesRL = nodesRight[rightInner];
+
+      for (const u of nodesLL) {
+        for (const w of nodesRR) {
+          let bestCost = Number.POSITIVE_INFINITY;
+          let bestOrder: number[] | null = null;
+
+          for (const m of nodesLR) {
+            for (const k of nodesRL) {
+              const leftEntry = leftTable.get(pairKey(u, m));
+              const rightEntry = rightTable.get(pairKey(k, w));
+              if (!leftEntry || !rightEntry) {
+                continue;
+              }
+              const middleDistance = getDistance(
+                nodeByIndex.get(m)!,
+                nodeByIndex.get(k)!,
+                distanceMatrix,
+                left,
+                right,
+                options,
+                uncertaintyScale
+              );
+              const currentCost = leftEntry.cost + rightEntry.cost + middleDistance;
+              if (currentCost < bestCost) {
+                bestCost = currentCost;
+                bestOrder = leftEntry.order.concat(rightEntry.order);
+              }
+            }
+          }
+
+          if (!bestOrder) {
+            continue;
+          }
+          storeBetter(table, pairKey(u, w), bestCost, bestOrder);
+          storeBetter(table, pairKey(w, u), bestCost, bestOrder.slice().reverse());
+        }
+      }
+    }
+    memoDp.set(node.index, table);
+  };
+
+  recurse(root);
+  const rootTable = memoDp.get(root.index);
+  if (!rootTable || rootTable.size === 0) {
+    return allLeaves(root, memoLeaves);
+  }
+
+  let bestCost = Number.POSITIVE_INFINITY;
+  let bestOrder: number[] = [];
+  for (const value of rootTable.values()) {
+    if (value.cost < bestCost) {
+      bestCost = value.cost;
+      bestOrder = value.order.slice();
+    }
+  }
+  if (bestOrder.length === 0) {
+    return allLeaves(root, memoLeaves);
+  }
+  return bestOrder;
+}
+
+function boundaryLeaves(node: LayerNode, memoLeaves: Map<number, number[]>): [number[], number[]] {
+  if (node.isLeaf) {
+    return [[node.index], [node.index]];
+  }
+  return [allLeaves(node.leftChild!, memoLeaves), allLeaves(node.rightChild!, memoLeaves)];
+}
+
+function allLeaves(node: LayerNode, memoLeaves: Map<number, number[]>): number[] {
+  const cached = memoLeaves.get(node.index);
+  if (cached) {
+    return cached;
+  }
+  if (node.isLeaf) {
+    const leaves = [node.index];
+    memoLeaves.set(node.index, leaves);
+    return leaves;
+  }
+  const leaves = allLeaves(node.leftChild!, memoLeaves).concat(allLeaves(node.rightChild!, memoLeaves));
+  memoLeaves.set(node.index, leaves);
+  return leaves;
+}
+
+function pairKey(a: number, b: number): string {
+  return `${a}_${b}`;
+}
+
+function storeBetter(table: Map<string, DPEntry>, key: string, cost: number, order: number[]): void {
+  const prev = table.get(key);
+  if (!prev || cost < prev.cost) {
+    table.set(key, { cost, order: order.slice() });
+  }
+}
+
+function objective(
+  leafOrder: number[],
+  leafNodes: LayerNode[],
+  distanceMatrix: number[][],
+  left: number,
+  right: number,
+  options: DistanceOptions,
   uncertaintyScale: number
 ): number {
-  // 1. ANGLE-BASED SIMILARITY
-  // Measure how aligned the thickness changes are
-  let angleSimilarity = 0;
-  let validPoints = 0;
-
-  for (let t = 0; t < metaA.thicknessChanges.length; t += 1) {
-    const dA = metaA.thicknessChanges[t];
-    const dB = metaB.thicknessChanges[t];
-    const sumAbs = Math.abs(dA) + Math.abs(dB);
-
-    if (sumAbs < 1e-10) {
-      continue;
-    }
-
-    // Core SineStream formula: |ΔA + ΔB| / (|ΔA| + |ΔB|)
-    const numerator = Math.abs(dA + dB);
-    angleSimilarity += numerator / sumAbs;
-    validPoints += 1;
-  }
-
-  if (validPoints > 0) {
-    angleSimilarity /= validPoints;
-  }
-
-  // 2. SIZE-BASED WEIGHTING
-  let sizeWeight = computeSizeWeight(layerA, layerB, left, right, weightType);
-
-  // 3. LENGTH WEIGHTING
-  // Penalize if either layer is thin/short-lived
-  let lengthWeight = 1;
-  if (useLengthWeight) {
-    const lengthA = metaA.effectiveLength > 0 ? metaA.effectiveLength : 1;
-    const lengthB = metaB.effectiveLength > 0 ? metaB.effectiveLength : 1;
-    const timeSeriesLength = metaA.thicknessChanges.length + 1;
-    
-    const penaltyA = timeSeriesLength / lengthA;
-    const penaltyB = timeSeriesLength / lengthB;
-    lengthWeight = Math.max(penaltyA, penaltyB);
-  }
-
-  // Combine components
-  let distance = angleSimilarity;
-  
-  if (useThicknessWeight) {
-    distance *= sizeWeight;
-  }
-  
-  if (useLengthWeight) {
-    distance *= lengthWeight;
-  }
-
-  if (useUncertaintyTerm && uncertaintyWeight > 0) {
-    const uncertaintyDiff = uncertaintyDifference(layerA, layerB, left, right, uncertaintyScale);
-    distance += uncertaintyWeight * uncertaintyDiff;
-  }
-
-  return distance;
-}
-
-/**
- * Compute size weight based on combined layer sizes
- */
-function computeSizeWeight(layerA: LayerInput, layerB: LayerInput, left: number, right: number, weightType: string): number {
-  const safeLeft = Math.max(0, Math.min(left, layerA.mean.length - 1));
-  const safeRight = Math.max(0, Math.min(right, layerA.mean.length - 1));
-  const n = Math.max(1, safeRight - safeLeft + 1);
-  
-  switch (weightType.toLowerCase()) {
-    case "arithmetic": {
-      let sum = 0;
-      let count = 0;
-      for (let t = safeLeft; t <= safeRight; t += 1) {
-        const combined = layerA.mean[t] + layerB.mean[t];
-        if (combined > 0) {
-          sum += combined;
-          count += 1;
-        }
-      }
-      return count > 0 ? sum / count : 1;
-    }
-    case "geometric": {
-      let product = 1;
-      let count = 0;
-      for (let t = safeLeft; t <= safeRight; t += 1) {
-        const combined = layerA.mean[t] + layerB.mean[t];
-        if (combined > 1e-10) {
-          product *= Math.pow(combined, 1 / n);
-          count += 1;
-        }
-      }
-      return count > 0 ? product : 1;
-    }
-    case "harmonic": {
-      let recipSum = 0;
-      let count = 0;
-      for (let t = safeLeft; t <= safeRight; t += 1) {
-        const combined = layerA.mean[t] + layerB.mean[t];
-        if (combined > 1e-10) {
-          recipSum += 1 / combined;
-          count += 1;
-        }
-      }
-      return count > 0 ? count / recipSum : 1;
-    }
-    case "median": {
-      const sizes: number[] = [];
-      for (let t = safeLeft; t <= safeRight; t += 1) {
-        const combined = layerA.mean[t] + layerB.mean[t];
-        if (combined > 0) sizes.push(combined);
-      }
-      if (sizes.length === 0) return 1;
-      sizes.sort((a, b) => a - b);
-      if (sizes.length % 2 !== 0) {
-        return sizes[Math.floor(sizes.length / 2)];
-      }
-      return (sizes[sizes.length / 2] + sizes[sizes.length / 2 - 1]) / 2;
-    }
-    case "max":
-    default: {
-      let maxSize = 0;
-      for (let t = safeLeft; t <= safeRight; t += 1) {
-        maxSize = Math.max(maxSize, layerA.mean[t] + layerB.mean[t]);
-      }
-      return maxSize;
-    }
-  }
-}
-
-function globalUncertaintyScale(layers: LayerInput[], left: number, right: number): number {
-  let maxMeanUnc = 0;
-  for (const layer of layers) {
-    const meanUnc = meanLayerUncertainty(layer, left, right);
-    if (meanUnc > maxMeanUnc) {
-      maxMeanUnc = meanUnc;
-    }
-  }
-  return Math.max(1e-9, maxMeanUnc);
-}
-
-function meanLayerUncertainty(layer: LayerInput, left: number, right: number): number {
-  const safeLeft = Math.max(0, Math.min(left, layer.mean.length - 1));
-  const safeRight = Math.max(0, Math.min(right, layer.mean.length - 1));
-  let acc = 0;
-  let count = 0;
-  for (let t = safeLeft; t <= safeRight; t += 1) {
-    acc += layerUncertaintyAt(layer, t);
-    count += 1;
-  }
-  return count > 0 ? acc / count : 0;
-}
-
-function uncertaintyDifference(layerA: LayerInput, layerB: LayerInput, left: number, right: number, scale: number): number {
-  const safeLeft = Math.max(0, Math.min(left, layerA.mean.length - 1));
-  const safeRight = Math.max(0, Math.min(right, layerA.mean.length - 1));
-  let acc = 0;
-  let count = 0;
-  for (let t = safeLeft; t <= safeRight; t += 1) {
-    const ua = layerUncertaintyAt(layerA, t);
-    const ub = layerUncertaintyAt(layerB, t);
-    acc += Math.abs(ua - ub);
-    count += 1;
-  }
-  const meanDiff = count > 0 ? acc / count : 0;
-  return meanDiff / Math.max(1e-9, scale);
-}
-
-function pairwiseDistance(vectors: number[][]): number[][] {
-  const n = vectors.length;
-  const dist = Array.from({ length: n }, () => new Array<number>(n).fill(0));
-  for (let i = 0; i < n; i += 1) {
-    for (let j = i + 1; j < n; j += 1) {
-      const d = l2(vectors[i], vectors[j]);
-      dist[i][j] = d;
-      dist[j][i] = d;
-    }
-  }
-  return dist;
-}
-
-function wardHierarchical(dist: number[][], masses: number[]): MergeStep[] {
-  const nodes = new Map<number, ClusterNode>();
-  for (let i = 0; i < dist.length; i += 1) {
-    nodes.set(i, { id: i, members: [i], centroid: [], mass: Math.max(1e-9, masses[i]) });
-  }
-
-  const merges: MergeStep[] = [];
-  let nextId = dist.length;
-
-  while (nodes.size > 1) {
-    const ids = Array.from(nodes.keys());
-    let bestI = ids[0];
-    let bestJ = ids[1];
-    let bestCost = Number.POSITIVE_INFINITY;
-
-    for (let a = 0; a < ids.length; a += 1) {
-      for (let b = a + 1; b < ids.length; b += 1) {
-        const i = ids[a];
-        const j = ids[b];
-        const ni = nodes.get(i)!;
-        const nj = nodes.get(j)!;
-        // Use existing precomputed distance scaled by mass product
-        let delta: number;
-        if (i < dist.length && j < dist.length) {
-          delta = (ni.mass * nj.mass) / (ni.mass + nj.mass) * dist[i][j];
-        } else {
-          delta = (ni.mass * nj.mass) / (ni.mass + nj.mass);
-        }
-        if (delta < bestCost) {
-          bestCost = delta;
-          bestI = i;
-          bestJ = j;
-        }
-      }
-    }
-
-    const left = nodes.get(bestI)!;
-    const right = nodes.get(bestJ)!;
-    const merged = mergeNodes(left, right, nextId);
-    nodes.delete(bestI);
-    nodes.delete(bestJ);
-    nodes.set(nextId, merged);
-    merges.push({ left: bestI, right: bestJ, cost: bestCost, mergedId: nextId });
-    nextId += 1;
-  }
-
-  return merges;
-}
-
-function pickClusterCount(merges: MergeStep[], scale: number, maxLeaf: number): number {
-  if (merges.length <= 1) {
-    return 1;
-  }
-  let maxJump = Number.NEGATIVE_INFINITY;
-  let idx = merges.length - 1;
-  for (let i = 1; i < merges.length; i += 1) {
-    const jump = merges[i].cost - merges[i - 1].cost;
-    if (jump > maxJump) {
-      maxJump = jump;
-      idx = i;
-    }
-  }
-  const raw = maxLeaf - idx;
-  const adjusted = Math.round(raw * Math.max(0.2, scale));
-  return Math.max(1, Math.min(maxLeaf, adjusted));
-}
-
-function cutClusters(merges: MergeStep[], nLeaf: number, k: number): number[] {
-  const active = new Set<number>();
-  for (let i = 0; i < nLeaf; i += 1) {
-    active.add(i);
-  }
-
-  for (const m of merges) {
-    if (active.size <= k) {
-      break;
-    }
-    active.delete(m.left);
-    active.delete(m.right);
-    active.add(m.mergedId);
-  }
-
-  const children = new Map<number, [number, number]>();
-  for (const m of merges) {
-    children.set(m.mergedId, [m.left, m.right]);
-  }
-
-  const labels = new Array<number>(nLeaf).fill(0);
-  let label = 0;
-  for (const root of active) {
-    fillLeaves(root, label, labels, children, nLeaf);
-    label += 1;
-  }
-  return labels;
-}
-
-function fillLeaves(
-  nodeId: number,
-  label: number,
-  labels: number[],
-  children: Map<number, [number, number]>,
-  nLeaf: number
-): void {
-  if (nodeId < nLeaf) {
-    labels[nodeId] = label;
-    return;
-  }
-  const ch = children.get(nodeId);
-  if (!ch) {
-    return;
-  }
-  fillLeaves(ch[0], label, labels, children, nLeaf);
-  fillLeaves(ch[1], label, labels, children, nLeaf);
-}
-
-function pickTrunkCluster(clusterToMembers: Map<number, number[]>, masses: number[]): number {
-  let bestCluster = 0;
-  let bestMass = Number.NEGATIVE_INFINITY;
-  for (const [clusterId, members] of clusterToMembers.entries()) {
-    const total = members.reduce((acc, idx) => acc + masses[idx], 0);
-    if (total > bestMass) {
-      bestMass = total;
-      bestCluster = clusterId;
-    }
-  }
-  return bestCluster;
-}
-
-function minDistanceToCluster(a: number[], b: number[], dist: number[][]): number {
-  let best = Number.POSITIVE_INFINITY;
-  for (const i of a) {
-    for (const j of b) {
-      best = Math.min(best, dist[i][j]);
-    }
-  }
-  return Number.isFinite(best) ? best : 0;
-}
-
-function nearestNeighborOrder(members: number[], dist: number[][], masses: number[]): number[] {
-  if (members.length <= 1) {
-    return members.slice();
-  }
-  const remaining = new Set(members);
-  let start = members[0];
-  let bestMass = Number.NEGATIVE_INFINITY;
-  for (const idx of members) {
-    if (masses[idx] > bestMass) {
-      bestMass = masses[idx];
-      start = idx;
-    }
-  }
-  remaining.delete(start);
-  const order = [start];
-
-  while (remaining.size > 0) {
-    const last = order[order.length - 1];
-    let best = -1;
-    let bestDist = Number.POSITIVE_INFINITY;
-    for (const cand of remaining) {
-      if (dist[last][cand] < bestDist) {
-        bestDist = dist[last][cand];
-        best = cand;
-      }
-    }
-    if (best < 0) {
-      break;
-    }
-    remaining.delete(best);
-    order.push(best);
-  }
-  return order;
-}
-
-function localSwapImprove(
-  order: number[],
-  labels: number[],
-  dist: number[][],
-  penalty: number,
-  sigma: number,
-  maxPasses: number
-): void {
-  let improved = true;
-  let loops = 0;
-  while (improved && loops < maxPasses) {
-    improved = false;
-    loops += 1;
-    for (let i = 0; i < order.length - 1; i += 1) {
-      const before = objective(order, labels, dist, penalty, sigma);
-      const tmp = order[i];
-      order[i] = order[i + 1];
-      order[i + 1] = tmp;
-      const after = objective(order, labels, dist, penalty, sigma);
-      if (after + 1e-9 < before) {
-        improved = true;
-      } else {
-        const back = order[i];
-        order[i] = order[i + 1];
-        order[i + 1] = back;
-      }
-    }
-  }
-}
-
-function objective(order: number[], labels: number[], dist: number[][], penalty: number, sigma: number): number {
-  if (order.length <= 1) {
+  if (leafOrder.length <= 1) {
     return 0;
   }
+  const leafByIndex = new Map<number, LayerNode>(leafNodes.map((node) => [node.index, node]));
   let total = 0;
-  for (let i = 0; i < order.length - 1; i += 1) {
-    const a = order[i];
-    const b = order[i + 1];
-    const sim = Math.exp(-dist[a][b] / sigma);
-    total += 1 - sim;
-    if (labels[a] !== labels[b]) {
-      total += penalty;
+  for (let i = 0; i < leafOrder.length - 1; i += 1) {
+    const a = leafByIndex.get(leafOrder[i]);
+    const b = leafByIndex.get(leafOrder[i + 1]);
+    if (!a || !b) {
+      continue;
     }
+    total += getDistance(a, b, distanceMatrix, left, right, options, uncertaintyScale);
   }
   return total;
 }
 
-function mergeNodes(left: ClusterNode, right: ClusterNode, id: number): ClusterNode {
-  const mass = left.mass + right.mass;
-  const centroid = left.centroid.map((v, i) => (v * left.mass + right.centroid[i] * right.mass) / Math.max(1e-9, mass));
-  return {
-    id,
-    members: left.members.concat(right.members),
-    centroid,
-    mass
+function getDistance(
+  nodeA: LayerNode,
+  nodeB: LayerNode,
+  distanceMatrix: number[][],
+  left: number,
+  right: number,
+  options: DistanceOptions,
+  uncertaintyScale: number
+): number {
+  const cached = distanceMatrix[nodeA.index]?.[nodeB.index];
+  if (cached !== undefined && cached >= 0) {
+    return cached;
+  }
+
+  const computed = computeDistance(nodeA, nodeB, left, right, options, uncertaintyScale);
+  const safe = Number.isFinite(computed) && computed >= 0 ? computed : 0;
+  distanceMatrix[nodeA.index][nodeB.index] = safe;
+  distanceMatrix[nodeB.index][nodeA.index] = safe;
+  return safe;
+}
+
+function computeDistance(
+  nodeA: LayerNode,
+  nodeB: LayerNode,
+  left: number,
+  right: number,
+  options: DistanceOptions,
+  uncertaintyScale: number
+): number {
+  const safeLeft = Math.max(0, Math.min(left, nodeA.size.length - 1));
+  const safeRight = Math.max(0, Math.min(right, nodeA.size.length - 1));
+  if (safeRight <= safeLeft) {
+    return 0;
+  }
+
+  let countD = safeRight - safeLeft;
+  let compensation = 0;
+  for (let t = safeLeft; t < safeRight; t += 1) {
+    const dA = nodeA.dFi[t] ?? 0;
+    const dB = nodeB.dFi[t] ?? 0;
+    const denom = Math.abs(dA) + Math.abs(dB);
+    const sizeNow = nodeA.size[t] + nodeB.size[t];
+    const sizeNext = nodeA.size[t + 1] + nodeB.size[t + 1];
+
+    if (denom === 0 && sizeNow === 0 && sizeNext === 0) {
+      countD -= 1;
+      continue;
+    }
+    if (denom === 0) {
+      continue;
+    }
+    compensation += Math.abs(dA + dB) / denom;
+  }
+
+  if (countD <= 0) {
+    return 0;
+  }
+  let distance = compensation / countD;
+
+  if (options.useThicknessWeight) {
+    distance *= thicknessWeight(nodeA, nodeB, safeLeft, safeRight, options.weightType);
+  }
+  if (options.useLengthWeight) {
+    distance *= lengthWeight(nodeA, nodeB, safeLeft, safeRight, options.lengthWeightThreshold);
+  }
+  if (options.useUncertaintyTerm && options.uncertaintyWeight > 0) {
+    const unc = uncertaintyDifference(nodeA, nodeB, safeLeft, safeRight, uncertaintyScale);
+    distance += options.uncertaintyWeight * unc;
+  }
+
+  return Number.isFinite(distance) ? distance : 0;
+}
+
+function thicknessWeight(nodeA: LayerNode, nodeB: LayerNode, left: number, right: number, weightType: WeightType): number {
+  switch (weightType) {
+    case "arithmetic": {
+      let sum = 0;
+      let count = 0;
+      for (let t = left; t <= right; t += 1) {
+        const v = nodeA.size[t] + nodeB.size[t];
+        if (v !== 0) {
+          sum += v;
+          count += 1;
+        }
+      }
+      return count === 0 ? 0 : sum / count;
+    }
+    case "geometric": {
+      let product = 1;
+      let count = 0;
+      for (let t = left; t <= right; t += 1) {
+        const v = nodeA.size[t] + nodeB.size[t];
+        if (v !== 0) {
+          count += 1;
+        }
+      }
+      if (count === 0) {
+        return 0;
+      }
+      for (let t = left; t <= right; t += 1) {
+        const v = nodeA.size[t] + nodeB.size[t];
+        if (v !== 0) {
+          product *= Math.pow(v, 1 / count);
+        }
+      }
+      return product;
+    }
+    case "harmonic": {
+      let harmonicSum = 0;
+      let count = 0;
+      for (let t = left; t <= right; t += 1) {
+        const v = nodeA.size[t] + nodeB.size[t];
+        if (v !== 0) {
+          harmonicSum += 1 / v;
+          count += 1;
+        }
+      }
+      return harmonicSum === 0 ? 0 : count / harmonicSum;
+    }
+    case "median": {
+      const values: number[] = [];
+      for (let t = left; t <= right; t += 1) {
+        values.push(nodeA.size[t] + nodeB.size[t]);
+      }
+      return median(values);
+    }
+    case "max":
+    default: {
+      let maxSize = Number.NEGATIVE_INFINITY;
+      for (let t = left; t <= right; t += 1) {
+        maxSize = Math.max(maxSize, nodeA.size[t] + nodeB.size[t]);
+      }
+      return Number.isFinite(maxSize) ? maxSize : 0;
+    }
+  }
+}
+
+function lengthWeight(nodeA: LayerNode, nodeB: LayerNode, left: number, right: number, threshold: number): number {
+  const roiLength = Math.max(1, right - left + 1);
+  let maxA = Number.NEGATIVE_INFINITY;
+  let maxB = Number.NEGATIVE_INFINITY;
+  for (let t = left; t <= right; t += 1) {
+    maxA = Math.max(maxA, nodeA.size[t]);
+    maxB = Math.max(maxB, nodeB.size[t]);
+  }
+  if (!Number.isFinite(maxA)) {
+    maxA = 0;
+  }
+  if (!Number.isFinite(maxB)) {
+    maxB = 0;
+  }
+
+  let activeA = 0;
+  let activeB = 0;
+  const minTimes = Math.max(1e-9, threshold);
+  for (let t = left; t <= right; t += 1) {
+    if (nodeA.size[t] > maxA / minTimes) {
+      activeA += 1;
+    }
+    if (nodeB.size[t] > maxB / minTimes) {
+      activeB += 1;
+    }
+  }
+
+  if (activeA === 0 || activeB === 0) {
+    return 1;
+  }
+  return Math.max(roiLength / activeA, roiLength / activeB);
+}
+
+function uncertaintyDifference(
+  nodeA: LayerNode,
+  nodeB: LayerNode,
+  left: number,
+  right: number,
+  uncertaintyScale: number
+): number {
+  let acc = 0;
+  let count = 0;
+  for (let t = left; t <= right; t += 1) {
+    acc += Math.abs(nodeA.uncertainty[t] - nodeB.uncertainty[t]);
+    count += 1;
+  }
+  if (count === 0) {
+    return 0;
+  }
+  return (acc / count) / Math.max(1e-9, uncertaintyScale);
+}
+
+function computeUncertaintyScale(layers: LayerInput[], left: number, right: number): number {
+  let maxMean = 0;
+  const safeSpan = Math.max(1, right - left + 1);
+  for (const layer of layers) {
+    let acc = 0;
+    for (let t = left; t <= right; t += 1) {
+      acc += Math.max(0, layerUncertaintyAt(layer, t));
+    }
+    maxMean = Math.max(maxMean, acc / safeSpan);
+  }
+  return Math.max(1e-9, maxMean);
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 !== 0) {
+    return sorted[mid];
+  }
+  return 0.5 * (sorted[mid - 1] + sorted[mid]);
+}
+
+function seededShuffleIndices(count: number, seed: number): number[] {
+  const out = Array.from({ length: count }, (_v, i) => i);
+  const random = mulberry32(normalizeSeed(seed));
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function normalizeSeed(seed: number): number {
+  if (!Number.isFinite(seed)) {
+    return FIXED_SEED >>> 0;
+  }
+  return (Math.floor(seed) >>> 0) || 1;
+}
+
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-function l2(a: number[], b: number[]): number {
-  return Math.sqrt(sqrL2(a, b));
-}
-
-function sqrL2(a: number[], b: number[]): number {
-  let acc = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    const d = (a[i] ?? 0) - (b[i] ?? 0);
-    acc += d * d;
-  }
-  return acc;
-}
-
-function sum(values: number[]): number {
-  let acc = 0;
-  for (const v of values) {
-    acc += v;
-  }
-  return acc;
 }

@@ -13,8 +13,10 @@ export interface MetricRow {
 
 export interface MetricResult {
   rows: MetricRow[];
+  globalRows?: MetricRow[] | null;
   invariant: InvariantSummary;
   scopeText: string;
+  globalScopeText?: string;
   multiscale?: MultiscaleDiagnosticsSummary | null;
 }
 
@@ -30,6 +32,7 @@ export interface MultiscaleDiagnosticsSummary {
 export interface MetricsComputeOptions {
   semantic?: MetricsSemanticOptions;
   multiscale?: MultiscaleDiagnosticsSummary | null;
+  includeGlobalRows?: boolean;
 }
 
 interface MetricsSemanticOptions {
@@ -49,25 +52,58 @@ export function computeMetrics(
   options: MetricsComputeOptions = {}
 ): MetricResult {
   const idx = computeIndices(dataset.times.length, roi);
+  const idxGlobal = d3.range(0, dataset.times.length);
   const centersBefore = centers(beforeLayout);
   const centersAfter = centers(afterLayout);
   const referenceLayers = orderedLayersForAfter ?? dataset.layers;
+  const semantic = options.semantic ?? {};
+  const rows = buildRowsForIndices(idx, beforeLayout, afterLayout, centersBefore, centersAfter, referenceLayers, semantic);
+  const includeGlobalRows = options.includeGlobalRows === true;
+  const globalRows = includeGlobalRows
+    ? buildRowsForIndices(
+        idxGlobal,
+        beforeLayout,
+        afterLayout,
+        centersBefore,
+        centersAfter,
+        referenceLayers,
+        semantic
+      )
+    : null;
 
+  return {
+    rows,
+    globalRows,
+    invariant,
+    scopeText: roi ? "ROI" : "Global",
+    globalScopeText: includeGlobalRows ? "Global" : undefined,
+    multiscale: options.multiscale ?? null
+  };
+}
+
+function buildRowsForIndices(
+  idx: number[],
+  beforeLayout: StackLayout,
+  afterLayout: BraidLayout,
+  centersBefore: number[][],
+  centersAfter: number[][],
+  referenceLayers: LayerInput[],
+  semantic: MetricsSemanticOptions
+): MetricRow[] {
   const rows: MetricRow[] = [
-    row("meanSlope", "Mean slope in ROI", meanSlope(centersBefore, idx), meanSlope(centersAfter, idx), "down"),
-    row("maxSlope", "Max slope in ROI", maxSlope(centersBefore, idx), maxSlope(centersAfter, idx), "down"),
+    row("meanSlope", "Mean slope", meanSlope(centersBefore, idx), meanSlope(centersAfter, idx), "down"),
+    row("maxSlope", "Max slope", maxSlope(centersBefore, idx), maxSlope(centersAfter, idx), "down"),
     row("wiggle", "Wiggle energy", wiggleEnergy(centersBefore, idx), wiggleEnergy(centersAfter, idx), "down"),
     row("illusion", "Sine-illusion proxy", curvatureEnergy(centersBefore, idx), curvatureEnergy(centersAfter, idx), "down"),
     row("sepMean", "Mean layer separation", meanSeparation(beforeLayout, idx), meanSeparation(afterLayout, idx), "up"),
     row("sepMin", "Min layer separation", minSeparation(beforeLayout, idx), minSeparation(afterLayout, idx), "up"),
     row("extraSpace", "Extra space used", 0, mean(afterLayout.sumGapPx, idx), "down"),
     row("compact", "Compactness loss", compactness(beforeLayout, idx), compactness(afterLayout, idx), "down"),
-    row("boundary", "ROI boundary distortion", 0, roiBoundaryDistortion(beforeLayout, afterLayout, idx), "down"),
+    row("boundary", "Boundary distortion", 0, roiBoundaryDistortion(beforeLayout, afterLayout, idx), "down"),
     row("thickness", "Thickness invariance error", 0, thicknessError(referenceLayers, afterLayout, idx), "down"),
     row("order", "Order stability", 1, orderStability(afterLayout, idx), "up")
   ];
 
-  const semantic = options.semantic ?? {};
   if (semantic.enableTpidCenterAlignment === true) {
     rows.push(
       row(
@@ -99,12 +135,7 @@ export function computeMetrics(
     );
   }
 
-  return {
-    rows,
-    invariant,
-    scopeText: "ROI",
-    multiscale: options.multiscale ?? null
-  };
+  return rows;
 }
 
 function row(key: string, label: string, before: number, after: number, better: "up" | "down"): MetricRow {

@@ -3,7 +3,7 @@ export type GapMode = "none" | "uncGap" | "fixedGap";
 export type SmoothKernel = "cubic";
 export type DatasetKind = "synthetic" | "covid";
 export type InsetViewMode = "before" | "after" | "diff" | "split";
-export type EnhanceTab = "optimize" | "braided" | "spaghetti" | "pidOrdering";
+export type EnhanceTab = "optimize" | "braided" | "spaghetti" | "pidOrdering" | "pidNew";
 export type OptimizeMethod = "sineStream" | "multiscale";
 export type PidBaselineMode = "l1" | "l2" | "sineStream" | "multiscale";
 export type RoiRecommendStrategy = "highest uncertainty" | "highest mean slope" | "highest wiggle" | "largest local change";
@@ -48,6 +48,8 @@ export interface LayoutOptimizationConfig {
   orderUncertaintyWeight?: number;
   /** Uncertainty strength in uncertainty-aware baseline solver */
   baselineUncertaintyWeight?: number;
+  /** Seed used by SineStream pre-shuffle in hierarchical ordering */
+  shuffleSeed?: number;
 }
 
 export interface BraidOptimizationDiagnostics {
