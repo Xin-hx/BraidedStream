@@ -1,6 +1,17 @@
-import * as d3 from "d3";
-import { computePidOrdering } from "../core/pidOrdering";
-import type { BraidLayout, InvariantSummary, LayerInput, PreparedDataset, ROI, StackLayout } from "../core/types";
+/**
+ * Layout quality metrics used by UI panels and search routines.
+ */
+import { computePidOrdering } from "../core/pid";
+import type {
+  BraidLayout,
+  InvariantSummary,
+  LayerInput,
+  PidUncertaintySource,
+  PreparedDataset,
+  ROI,
+  StackLayout
+} from "../core/types";
+import { meanFinite, range } from "../core/utils";
 
 export interface MetricRow {
   key: string;
@@ -37,6 +48,7 @@ export interface MetricsComputeOptions {
 
 interface MetricsSemanticOptions {
   enableTpidCenterAlignment?: boolean;
+  pidUncertaintySource?: PidUncertaintySource;
   baselineShiftBeforeAbs?: number[];
   baselineShiftAfterAbs?: number[];
   uncertaintySaliency?: number[];
@@ -52,7 +64,7 @@ export function computeMetrics(
   options: MetricsComputeOptions = {}
 ): MetricResult {
   const idx = computeIndices(dataset.times.length, roi);
-  const idxGlobal = d3.range(0, dataset.times.length);
+  const idxGlobal = range(0, dataset.times.length);
   const centersBefore = centers(beforeLayout);
   const centersAfter = centers(afterLayout);
   const referenceLayers = orderedLayersForAfter ?? dataset.layers;
@@ -109,8 +121,8 @@ function buildRowsForIndices(
       row(
         "tpidCenterAlignment",
         "TPID Center Alignment",
-        tpidCenterAlignment(referenceLayers, beforeLayout, idx),
-        tpidCenterAlignment(referenceLayers, afterLayout, idx),
+        tpidCenterAlignment(referenceLayers, beforeLayout, idx, semantic),
+        tpidCenterAlignment(referenceLayers, afterLayout, idx, semantic),
         "up"
       )
     );
@@ -144,11 +156,11 @@ function row(key: string, label: string, before: number, after: number, better: 
 
 function computeIndices(length: number, roi: ROI | null): number[] {
   if (!roi) {
-    return d3.range(0, length);
+    return range(0, length);
   }
   const left = Math.max(0, roi.t0Index);
   const right = Math.min(length - 1, roi.t1Index);
-  return d3.range(left, right + 1);
+  return range(left, right + 1);
 }
 
 function centers(layout: StackLayout): number[][] {
@@ -280,14 +292,20 @@ function orderStability(layout: StackLayout, idx: number[]): number {
   return 1 - overlaps / Math.max(1, total);
 }
 
-function tpidCenterAlignment(layers: LayerInput[], layout: StackLayout, idx: number[]): number {
+function tpidCenterAlignment(
+  layers: LayerInput[],
+  layout: StackLayout,
+  idx: number[],
+  semantic: MetricsSemanticOptions
+): number {
   if (layers.length <= 1 || layout.yBottom.length !== layers.length) {
     return 1;
   }
   const pid = computePidOrdering(layers, {
     excludeSelf: true,
     widthPenaltyPower: 1,
-    minComparators: 2
+    minComparators: 2,
+    uncertaintySource: semantic.pidUncertaintySource ?? "value"
   });
   const depthByLayer = pid.depthByLayerId;
   const depth: number[] = [];
@@ -381,8 +399,7 @@ function pearson(x: number[], y: number[]): number {
 function mean(values: number[], idx?: number[]): number {
   if (idx) {
     const picked = idx.map((i) => values[i]).filter((v) => Number.isFinite(v));
-    return picked.length === 0 ? 0 : d3.mean(picked) ?? 0;
+    return meanFinite(picked);
   }
-  const finite = values.filter((v) => Number.isFinite(v));
-  return finite.length === 0 ? 0 : d3.mean(finite) ?? 0;
+  return meanFinite(values);
 }

@@ -83,6 +83,14 @@ function onSpaghettiSelectionChange(event: Event): void {
           </select>
         </label>
 
+        <label v-if="state.datasetKind === 'covid' && (state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew')">
+          PID Source
+          <select v-model="state.pidUncertaintySource" @change="onControlsChange">
+            <option value="value">value</option>
+            <option value="poportion">poportion</option>
+          </select>
+        </label>
+
         <template v-if="state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew'">
         <label class="checkbox">
           <input v-model="state.optimizeWithinROI" type="checkbox" @change="onControlsChange" />

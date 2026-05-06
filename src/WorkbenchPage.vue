@@ -212,6 +212,7 @@ const pidMetricsBundle = computed(() => {
     roi: scene?.insetRoi ?? null,
     sineOrder: pidSineReferenceOrder.value,
     uncertaintyStrength: Math.max(0, state.optimization.baselineUncertaintyWeight ?? 0.45),
+    uncertaintySource: state.pidUncertaintySource,
     baselineHooks: {
       centerType: state.optimization.baselineCenterType ?? "median",
       wiggleWeightL1: state.optimization.wiggleWeightL1,

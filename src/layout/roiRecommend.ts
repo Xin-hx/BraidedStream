@@ -1,5 +1,8 @@
-import * as d3 from "d3";
+/**
+ * ROI candidate scoring for quick analyst navigation.
+ */
 import type { PreparedDataset, ROI, RoiRecommendStrategy } from "../core/types";
+import { range, sum } from "../core/utils";
 import { layerUncertaintyAt } from "../core/validate";
 
 export interface RoiCandidate {
@@ -58,7 +61,7 @@ function scoreWindow(dataset: PreparedDataset, strategy: RoiRecommendStrategy, r
     return acc;
   }
 
-  const totals = d3.range(roi.t0Index, roi.t1Index + 1).map((t) => d3.sum(dataset.layers, (layer) => layer.mean[t]) ?? 0);
+  const totals = range(roi.t0Index, roi.t1Index + 1).map((t) => sum(dataset.layers.map((layer) => layer.mean[t])));
   let change = 0;
   for (let i = 1; i < totals.length; i += 1) {
     change += Math.abs(totals[i] - totals[i - 1]);

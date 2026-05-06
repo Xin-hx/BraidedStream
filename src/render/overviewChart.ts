@@ -1,5 +1,9 @@
+/**
+ * Compact overview renderer and primary ROI brush.
+ */
 import * as d3 from "d3";
 import type { PreparedDataset, ROI } from "../core/types";
+import { angleAxisLabels, formatTimeTick, readChartSize } from "./chartUtils";
 import { createRoiBrush, type RoiBrushController } from "../ui/brush";
 
 export interface OverviewRenderArgs {
@@ -21,10 +25,11 @@ export class OverviewChart {
   private readonly roiBrush: RoiBrushController;
 
   constructor(private readonly svg: SVGSVGElement) {
-    this.width = Number(svg.getAttribute("width") ?? "1180");
-    this.height = Number(svg.getAttribute("height") ?? "118");
-    this.innerWidth = this.width - this.margin.left - this.margin.right;
-    this.innerHeight = this.height - this.margin.top - this.margin.bottom;
+    const size = readChartSize(svg, 1180, 118, this.margin);
+    this.width = size.width;
+    this.height = size.height;
+    this.innerWidth = size.innerWidth;
+    this.innerHeight = size.innerHeight;
 
     const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
     this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
@@ -82,23 +87,11 @@ export class OverviewChart {
           .ticks(Math.max(4, Math.floor(this.innerWidth / 140)))
           .tickFormat((value) => formatTimeTick(Number(value)))
       );
-    this.axisX
-      .selectAll<SVGTextElement, unknown>("text")
-      .attr("text-anchor", "end")
-      .attr("dx", "-0.45em")
-      .attr("dy", "0.35em")
-      .attr("transform", "rotate(-35)");
+    angleAxisLabels(this.axisX);
 
     this.lastOnRoiChange = onRoiChange;
     this.roiBrush.updateContext(dataset.times, xScale);
     this.roiBrush.sync(roi);
     return xScale;
   }
-}
-
-function formatTimeTick(value: number): string {
-  if (!Number.isFinite(value)) {
-    return "";
-  }
-  return d3.utcFormat("%Y-%m-%d")(new Date(value));
 }

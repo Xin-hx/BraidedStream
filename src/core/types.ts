@@ -1,3 +1,7 @@
+/**
+ * Shared domain types for data preparation, ordering, baselines, and layouts.
+ */
+
 export type BaselineMode = "sineStream" | "center" | "zero" | "l1" | "l2";
 export type GapMode = "none" | "uncGap" | "fixedGap";
 export type SmoothKernel = "cubic";
@@ -6,6 +10,7 @@ export type InsetViewMode = "before" | "after" | "diff" | "split";
 export type EnhanceTab = "optimize" | "braided" | "spaghetti" | "pidOrdering" | "pidNew";
 export type OptimizeMethod = "sineStream" | "multiscale";
 export type PidBaselineMode = "l1" | "l2" | "sineStream" | "multiscale";
+export type PidUncertaintySource = "value" | "poportion";
 export type RoiRecommendStrategy = "highest uncertainty" | "highest mean slope" | "highest wiggle" | "largest local change";
 export type UncertaintyBandMode = "50" | "95";
 export type HorizonFilterMode = "h1" | "h2" | "h3" | "h4";

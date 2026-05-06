@@ -1,29 +1,39 @@
 ﻿import { computeBaseline, computeMultiscaleDistributedBaseline, type SineStreamHooks } from "../core/baseline";
+/**
+ * Search experiment comparing PID-new ordering against SineStream control ordering.
+ */
 import { normalizeOrderForComparison } from "../core/orderCompare";
 import { optimizeLayerOrder } from "../core/optimizeOrder";
-import { buildPidCenterOutOrder, computePidOrdering } from "../core/pidOrdering";
+import { buildPidCenterOutOrder, computePidOrdering } from "../core/pid";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
-  BraidLayout,
-  InvariantSummary,
   LayerInput,
   LayoutOptimizationConfig,
   PreparedDataset,
-  ROI,
-  StackLayout
+  ROI
 } from "../core/types";
 import { orderLayers } from "../core/validate";
-import { computeMetrics, type MetricRow } from "./metrics";
+import { computeMetrics } from "./metrics";
+import {
+  compareSearchCandidates,
+  discreteValues as discreteSearchValues,
+  emptyInvariantSummary,
+  finiteNumber,
+  passReasons,
+  regressionReasons,
+  sanitizeCenterTypes,
+  sanitizeRange as sanitizeSearchRange,
+  scopeSummaryFromMetricRows,
+  sortKeyFromParams,
+  stackToBraidLayout,
+  type CoreMetricDelta,
+  type CoreMetricKey,
+  type ScopeSummary,
+  type SearchCenterType as CenterType,
+  type SearchRange
+} from "./searchUtils";
 
-const CORE_KEYS = ["meanSlope", "wiggle", "illusion"] as const;
-type CoreMetricKey = (typeof CORE_KEYS)[number];
-type CenterType = "median" | "mean" | "geometric" | "harmonic";
-
-export interface PidVsSineSearchRange {
-  min: number;
-  max: number;
-  step: number;
-}
+export interface PidVsSineSearchRange extends SearchRange {}
 
 export interface PidVsSineSearchSpace {
   baselineUncertaintyWeight: PidVsSineSearchRange;
@@ -39,20 +49,9 @@ export interface PidVsSineCandidateParams {
   baselineCenterType: CenterType;
 }
 
-export interface PidVsSineCoreMetricDelta {
-  key: CoreMetricKey;
-  label: string;
-  before: number;
-  after: number;
-  delta: number;
-  improvementPct: number;
-}
+export interface PidVsSineCoreMetricDelta extends CoreMetricDelta {}
 
-export interface PidVsSineScopeSummary {
-  metrics: PidVsSineCoreMetricDelta[];
-  maxImprovementPct: number;
-  avgImprovementPct: number;
-}
+export interface PidVsSineScopeSummary extends ScopeSummary {}
 
 export interface PidVsSineCandidateResult {
   params: PidVsSineCandidateParams;
@@ -98,8 +97,8 @@ export interface PidVsSineSearchInput {
 
 export function runPidVsSineSearch(input: PidVsSineSearchInput): PidVsSineSearchResult {
   const searchSpace = sanitizeSearchSpace(input.searchSpace);
-  const strengths = discreteValues(searchSpace.baselineUncertaintyWeight);
-  const thresholds = discreteValues(searchSpace.energyThreshold);
+  const strengths = discreteSearchValues(searchSpace.baselineUncertaintyWeight);
+  const thresholds = discreteSearchValues(searchSpace.energyThreshold);
   const layerIds = input.dataset.layers.map((layer) => layer.id);
 
   const controlOrder = buildControlOrder(input.dataset, input.optimizationConfig, layerIds, input.shuffleSeed);
@@ -114,11 +113,7 @@ export function runPidVsSineSearch(input: PidVsSineSearchInput): PidVsSineSearch
   const controlBaseline = computeBaseline(input.dataset.times, controlLayers, "sineStream", controlHooks);
   const controlLayout = computeStackedBoundaries(controlBaseline, controlLayers);
 
-  const invariant: InvariantSummary = {
-    checked: false,
-    violations: [],
-    maxThicknessError: 0
-  };
+  const invariant = emptyInvariantSummary();
 
   const candidates: PidVsSineCandidateResult[] = [];
 
@@ -148,8 +143,8 @@ export function runPidVsSineSearch(input: PidVsSineSearchInput): PidVsSineSearch
         const metrics = computeMetrics(input.dataset, controlLayout, experimentLayout, input.roi, invariant, experimentLayers, {
           includeGlobalRows: true
         });
-        const roi = scopeSummaryFromRows(metrics.rows);
-        const global = scopeSummaryFromRows(metrics.globalRows ?? metrics.rows);
+        const roi = scopeSummaryFromMetricRows(metrics.rows);
+        const global = scopeSummaryFromMetricRows(metrics.globalRows ?? metrics.rows);
 
         const reasons = evaluateCandidate(
           roi,
@@ -178,7 +173,7 @@ export function runPidVsSineSearch(input: PidVsSineSearchInput): PidVsSineSearch
     }
   }
 
-  candidates.sort(compareCandidates);
+  candidates.sort(compareSearchCandidates);
   const topN = Math.max(1, Math.round(searchSpace.topN));
 
   return {
@@ -234,69 +229,12 @@ function buildExperimentOrder(dataset: PreparedDataset, layerIds: string[]): str
 }
 
 function sanitizeSearchSpace(space: PidVsSineSearchSpace): PidVsSineSearchSpace {
-  const centerTypes = Array.from(new Set(space.centerTypes)).filter((v): v is CenterType =>
-    v === "median" || v === "mean" || v === "geometric" || v === "harmonic"
-  );
-
   return {
-    baselineUncertaintyWeight: sanitizeRange(space.baselineUncertaintyWeight, { min: 0.15, max: 1.2, step: 0.05 }),
-    energyThreshold: sanitizeRange(space.energyThreshold, { min: 0.04, max: 0.2, step: 0.02 }, 0, 1),
-    centerTypes: centerTypes.length > 0 ? centerTypes : ["median"],
+    baselineUncertaintyWeight: sanitizeSearchRange(space.baselineUncertaintyWeight, { min: 0.15, max: 1.2, step: 0.05 }),
+    energyThreshold: sanitizeSearchRange(space.energyThreshold, { min: 0.04, max: 0.2, step: 0.02 }, 0, 1),
+    centerTypes: sanitizeCenterTypes(space.centerTypes),
     regressionGuardrailPct: Math.max(0, finiteNumber(space.regressionGuardrailPct, 3)),
     topN: Math.max(1, Math.round(finiteNumber(space.topN, 20)))
-  };
-}
-
-function sanitizeRange(
-  range: PidVsSineSearchRange,
-  fallback: PidVsSineSearchRange,
-  hardMin = Number.NEGATIVE_INFINITY,
-  hardMax = Number.POSITIVE_INFINITY
-): PidVsSineSearchRange {
-  const minRaw = finiteNumber(range.min, fallback.min);
-  const maxRaw = finiteNumber(range.max, fallback.max);
-  const stepRaw = finiteNumber(range.step, fallback.step);
-  const min = clamp(Math.min(minRaw, maxRaw), hardMin, hardMax);
-  const max = clamp(Math.max(minRaw, maxRaw), hardMin, hardMax);
-  const step = Math.max(1e-6, Math.abs(stepRaw));
-  return { min, max, step };
-}
-
-function discreteValues(range: PidVsSineSearchRange): number[] {
-  const values: number[] = [];
-  const maxLoops = 5000;
-  let loops = 0;
-  for (let value = range.min; value <= range.max + range.step * 1e-6 && loops < maxLoops; value += range.step) {
-    values.push(round(value, 6));
-    loops += 1;
-  }
-  const dedup = Array.from(new Set(values.map((value) => round(value, 6))));
-  dedup.sort((a, b) => a - b);
-  return dedup.length > 0 ? dedup : [round(range.min, 6)];
-}
-
-function scopeSummaryFromRows(rows: MetricRow[]): PidVsSineScopeSummary {
-  const metrics = CORE_KEYS.map((key) => {
-    const row = rows.find((item) => item.key === key);
-    const before = row?.before ?? 0;
-    const after = row?.after ?? 0;
-    const delta = after - before;
-    const improvementPct = relativeImprovementDown(before, after);
-    return {
-      key,
-      label: row?.label ?? key,
-      before,
-      after,
-      delta,
-      improvementPct
-    };
-  });
-
-  const improvements = metrics.map((metric) => metric.improvementPct);
-  return {
-    metrics,
-    maxImprovementPct: Math.max(...improvements),
-    avgImprovementPct: improvements.reduce((sum, value) => sum + value, 0) / Math.max(1, improvements.length)
   };
 }
 
@@ -318,85 +256,8 @@ function evaluateCandidate(
     reasons.push(`ROI has no positive readability gain (max=${roi.maxImprovementPct.toFixed(2)}%)`);
   }
 
-  const roiRegression = roi.metrics.filter((metric) => metric.improvementPct < -regressionGuardrailPct);
-  for (const metric of roiRegression) {
-    reasons.push(`ROI ${metric.key} regressed ${(-metric.improvementPct).toFixed(2)}% > ${regressionGuardrailPct.toFixed(2)}%`);
-  }
-
-  const globalRegression = global.metrics.filter((metric) => metric.improvementPct < -regressionGuardrailPct);
-  for (const metric of globalRegression) {
-    reasons.push(
-      `Global ${metric.key} regressed ${(-metric.improvementPct).toFixed(2)}% > ${regressionGuardrailPct.toFixed(2)}%`
-    );
-  }
+  reasons.push(...regressionReasons("ROI", roi, regressionGuardrailPct));
+  reasons.push(...regressionReasons("Global", global, regressionGuardrailPct));
 
   return reasons;
-}
-
-function passReasons(roi: PidVsSineScopeSummary, global: PidVsSineScopeSummary): string[] {
-  return [
-    `ROI max improvement ${roi.maxImprovementPct.toFixed(2)}%`,
-    `ROI avg improvement ${roi.avgImprovementPct.toFixed(2)}%`,
-    `Global avg improvement ${global.avgImprovementPct.toFixed(2)}%`
-  ];
-}
-
-function compareCandidates(a: PidVsSineCandidateResult, b: PidVsSineCandidateResult): number {
-  if (a.pass !== b.pass) {
-    return a.pass ? -1 : 1;
-  }
-  if (a.roi.maxImprovementPct !== b.roi.maxImprovementPct) {
-    return b.roi.maxImprovementPct - a.roi.maxImprovementPct;
-  }
-  if (a.roi.avgImprovementPct !== b.roi.avgImprovementPct) {
-    return b.roi.avgImprovementPct - a.roi.avgImprovementPct;
-  }
-  if (a.global.avgImprovementPct !== b.global.avgImprovementPct) {
-    return b.global.avgImprovementPct - a.global.avgImprovementPct;
-  }
-  return a.sortKey.localeCompare(b.sortKey);
-}
-
-function sortKeyFromParams(params: PidVsSineCandidateParams): string {
-  return [
-    params.baselineCenterType,
-    params.baselineUncertaintyWeight.toFixed(6),
-    params.energyThreshold.toFixed(6)
-  ].join("|");
-}
-
-function relativeImprovementDown(before: number, after: number): number {
-  if (!Number.isFinite(before) || !Number.isFinite(after)) {
-    return 0;
-  }
-  const denominator = Math.max(1e-9, Math.abs(before));
-  return ((before - after) / denominator) * 100;
-}
-
-function finiteNumber(value: number, fallback: number): number {
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function round(value: number, digits: number): number {
-  const scale = 10 ** digits;
-  return Math.round(value * scale) / scale;
-}
-
-function stackToBraidLayout(layout: StackLayout): BraidLayout {
-  const tLength = layout.baseline.length;
-  const gapCount = Math.max(0, layout.yBottom.length - 1);
-  return {
-    baseline: layout.baseline.slice(),
-    yBottom: layout.yBottom.map((row) => row.slice()),
-    yTop: layout.yTop.map((row) => row.slice()),
-    omega: new Array<number>(tLength).fill(0),
-    gapsPx: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
-    gapsValue: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
-    sumGapPx: new Array<number>(tLength).fill(0),
-    roiSupport: null
-  };
 }

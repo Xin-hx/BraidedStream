@@ -7,6 +7,7 @@ import type {
   InsetViewMode,
   OptimizeMethod,
   PidBaselineMode,
+  PidUncertaintySource,
   ROI,
   LayoutOptimizationConfig,
   RoiRecommendStrategy,
@@ -21,6 +22,7 @@ export interface AppState {
   metricsExpanded: boolean;
   optimizeMethod: OptimizeMethod;
   pidBaselineMode: PidBaselineMode;
+  pidUncertaintySource: PidUncertaintySource;
   optimizeWithinROI: boolean;
   spaghettiAllStates: boolean;
   spaghettiSelectedStates: string[];
@@ -52,6 +54,7 @@ export function createInitialState(): AppState {
     metricsExpanded: false,
     optimizeMethod: "sineStream",
     pidBaselineMode: "multiscale",
+    pidUncertaintySource: "value",
     optimizeWithinROI: true,
     spaghettiAllStates: false,
     spaghettiSelectedStates: [],

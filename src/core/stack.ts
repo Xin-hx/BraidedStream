@@ -1,5 +1,9 @@
+/**
+ * Basic stack geometry construction from a baseline and ordered layers.
+ */
 import type { LayerInput, StackLayout } from "./types";
 
+/** Convert layer thickness series into bottom/top boundaries. */
 export function computeStackedBoundaries(baseline: number[], orderedLayers: LayerInput[]): StackLayout {
   const tLength = baseline.length;
   const kLength = orderedLayers.length;

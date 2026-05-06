@@ -1,5 +1,12 @@
+/**
+ * SVG path generation for streamgraph bands.
+ *
+ * The public factory chooses between raw, shape-preserving smoothed, and
+ * uncertainty-jagged paths; helper functions keep geometry and noise separate.
+ */
 import * as d3 from "d3";
 import { withFixedSeed } from "../core/seed";
+import { clamp, clamp01, nearlyEqual, percentile } from "../core/utils";
 
 export interface AreaPathOptions {
   jagged?: boolean;
@@ -12,6 +19,7 @@ export interface AreaPathOptions {
   uncertainty?: number[];
 }
 
+/** Create one closed area path for a layer band. */
 export function createAreaPath(
   times: number[],
   yBottom: number[],
@@ -105,7 +113,7 @@ function evaluateShapePreservingSpline(
   }
 
   for (let i = 0; i < n - 1; i += 1) {
-    if (nearlyEqual(ys[i], ys[i + 1])) {
+    if (nearlyEqual(ys[i], ys[i + 1], 1e-9)) {
       m[i] = 0;
       m[i + 1] = 0;
     }
@@ -130,7 +138,7 @@ function evaluateShapePreservingSpline(
       const u = s / substeps;
       const xx = x0 + (x1 - x0) * u;
       let yy: number;
-      if (nearlyEqual(y0, y1)) {
+      if (nearlyEqual(y0, y1, 1e-9)) {
         yy = y0;
       } else {
         yy = hermiteAt(y0, y1, m[i], m[i + 1], dt, u);
@@ -185,7 +193,7 @@ function endpointSlope(h0: number, h1: number, d0: number, d1: number): number {
 function enforceMonotonicIntervalConstraints(m: number[], d: number[]): void {
   for (let i = 0; i < d.length; i += 1) {
     const di = d[i];
-    if (nearlyEqual(di, 0)) {
+    if (nearlyEqual(di, 0, 1e-9)) {
       m[i] = 0;
       m[i + 1] = 0;
       continue;
@@ -285,12 +293,7 @@ function triangleWave(v: number): number {
 }
 
 function robustScale(values: number[]): number {
-  if (values.length === 0) {
-    return 0;
-  }
-  const sorted = values.slice().sort((a, b) => a - b);
-  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.9 * (sorted.length - 1))));
-  return Math.max(0, sorted[idx]);
+  return Math.max(0, percentile(values, 0.9));
 }
 
 function hash32(text: string): number {
@@ -308,16 +311,4 @@ function pseudo(seed: number, i: number): number {
   x ^= x >>> 17;
   x ^= x << 5;
   return (x >>> 0) / 4294967295;
-}
-
-function clamp(v: number, low: number, high: number): number {
-  return Math.max(low, Math.min(high, v));
-}
-
-function nearlyEqual(a: number, b: number, eps = 1e-9): boolean {
-  return Math.abs(a - b) <= eps;
-}
-
-function clamp01(v: number): number {
-  return Math.max(0, Math.min(1, v));
 }

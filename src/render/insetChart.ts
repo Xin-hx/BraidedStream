@@ -1,6 +1,12 @@
+/**
+ * Inset renderer for before/after/diff/split layout comparisons.
+ */
 import * as d3 from "d3";
+import { roiBounds } from "../core/roi";
 import type { BraidLayout, InsetViewMode, LayerInput, PreparedDataset, ROI, StackLayout } from "../core/types";
+import { clamp01, percentile, range } from "../core/utils";
 import { createAreaPath } from "./paths";
+import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtentForIndices, readChartSize } from "./chartUtils";
 import { diffColor, layerColor } from "../styles/palette";
 import { boundaryUncertaintyAt } from "../core/validate";
 
@@ -42,10 +48,11 @@ export class InsetChart {
   private readonly hoverGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
 
   constructor(private readonly svg: SVGSVGElement) {
-    this.width = Number(svg.getAttribute("width") ?? "1180");
-    this.height = Number(svg.getAttribute("height") ?? "300");
-    this.innerWidth = this.width - this.margin.left - this.margin.right;
-    this.innerHeight = this.height - this.margin.top - this.margin.bottom;
+    const size = readChartSize(svg, 1180, 300, this.margin);
+    this.width = size.width;
+    this.height = size.height;
+    this.innerWidth = size.innerWidth;
+    this.innerHeight = size.innerHeight;
 
     const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
     this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
@@ -89,10 +96,11 @@ export class InsetChart {
 
     const [left, right] = roiBounds(dataset.times.length, args.roi);
     const activeTimes = dataset.times.slice(left, right + 1);
+    const activeIndices = range(left, right + 1);
     const xScale = d3.scaleLinear().domain([activeTimes[0], activeTimes[activeTimes.length - 1]]).range([0, this.innerWidth]);
 
-    const eBefore = extentCrop(before, left, right);
-    const eAfter = extentCrop(after, left, right);
+    const eBefore = layoutExtentForIndices(before, activeIndices);
+    const eAfter = layoutExtentForIndices(after, activeIndices);
     const minV = Math.min(eBefore[0], eAfter[0]);
     const maxV = Math.max(eBefore[1], eAfter[1]);
     const center = 0.5 * (minV + maxV);
@@ -126,32 +134,14 @@ export class InsetChart {
           .ticks(Math.max(3, Math.floor(this.innerWidth / 160)))
           .tickFormat((value) => formatTimeTick(Number(value)))
       );
-    this.axisX
-      .selectAll<SVGTextElement, unknown>("text")
-      .attr("text-anchor", "end")
-      .attr("dx", "-0.45em")
-      .attr("dy", "0.35em")
-      .attr("transform", "rotate(-35)");
+    angleAxisLabels(this.axisX);
     this.axisY.call(d3.axisLeft(yScale).ticks(6));
 
     return { xScale, yScale, activeTimes, activeStartIndex: left };
   }
 
   setHover(timeValue: number | null, xScale: d3.ScaleLinear<number, number> | null): void {
-    if (xScale === null || timeValue === null) {
-      this.hoverGroup.selectAll("*").remove();
-      return;
-    }
-    const lineSel = this.hoverGroup.selectAll<SVGLineElement, number>("line.crosshair").data([timeValue]);
-    lineSel
-      .join((enter) => enter.append("line").attr("class", "crosshair"), (update) => update, (exit) => exit.remove())
-      .attr("x1", (d) => xScale(d))
-      .attr("x2", (d) => xScale(d))
-      .attr("y1", 0)
-      .attr("y2", this.innerHeight)
-      .attr("stroke", "#7c2d12")
-      .attr("stroke-opacity", 0.5)
-      .attr("stroke-dasharray", "4,2");
+    drawCrosshair(this.hoverGroup, timeValue, xScale, this.innerHeight, "#7c2d12", 0.5, "4,2");
   }
 
   private drawTitle(viewMode: InsetViewMode, enableUncertaintyGap: boolean, enableJaggedEdge: boolean): void {
@@ -340,64 +330,4 @@ export class InsetChart {
 
     this.overlayGroup.selectAll("line.gap-ruler").remove();
   }
-}
-
-function extentCrop(layout: StackLayout, left: number, right: number): [number, number] {
-  let minV = Number.POSITIVE_INFINITY;
-  let maxV = Number.NEGATIVE_INFINITY;
-  for (const row of layout.yBottom) {
-    for (let t = left; t <= right; t += 1) {
-      minV = Math.min(minV, row[t]);
-      maxV = Math.max(maxV, row[t]);
-    }
-  }
-  for (const row of layout.yTop) {
-    for (let t = left; t <= right; t += 1) {
-      minV = Math.min(minV, row[t]);
-      maxV = Math.max(maxV, row[t]);
-    }
-  }
-  if (!Number.isFinite(minV) || !Number.isFinite(maxV)) {
-    return [-1, 1];
-  }
-  if (minV === maxV) {
-    return [minV - 1, maxV + 1];
-  }
-  return [minV, maxV];
-}
-
-function clamp01(v: number): number {
-  return Math.max(0, Math.min(1, v));
-}
-
-function percentile(values: number[], q: number): number {
-  if (values.length === 0) {
-    return 0;
-  }
-  const sorted = values.slice().sort((a, b) => a - b);
-  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1))));
-  return sorted[idx];
-}
-
-function roiBounds(length: number, roi: ROI | null): [number, number] {
-  if (length <= 0) {
-    return [0, 0];
-  }
-  if (!roi) {
-    return [0, length - 1];
-  }
-  const left = clamp(Math.round(roi.t0Index), 0, length - 1);
-  const right = clamp(Math.round(roi.t1Index), 0, length - 1);
-  return left <= right ? [left, right] : [right, left];
-}
-
-function clamp(v: number, low: number, high: number): number {
-  return Math.max(low, Math.min(high, v));
-}
-
-function formatTimeTick(value: number): string {
-  if (!Number.isFinite(value)) {
-    return "";
-  }
-  return d3.utcFormat("%Y-%m-%d")(new Date(value));
 }

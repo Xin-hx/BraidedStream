@@ -2,9 +2,11 @@
 
 本文比较当前项目中的 PID-inspired layer ordering 与 GitHub 参考实现 [Probabilistic-Inclusion-Depth](https://github.com/cenyangWu/Probabilistic-Inclusion-Depth)。结论是：**两者原理不一致**。因此，在当前实现下不应直接绘制 GitHub 意义上的 contour boxplot；若要绘制，需要先为当前 time-series streamgraph 数据定义 time-value mask 或 contour ensemble 表示。
 
+当前 PID 相关代码已经收拢到 [src/core/pid.ts](src/core/pid.ts)，并且可以在前端在 `value / poportion` 两种 uncertainty source 之间切换。
+
 ## 1. Current Local Implementation
 
-本项目当前实现位于 [src/core/pidOrdering.ts](src/core/pidOrdering.ts)。
+本项目当前实现位于 [src/core/pid.ts](src/core/pid.ts) 中的 `computePidOrdering`，其默认使用 `value`，但在 PID 面板里可以切换到 `poportion`。
 
 它的输入是 streamgraph layer 的时间序列：
 
@@ -133,7 +135,7 @@ PID\text{-}mean(u_i)
 \right\}
 $$
 
-这正对应 `PID/Boxplot.py` 中的实现：
+这正对应 `PID/Boxplot.py` 中的实现，也对应本项目 `src/core/pid.ts` 里的 `computeContourPid`：
 
 ```python
 dot_product = np.sum(masks_flattened * original_center, axis=1)

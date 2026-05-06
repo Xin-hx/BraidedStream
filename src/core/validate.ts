@@ -1,7 +1,10 @@
+/**
+ * Validation and small data-access helpers shared by layout algorithms.
+ */
 import type { LayerInput } from "./types";
+import { EPSILON } from "./utils";
 
-const EPS = 1e-12;
-
+/** Assert that all per-time layer series match the dataset timeline length. */
 export function validateTimeLengths(times: number[], layers: LayerInput[]): void {
   if (times.length === 0) {
     throw new Error("times must not be empty");
@@ -34,6 +37,7 @@ export function validateTimeLengths(times: number[], layers: LayerInput[]): void
   }
 }
 
+/** Reorder layers by id, rejecting missing or duplicate ids. */
 export function orderLayers(layers: LayerInput[], order: string[]): LayerInput[] {
   const byId = new Map<string, LayerInput>(layers.map((layer) => [layer.id, layer]));
   const seen = new Set<string>();
@@ -55,6 +59,7 @@ export function orderLayers(layers: LayerInput[], order: string[]): LayerInput[]
   return ordered;
 }
 
+/** Estimate a layer's uncertainty spread at one time sample. */
 export function layerUncertaintyAt(layer: LayerInput, t: number): number {
   if (layer.quantiles) {
     const values = Object.values(layer.quantiles)
@@ -75,10 +80,12 @@ export function layerUncertaintyAt(layer: LayerInput, t: number): number {
   return 0;
 }
 
+/** Boundary uncertainty is the combined spread of adjacent layers. */
 export function boundaryUncertaintyAt(a: LayerInput, b: LayerInput, t: number): number {
   return layerUncertaintyAt(a, t) + layerUncertaintyAt(b, t);
 }
 
-export function almostEqual(a: number, b: number, eps = EPS): boolean {
+/** Numeric equality check used by invariant and geometry code. */
+export function almostEqual(a: number, b: number, eps = EPSILON): boolean {
   return Math.abs(a - b) <= eps;
 }

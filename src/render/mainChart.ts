@@ -1,7 +1,12 @@
+/**
+ * Main streamgraph renderer with inset-ROI brushing.
+ */
 import * as d3 from "d3";
-import { createAreaPath } from "./paths";
-import { layerColor } from "../styles/palette";
+import { roiBounds } from "../core/roi";
 import type { LayerInput, PreparedDataset, ROI, StackLayout } from "../core/types";
+import { createAreaPath } from "./paths";
+import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtent, readChartSize, roiXRange } from "./chartUtils";
+import { layerColor } from "../styles/palette";
 import { createRoiBrush, type RoiBrushController } from "../ui/brush";
 
 export interface MainChartRenderArgs {
@@ -31,10 +36,11 @@ export class MainChart {
   private lastOnInsetRoiChange: ((roi: ROI | null) => void) | null = null;
 
   constructor(private readonly svg: SVGSVGElement) {
-    this.width = Number(svg.getAttribute("width") ?? "1180");
-    this.height = Number(svg.getAttribute("height") ?? "360");
-    this.innerWidth = this.width - this.margin.left - this.margin.right;
-    this.innerHeight = this.height - this.margin.top - this.margin.bottom;
+    const size = readChartSize(svg, 1180, 360, this.margin);
+    this.width = size.width;
+    this.height = size.height;
+    this.innerWidth = size.innerWidth;
+    this.innerHeight = size.innerHeight;
 
     const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
     this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
@@ -59,16 +65,15 @@ export class MainChart {
 
   render(args: MainChartRenderArgs): { xScale: d3.ScaleLinear<number, number>; yScale: d3.ScaleLinear<number, number> } {
     const { dataset, orderedLayers, layout, insetRoi, onInsetRoiChange } = args;
-    const left = args.roi ? Math.max(0, Math.min(dataset.times.length - 1, args.roi.t0Index)) : 0;
-    const right = args.roi ? Math.max(0, Math.min(dataset.times.length - 1, args.roi.t1Index)) : dataset.times.length - 1;
-    const domainStart = dataset.times[Math.min(left, right)];
-    const domainEnd = dataset.times[Math.max(left, right)];
+    const [left, right] = roiBounds(dataset.times.length, args.roi);
+    const domainStart = dataset.times[left];
+    const domainEnd = dataset.times[right];
     const xScale = d3
       .scaleLinear()
       .domain([domainStart, domainEnd])
       .range([0, this.innerWidth]);
 
-    const extent = extentLayout(layout);
+    const extent = layoutExtent(layout);
     const yScale = d3
       .scaleLinear()
       .domain([extent[0] - (extent[1] - extent[0]) * 0.04, extent[1] + (extent[1] - extent[0]) * 0.04])
@@ -83,9 +88,9 @@ export class MainChart {
         xScale,
         yScale,
         {
-        smoothInterpolation: true,
-        interpolationSubsteps: 8
-      }
+          smoothInterpolation: true,
+          interpolationSubsteps: 8
+        }
       ),
       color: layerColor(k, layer.id)
     }));
@@ -114,12 +119,7 @@ export class MainChart {
           .ticks(Math.max(4, Math.floor(this.innerWidth / 140)))
           .tickFormat((value) => formatTimeTick(Number(value)))
       );
-    this.axisX
-      .selectAll<SVGTextElement, unknown>("text")
-      .attr("text-anchor", "end")
-      .attr("dx", "-0.45em")
-      .attr("dy", "0.35em")
-      .attr("transform", "rotate(-35)");
+    angleAxisLabels(this.axisX);
     this.axisY.call(d3.axisLeft(yScale).ticks(7));
 
     return { xScale, yScale };
@@ -130,10 +130,7 @@ export class MainChart {
       this.insetRoiGroup.selectAll("*").remove();
       return;
     }
-    const left = xScale(times[Math.max(0, roi.t0Index)]);
-    const right = xScale(times[Math.min(times.length - 1, roi.t1Index)]);
-    const x0 = Math.max(0, Math.min(this.innerWidth, Math.min(left, right)));
-    const x1 = Math.max(0, Math.min(this.innerWidth, Math.max(left, right)));
+    const [x0, x1] = roiXRange(roi, times, xScale, this.innerWidth);
     const width = Math.max(1, x1 - x0);
 
     this.insetRoiGroup
@@ -161,16 +158,7 @@ export class MainChart {
   }
 
   setHover(timeValue: number | null, xScale: d3.ScaleLinear<number, number>): void {
-    const lineSel = this.hoverGroup.selectAll<SVGLineElement, number>("line.crosshair").data(timeValue === null ? [] : [timeValue]);
-    lineSel
-      .join((enter) => enter.append("line").attr("class", "crosshair"), (update) => update, (exit) => exit.remove())
-      .attr("x1", (d) => xScale(d))
-      .attr("x2", (d) => xScale(d))
-      .attr("y1", 0)
-      .attr("y2", this.innerHeight)
-      .attr("stroke", "#0f172a")
-      .attr("stroke-opacity", 0.45)
-      .attr("stroke-dasharray", "4,3");
+    drawCrosshair(this.hoverGroup, timeValue, xScale, this.innerHeight, "#0f172a", 0.45, "4,3");
   }
 
   private drawRoi(roi: ROI | null, times: number[], xScale: d3.ScaleLinear<number, number>): void {
@@ -178,8 +166,7 @@ export class MainChart {
       this.roiGroup.selectAll("*").remove();
       return;
     }
-    const left = xScale(times[Math.max(0, roi.t0Index)]);
-    const right = xScale(times[Math.min(times.length - 1, roi.t1Index)]);
+    const [left, right] = roiXRange(roi, times, xScale, this.innerWidth);
     const width = Math.max(1, right - left);
 
     const box = this.roiGroup.selectAll<SVGRectElement, number>("rect.roi-window").data([0]);
@@ -214,35 +201,4 @@ export class MainChart {
       .attr("stroke-dasharray", "4,3")
       .attr("opacity", 0.85);
   }
-}
-
-function extentLayout(layout: StackLayout): [number, number] {
-  let minV = Number.POSITIVE_INFINITY;
-  let maxV = Number.NEGATIVE_INFINITY;
-  for (const row of layout.yBottom) {
-    for (const v of row) {
-      minV = Math.min(minV, v);
-      maxV = Math.max(maxV, v);
-    }
-  }
-  for (const row of layout.yTop) {
-    for (const v of row) {
-      minV = Math.min(minV, v);
-      maxV = Math.max(maxV, v);
-    }
-  }
-  if (!Number.isFinite(minV) || !Number.isFinite(maxV)) {
-    return [-1, 1];
-  }
-  if (minV === maxV) {
-    return [minV - 1, maxV + 1];
-  }
-  return [minV, maxV];
-}
-
-function formatTimeTick(value: number): string {
-  if (!Number.isFinite(value)) {
-    return "";
-  }
-  return d3.utcFormat("%Y-%m-%d")(new Date(value));
 }

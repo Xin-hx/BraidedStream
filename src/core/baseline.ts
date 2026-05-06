@@ -1,4 +1,12 @@
+/**
+ * Baseline solvers for stacked streamgraph layouts.
+ *
+ * The exported functions choose or combine baseline strategies; helpers below
+ * keep numerical routines such as wiggle minimization and multiscale shift
+ * distribution separate from those public orchestration functions.
+ */
 import type { BaselineMode, LayerInput } from "./types";
+import { clamp, median, normalize01, sumAbs } from "./utils";
 import { layerUncertaintyAt, validateTimeLengths } from "./validate";
 
 export interface SineStreamHooks {
@@ -52,6 +60,7 @@ export interface MultiscaleBaselineResult {
   diagnostics: MultiscaleBaselineDiagnostics;
 }
 
+/** Compute a baseline by the selected global baseline mode. */
 export function computeBaseline(
   times: number[],
   layers: LayerInput[],
@@ -76,6 +85,7 @@ export function computeBaseline(
   return computeSineStreamBaseline(times.length, layers, hooks);
 }
 
+/** Shift the baseline using layer uncertainty as an additional local weight. */
 export function computeUncertaintyAwareBaseline(
   times: number[],
   layers: LayerInput[],
@@ -93,7 +103,7 @@ export function computeUncertaintyAwareBaseline(
     return total.map((v) => -0.5 * v);
   }
 
-  const clippedStrength = Math.max(0, Math.min(1.5, strength));
+  const clippedStrength = clamp(strength, 0, 1.5);
   const unc = layers.map((layer) => {
     const arr = new Array<number>(tLength).fill(0);
     for (let t = 0; t < tLength; t += 1) {
@@ -163,6 +173,7 @@ export function computeUncertaintyAwareBaseline(
   return baseline;
 }
 
+/** Spread local uncertainty-aware shifts across Haar-like temporal scales. */
 export function computeMultiscaleDistributedBaseline(
   times: number[],
   layers: LayerInput[],
@@ -174,7 +185,7 @@ export function computeMultiscaleDistributedBaseline(
   const tLength = times.length;
   const kLength = layers.length;
   const total = sumLayerMeans(tLength, layers);
-  const clippedThreshold = Math.max(0, Math.min(1, energyThreshold));
+  const clippedThreshold = clamp(energyThreshold, 0, 1);
   const localBaseline = computeUncertaintyAwareBaseline(times, layers, strength);
   const emptyDiagnostics = (): MultiscaleBaselineDiagnostics => ({
     method: "haar-dyadic",
@@ -205,14 +216,17 @@ export function computeMultiscaleDistributedBaseline(
   const localShiftAbs = localShift.map((v) => Math.abs(v));
   const localShiftBudget = sumAbs(localShift);
 
-  const uncertaintyVariation = aggregateUncertaintyVariation(layers, tLength);
-  const bands = haarDyadicBands(uncertaintyVariation);
+  const uncertaintySignal = aggregateMultiscaleUncertaintySignal(layers, tLength);
+  const bands = haarDyadicBands(uncertaintySignal).map((band) => ({
+    ...band,
+    saliency: blendScaleSaliencyWithLevel(band.saliency, uncertaintySignal)
+  }));
   if (bands.length === 0) {
     return {
       baseline: localBaselineCentered,
       diagnostics: {
         ...emptyDiagnostics(),
-        fallbackReason: "uncertainty variation unavailable",
+        fallbackReason: "uncertainty multiscale signal unavailable",
         localShiftBudget,
         distributedShiftBudget: localShiftBudget,
         localShiftAbs: localShiftAbs.slice(),
@@ -230,7 +244,7 @@ export function computeMultiscaleDistributedBaseline(
       baseline: localBaselineCentered,
       diagnostics: {
         ...emptyDiagnostics(),
-        fallbackReason: "flat uncertainty variation",
+        fallbackReason: "flat uncertainty multiscale signal",
         localShiftBudget,
         distributedShiftBudget: localShiftBudget,
         localShiftAbs: localShiftAbs.slice(),
@@ -247,15 +261,7 @@ export function computeMultiscaleDistributedBaseline(
   }
 
   const lambda = bands.map((band) => band.energy / totalEnergy);
-  const uncertaintySaliencyRaw = new Array<number>(tLength).fill(0);
-  for (let b = 0; b < bands.length; b += 1) {
-    const saliency = bands[b].saliency;
-    const w = lambda[b];
-    for (let t = 0; t < tLength; t += 1) {
-      uncertaintySaliencyRaw[t] += w * saliency[t];
-    }
-  }
-  const uncertaintySaliency = normalize01(uncertaintySaliencyRaw);
+  const uncertaintySaliency = uncertaintySignal.slice();
 
   const distributedShift = new Array<number>(tLength).fill(0);
   for (let b = 0; b < bands.length; b += 1) {
@@ -442,7 +448,7 @@ function recenterBaseline(baseline: number[], total: number[]): number[] {
   return baseline.map((value) => value - centerOffset);
 }
 
-function aggregateUncertaintyVariation(layers: LayerInput[], tLength: number): number[] {
+function aggregateMultiscaleUncertaintySignal(layers: LayerInput[], tLength: number): number[] {
   const uncertainty = new Array<number>(tLength).fill(0);
   for (let t = 0; t < tLength; t += 1) {
     let acc = 0;
@@ -455,7 +461,19 @@ function aggregateUncertaintyVariation(layers: LayerInput[], tLength: number): n
   for (let t = 1; t < tLength; t += 1) {
     variation[t] = Math.abs(uncertainty[t] - uncertainty[t - 1]);
   }
-  return variation;
+  const level = normalize01(uncertainty);
+  const variationLevel = normalize01(variation);
+  return level.map((value, t) => 0.75 * value + 0.25 * variationLevel[t]);
+}
+
+function blendScaleSaliencyWithLevel(scaleSaliency: number[], levelSignal: number[]): number[] {
+  const detail = normalize01(scaleSaliency);
+  const out = new Array<number>(scaleSaliency.length).fill(0);
+  for (let t = 0; t < scaleSaliency.length; t += 1) {
+    const level = levelSignal[t] ?? 0;
+    out[t] = 0.5 * detail[t] + 0.5 * level;
+  }
+  return out;
 }
 
 function movingAverage(values: number[], window: number): number[] {
@@ -499,31 +517,6 @@ function scaleToBudget(values: number[], targetBudget: number): number[] {
   }
   const scale = targetBudget / current;
   return values.map((value) => value * scale);
-}
-
-function normalize01(values: number[]): number[] {
-  if (values.length === 0) {
-    return [];
-  }
-  let minV = Number.POSITIVE_INFINITY;
-  let maxV = Number.NEGATIVE_INFINITY;
-  for (const value of values) {
-    minV = Math.min(minV, value);
-    maxV = Math.max(maxV, value);
-  }
-  const range = maxV - minV;
-  if (range <= 1e-12) {
-    return new Array<number>(values.length).fill(0);
-  }
-  return values.map((value) => (value - minV) / range);
-}
-
-function sumAbs(values: number[]): number {
-  let acc = 0;
-  for (const value of values) {
-    acc += Math.abs(value);
-  }
-  return acc;
 }
 
 function haarDyadicBands(signal: number[]): HaarBand[] {
@@ -580,18 +573,6 @@ function haarDyadicBands(signal: number[]): HaarBand[] {
   return bands;
 }
 
-function median(values: number[]): number {
-  if (values.length === 0) {
-    return 0;
-  }
-  const sorted = values.slice().sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 !== 0) {
-    return sorted[mid];
-  }
-  return 0.5 * (sorted[mid - 1] + sorted[mid]);
-}
-
 /**
  * SineStream Baseline Computation using Gaussian-weighted adjustments
  * Following: StreamLayout_2norm_Gauss from SineStream paper
@@ -637,11 +618,7 @@ function computeThicknessChangeMetric(changes: number[], centerType: string): nu
 
   switch (centerType) {
     case "median": {
-      const sorted = changes.slice().sort((a, b) => a - b);
-      if (sorted.length % 2 !== 0) {
-        return sorted[(sorted.length - 1) / 2];
-      }
-      return 0.5 * (sorted[sorted.length / 2] + sorted[sorted.length / 2 - 1]);
+      return median(changes);
     }
     case "geometric": {
       for (const value of changes) {
@@ -688,13 +665,14 @@ function computeThicknessChangeMetric(changes: number[], centerType: string): nu
 /**
  * Compute Gaussian-weighted baseline adjustment at time step i
  * 
- * Formula: 螖g_i = -危(w_j 脳 Q_i^j) / 危(w_j)
+ * Formula: deltaG_i = -sum(w_j * Q_i^j) / sum(w_j)
  * where:
- *   w_j = exp(-(dF_i^j)虏 / (2c虏))  [Gaussian weight penalizing large changes]
+ *   w_j = exp(-(dF_i^j)^2 / (2c^2))  [Gaussian weight penalizing large changes]
  *   dF_i^j = thickness change of layer j at time i
  *   Q_i^j = cumulative contribution term
  *   c = thickness change metric
  */
+// Computes deltaG_i = -sum(w_j * Q_i^j) / sum(w_j) for the SineStream update.
 function computeGaussianWeightedAdjustment(layers: LayerInput[], i: number, c: number): number {
   const n = layers.length;
   const dFi = new Array<number>(n);

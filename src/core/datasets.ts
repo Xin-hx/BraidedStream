@@ -1,6 +1,13 @@
+/**
+ * Dataset loading and normalization for synthetic and Covid ensemble inputs.
+ *
+ * Rendering components consume PreparedDataset; this module owns parsing,
+ * quantile interpolation, and uncertainty-band switching.
+ */
 import * as d3 from "d3";
 import { generateSyntheticDataset } from "./synthetic";
 import type { DatasetKind, LayerInput, PreparedDataset, QuantileBands, UncertaintyBandMode } from "./types";
+import { hasFinite, nearlyEqual, sum, toFiniteNumber } from "./utils";
 
 export interface DatasetBundle {
   kind: DatasetKind;
@@ -34,6 +41,17 @@ interface CovidLayerMeta {
 
 type CovidLayerInput = LayerInput & CovidLayerMeta;
 
+interface CovidQuantileSeries {
+  q025: number[];
+  q10: number[];
+  q25: number[];
+  q50: number[];
+  q75: number[];
+  q90: number[];
+  q975: number[];
+}
+
+/** Create the built-in synthetic example bundle. */
 export function createSyntheticBundle(): DatasetBundle {
   return {
     kind: "synthetic",
@@ -43,6 +61,7 @@ export function createSyntheticBundle(): DatasetBundle {
   };
 }
 
+/** Load, normalize, and select the Covid ensemble dataset. */
 export async function loadCovidBundle(): Promise<DatasetBundle> {
   const rows = await fetchEnsembleCovidRows();
   if (rows.length === 0) {
@@ -83,6 +102,7 @@ export async function loadCovidBundle(): Promise<DatasetBundle> {
   };
 }
 
+/** Switch Covid layer uncertainty between IQR and 95% spread. */
 export function applyCovidUncertaintyBand(dataset: PreparedDataset, mode: UncertaintyBandMode): boolean {
   let changed = false;
   for (const layer of dataset.layers as CovidLayerInput[]) {
@@ -156,20 +176,8 @@ function normalizeEnsembleCovidRows(rows: EnsembleCovidRow[]): { times: number[]
 
   const layers: CovidLayerInput[] = [];
   for (const [abbreviation, locationRows] of byLocation.entries()) {
-    const q025 = filledSeries(dates.length);
-    const q10 = filledSeries(dates.length);
-    const q25 = filledSeries(dates.length);
-    const q50 = filledSeries(dates.length);
-    const q75 = filledSeries(dates.length);
-    const q90 = filledSeries(dates.length);
-    const q975 = filledSeries(dates.length);
-    const poportionQ025 = filledSeries(dates.length);
-    const poportionQ10 = filledSeries(dates.length);
-    const poportionQ25 = filledSeries(dates.length);
-    const poportionQ50 = filledSeries(dates.length);
-    const poportionQ75 = filledSeries(dates.length);
-    const poportionQ90 = filledSeries(dates.length);
-    const poportionQ975 = filledSeries(dates.length);
+    const rawCounts = createCovidQuantileSeries(dates.length);
+    const rawPoportion = createCovidQuantileSeries(dates.length);
 
     for (const row of locationRows) {
       const time = Date.parse(String(row.target_end_date));
@@ -184,117 +192,130 @@ function normalizeEnsembleCovidRows(rows: EnsembleCovidRow[]): { times: number[]
       }
       const poportionValue = toFiniteNumber(row.poportion_minmax) ?? toFiniteNumber(row.poportion);
       const v = Math.max(0, value);
-      if (nearlyEqual(quantile, 0.025)) {
-        q025[index] = v;
-        if (poportionValue !== null) {
-          poportionQ025[index] = poportionValue;
-        }
-      } else if (nearlyEqual(quantile, 0.1)) {
-        q10[index] = v;
-        if (poportionValue !== null) {
-          poportionQ10[index] = poportionValue;
-        }
-      } else if (nearlyEqual(quantile, 0.25)) {
-        q25[index] = v;
-        if (poportionValue !== null) {
-          poportionQ25[index] = poportionValue;
-        }
-      } else if (nearlyEqual(quantile, 0.5)) {
-        q50[index] = v;
-        if (poportionValue !== null) {
-          poportionQ50[index] = poportionValue;
-        }
-      } else if (nearlyEqual(quantile, 0.75)) {
-        q75[index] = v;
-        if (poportionValue !== null) {
-          poportionQ75[index] = poportionValue;
-        }
-      } else if (nearlyEqual(quantile, 0.9)) {
-        q90[index] = v;
-        if (poportionValue !== null) {
-          poportionQ90[index] = poportionValue;
-        }
-      } else if (nearlyEqual(quantile, 0.975)) {
-        q975[index] = v;
-        if (poportionValue !== null) {
-          poportionQ975[index] = poportionValue;
-        }
+      const assigned = assignCovidQuantile(rawCounts, quantile, index, v);
+      if (assigned && poportionValue !== null) {
+        assignCovidQuantile(rawPoportion, quantile, index, poportionValue);
       }
     }
 
-    const q025Series = interpolateFinite(q025);
-    const q10Series = interpolateFinite(q10);
-    const q25Series = interpolateFinite(q25);
-    const q50Series = interpolateFinite(q50);
-    const q75Series = interpolateFinite(q75);
-    const q90Series = interpolateFinite(q90);
-    const q975Series = interpolateFinite(q975);
-    const poportionQ025Series = interpolateFinite(poportionQ025);
-    const poportionQ10Series = interpolateFinite(poportionQ10);
-    const poportionQ25Series = interpolateFinite(poportionQ25);
-    const poportionQ50Series = interpolateFinite(poportionQ50);
-    const poportionQ75Series = interpolateFinite(poportionQ75);
-    const poportionQ90Series = interpolateFinite(poportionQ90);
-    const poportionQ975Series = interpolateFinite(poportionQ975);
-
-    enforceMonotonicQuantiles([q025Series, q10Series, q25Series, q50Series, q75Series, q90Series, q975Series]);
-    enforceMonotonicQuantiles([
-      poportionQ025Series,
-      poportionQ10Series,
-      poportionQ25Series,
-      poportionQ50Series,
-      poportionQ75Series,
-      poportionQ90Series,
-      poportionQ975Series
-    ]);
-
-    const hasQ025 = hasFinite(q025);
-    const hasQ975 = hasFinite(q975);
-    const lower95Series = hasQ025 ? q025Series : q10Series;
-    const upper95Series = hasQ975 ? q975Series : q90Series;
-    const hasPoportionQ025 = hasFinite(poportionQ025);
-    const hasPoportionQ975 = hasFinite(poportionQ975);
-    const poportionLowerSeries = hasPoportionQ025 ? poportionQ025Series : poportionQ10Series;
-    const poportionUpperSeries = hasPoportionQ975 ? poportionQ975Series : poportionQ90Series;
-
-    const iqrSeries = q50Series.map((_, i) => Math.max(0, q75Series[i] - q25Series[i]));
-    const wideSeries = q50Series.map((_, i) => Math.max(0, upper95Series[i] - lower95Series[i]));
-    const poportionUncSeries = poportionQ50Series.map((_, i) => Math.max(0, poportionUpperSeries[i] - poportionLowerSeries[i]));
-
-    layers.push({
-      id: `${abbreviation}|h1`,
-      mean: q50Series.slice(),
-      unc: wideSeries.slice(),
-      poportionUnc: poportionUncSeries.slice(),
-      lower: lower95Series.slice(),
-      upper: upper95Series.slice(),
-      unc50Series: iqrSeries.slice(),
-      unc95Series: wideSeries.slice(),
-      poportionUncSeries: poportionUncSeries.slice(),
-      lower50Series: q25Series.slice(),
-      upper50Series: q75Series.slice(),
-      lower95Series: lower95Series.slice(),
-      upper95Series: upper95Series.slice(),
-      quantiles: {
-        // Keep legacy keys for compatibility, and include full quantile set for spaghetti.
-        p05: lower95Series.slice(),
-        p25: q25Series.slice(),
-        p50: q50Series.slice(),
-        p75: q75Series.slice(),
-        p95: upper95Series.slice(),
-        p025: lower95Series.slice(),
-        p10: q10Series.slice(),
-        p90: q90Series.slice(),
-        p975: upper95Series.slice()
-      },
-      regionKey: abbreviation,
-      horizonKey: "h1"
-    });
+    const counts = interpolateCovidQuantileSeries(rawCounts);
+    const poportion = interpolateCovidQuantileSeries(rawPoportion);
+    enforceMonotonicQuantiles(covidQuantileRows(counts));
+    enforceMonotonicQuantiles(covidQuantileRows(poportion));
+    layers.push(buildCovidLayer(abbreviation, rawCounts, counts, rawPoportion, poportion));
   }
 
   return {
     times: dates.slice(),
     layers
+  };
+}
+
+function createCovidQuantileSeries(length: number): CovidQuantileSeries {
+  return {
+    q025: filledSeries(length),
+    q10: filledSeries(length),
+    q25: filledSeries(length),
+    q50: filledSeries(length),
+    q75: filledSeries(length),
+    q90: filledSeries(length),
+    q975: filledSeries(length)
+  };
+}
+
+function assignCovidQuantile(series: CovidQuantileSeries, quantile: number, index: number, value: number): boolean {
+  const target = covidQuantileTarget(series, quantile);
+  if (!target) {
+    return false;
+  }
+  target[index] = value;
+  return true;
+}
+
+function covidQuantileTarget(series: CovidQuantileSeries, quantile: number): number[] | null {
+  if (nearlyEqual(quantile, 0.025)) {
+    return series.q025;
+  }
+  if (nearlyEqual(quantile, 0.1)) {
+    return series.q10;
+  }
+  if (nearlyEqual(quantile, 0.25)) {
+    return series.q25;
+  }
+  if (nearlyEqual(quantile, 0.5)) {
+    return series.q50;
+  }
+  if (nearlyEqual(quantile, 0.75)) {
+    return series.q75;
+  }
+  if (nearlyEqual(quantile, 0.9)) {
+    return series.q90;
+  }
+  if (nearlyEqual(quantile, 0.975)) {
+    return series.q975;
+  }
+  return null;
+}
+
+function interpolateCovidQuantileSeries(series: CovidQuantileSeries): CovidQuantileSeries {
+  return {
+    q025: interpolateFinite(series.q025),
+    q10: interpolateFinite(series.q10),
+    q25: interpolateFinite(series.q25),
+    q50: interpolateFinite(series.q50),
+    q75: interpolateFinite(series.q75),
+    q90: interpolateFinite(series.q90),
+    q975: interpolateFinite(series.q975)
+  };
+}
+
+function covidQuantileRows(series: CovidQuantileSeries): number[][] {
+  return [series.q025, series.q10, series.q25, series.q50, series.q75, series.q90, series.q975];
+}
+
+function buildCovidLayer(
+  abbreviation: string,
+  rawCounts: CovidQuantileSeries,
+  counts: CovidQuantileSeries,
+  rawPoportion: CovidQuantileSeries,
+  poportion: CovidQuantileSeries
+): CovidLayerInput {
+  const lower95Series = hasFinite(rawCounts.q025) ? counts.q025 : counts.q10;
+  const upper95Series = hasFinite(rawCounts.q975) ? counts.q975 : counts.q90;
+  const poportionLowerSeries = hasFinite(rawPoportion.q025) ? poportion.q025 : poportion.q10;
+  const poportionUpperSeries = hasFinite(rawPoportion.q975) ? poportion.q975 : poportion.q90;
+  const iqrSeries = counts.q50.map((_value, i) => Math.max(0, counts.q75[i] - counts.q25[i]));
+  const wideSeries = counts.q50.map((_value, i) => Math.max(0, upper95Series[i] - lower95Series[i]));
+  const poportionUncSeries = poportion.q50.map((_value, i) => Math.max(0, poportionUpperSeries[i] - poportionLowerSeries[i]));
+
+  return {
+    id: `${abbreviation}|h1`,
+    mean: counts.q50.slice(),
+    unc: wideSeries.slice(),
+    poportionUnc: poportionUncSeries.slice(),
+    lower: lower95Series.slice(),
+    upper: upper95Series.slice(),
+    unc50Series: iqrSeries.slice(),
+    unc95Series: wideSeries.slice(),
+    poportionUncSeries: poportionUncSeries.slice(),
+    lower50Series: counts.q25.slice(),
+    upper50Series: counts.q75.slice(),
+    lower95Series: lower95Series.slice(),
+    upper95Series: upper95Series.slice(),
+    quantiles: {
+      // Keep legacy keys for compatibility, and include the full quantile set for spaghetti views.
+      p05: lower95Series.slice(),
+      p25: counts.q25.slice(),
+      p50: counts.q50.slice(),
+      p75: counts.q75.slice(),
+      p95: upper95Series.slice(),
+      p025: lower95Series.slice(),
+      p10: counts.q10.slice(),
+      p90: counts.q90.slice(),
+      p975: upper95Series.slice()
+    },
+    regionKey: abbreviation,
+    horizonKey: "h1"
   };
 }
 
@@ -349,27 +370,6 @@ function interpolateFinite(values: number[]): number[] {
   return out.map((v) => (Number.isFinite(v) ? Math.max(0, v) : 0));
 }
 
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string" && value.trim() !== "") {
-    const n = Number(value);
-    if (Number.isFinite(n)) {
-      return n;
-    }
-  }
-  return null;
-}
-
-function nearlyEqual(a: number, b: number, eps = 1e-6): boolean {
-  return Math.abs(a - b) <= eps;
-}
-
-function hasFinite(values: number[]): boolean {
-  return values.some((v) => Number.isFinite(v));
-}
-
 function enforceMonotonicQuantiles(series: number[][]): void {
   if (series.length === 0) {
     return;
@@ -380,12 +380,4 @@ function enforceMonotonicQuantiles(series: number[][]): void {
       series[i][t] = Math.max(series[i][t], series[i - 1][t]);
     }
   }
-}
-
-function sum(values: number[]): number {
-  let out = 0;
-  for (const v of values) {
-    out += v;
-  }
-  return out;
 }

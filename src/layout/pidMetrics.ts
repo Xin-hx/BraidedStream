@@ -1,17 +1,22 @@
+/**
+ * PID ordering metric bundle assembly for comparison panels.
+ */
 import type { SineStreamHooks } from "../core/baseline";
 import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
 import { normalizeOrderForComparison, rankMap } from "../core/orderCompare";
-import { buildPidCenterOutOrder, computePidOrdering } from "../core/pidOrdering";
+import { buildPidCenterOutOrder, computePidOrdering } from "../core/pid";
 import { computeStackedBoundaries } from "../core/stack";
-import type { BraidLayout, InvariantSummary, PreparedDataset, ROI, StackLayout } from "../core/types";
+import type { InvariantSummary, PidUncertaintySource, PreparedDataset, ROI } from "../core/types";
 import { orderLayers } from "../core/validate";
 import { computeMetrics, type MetricResult, type MultiscaleDiagnosticsSummary } from "./metrics";
+import { stackToBraidLayout } from "./searchUtils";
 
 export interface PidOrderingMetricsInput {
   dataset: PreparedDataset;
   roi: ROI | null;
   sineOrder: string[];
   uncertaintyStrength: number;
+  uncertaintySource?: PidUncertaintySource;
   baselineHooks?: SineStreamHooks;
 }
 
@@ -39,7 +44,8 @@ export function computePidOrderingMetrics(input: PidOrderingMetricsInput): PidOr
   const pid = computePidOrdering(input.dataset.layers, {
     excludeSelf: true,
     widthPenaltyPower: 1,
-    minComparators: 2
+    minComparators: 2,
+    uncertaintySource: input.uncertaintySource ?? "value"
   });
   const pidDepthOrder = normalizeOrderForComparison(pid.order, layerIds, input.dataset.order);
 
@@ -76,6 +82,7 @@ export function computePidOrderingMetrics(input: PidOrderingMetricsInput): PidOr
   const core = computeMetrics(input.dataset, beforeLayout, afterLayout, input.roi, invariant, pidDisplayLayers, {
     semantic: {
       enableTpidCenterAlignment: true,
+      pidUncertaintySource: input.uncertaintySource ?? "value",
       baselineShiftBeforeAbs: multiscale.diagnostics.localShiftAbs,
       baselineShiftAfterAbs: multiscale.diagnostics.distributedShiftAbs,
       uncertaintySaliency: multiscale.diagnostics.uncertaintySaliency
@@ -197,20 +204,5 @@ function metricRow(
     after,
     delta: after - before,
     better
-  };
-}
-
-function stackToBraidLayout(layout: StackLayout): BraidLayout {
-  const tLength = layout.baseline.length;
-  const gapCount = Math.max(0, layout.yBottom.length - 1);
-  return {
-    baseline: layout.baseline.slice(),
-    yBottom: layout.yBottom.map((row) => row.slice()),
-    yTop: layout.yTop.map((row) => row.slice()),
-    omega: new Array<number>(tLength).fill(0),
-    gapsPx: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
-    gapsValue: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
-    sumGapPx: new Array<number>(tLength).fill(0),
-    roiSupport: null
   };
 }

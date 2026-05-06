@@ -1,5 +1,10 @@
+/**
+ * ROI helpers for keeping user-selected time windows inside valid bounds.
+ */
 import type { ROI } from "./types";
+import { clamp } from "./utils";
 
+/** Normalize ROI endpoints and clamp them to the available time range. */
 export function normalizeROI(roi: ROI | null, tLength: number): ROI | null {
   if (!roi || tLength <= 0) {
     return null;
@@ -13,10 +18,12 @@ export function normalizeROI(roi: ROI | null, tLength: number): ROI | null {
     : { t0Index: raw1, t1Index: raw0 };
 }
 
+/** True when a time index is outside the active ROI, or when no ROI exists. */
 export function isOutsideROI(t: number, roi: ROI | null): boolean {
   return !roi || t < roi.t0Index || t > roi.t1Index;
 }
 
+/** Clamp a child ROI so it stays inside a parent ROI. */
 export function clampRoiToParent(roi: ROI | null, parent: ROI | null): ROI | null {
   if (!roi || !parent) {
     return null;
@@ -28,6 +35,15 @@ export function clampRoiToParent(roi: ROI | null, parent: ROI | null): ROI | nul
     : { t0Index: right, t1Index: left };
 }
 
-function clamp(v: number, low: number, high: number): number {
-  return Math.max(low, Math.min(high, v));
+/** Return inclusive ROI bounds as safe array indices. */
+export function roiBounds(length: number, roi: ROI | null): [number, number] {
+  if (length <= 0) {
+    return [0, 0];
+  }
+  if (!roi) {
+    return [0, length - 1];
+  }
+  const left = clamp(Math.round(roi.t0Index), 0, length - 1);
+  const right = clamp(Math.round(roi.t1Index), 0, length - 1);
+  return left <= right ? [left, right] : [right, left];
 }

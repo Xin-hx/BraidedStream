@@ -3,7 +3,7 @@ import * as d3 from "d3";
 import { onMounted, ref, watch } from "vue";
 import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
 import { normalizeOrderForComparison } from "../core/orderCompare";
-import { buildPidCenterOutOrder, computePidOrdering } from "../core/pidOrdering";
+import { buildPidCenterOutOrder, computePidOrdering } from "../core/pid";
 import { computeStackedBoundaries } from "../core/stack";
 import type { BaselineMode, LayerInput, PidBaselineMode, PreparedDataset, ROI, StackLayout } from "../core/types";
 import type { AppState } from "../state/appState";
@@ -159,6 +159,7 @@ watch(
     props.sineOrder,
     props.roi,
     props.state.pidBaselineMode,
+    props.state.pidUncertaintySource,
     props.state.optimization.baselineUncertaintyWeight,
     props.state.optimization.wiggleWeightL1,
     props.state.optimization.wiggleWeightL2,
@@ -218,7 +219,8 @@ function renderChart(): void {
   const pid = computePidOrdering(dataset.layers, {
     excludeSelf: true,
     widthPenaltyPower: 1,
-    minComparators: 2
+    minComparators: 2,
+    uncertaintySource: props.state.pidUncertaintySource
   });
   const layerIds = dataset.layers.map((layer) => layer.id);
   const sineBaseOrder = normalizeOrderForComparison(props.sineOrder, layerIds, dataset.order);
