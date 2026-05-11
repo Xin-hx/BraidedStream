@@ -24,6 +24,13 @@ export interface ChartSize {
   innerHeight: number;
 }
 
+export interface PlotArea {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 /** Read SVG dimensions and derive the inner plotting rectangle. */
 export function readChartSize(svg: SVGSVGElement, fallbackWidth: number, fallbackHeight: number, margin: ChartMargin): ChartSize {
   const width = Number(svg.getAttribute("width") ?? String(fallbackWidth));
@@ -34,6 +41,15 @@ export function readChartSize(svg: SVGSVGElement, fallbackWidth: number, fallbac
     margin,
     innerWidth: width - margin.left - margin.right,
     innerHeight: height - margin.top - margin.bottom
+  };
+}
+
+export function plotAreaFromSize(size: ChartSize): PlotArea {
+  return {
+    left: size.margin.left,
+    top: size.margin.top,
+    width: size.innerWidth,
+    height: size.innerHeight
   };
 }
 

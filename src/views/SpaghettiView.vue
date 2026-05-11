@@ -2,6 +2,8 @@
 import * as d3 from "d3";
 import { onMounted, ref, watch } from "vue";
 import type { LayerInput, PreparedDataset } from "../core/types";
+import { nearestIndexByValue, pointerToPlot } from "../interactions/hitTest";
+import type { PlotArea } from "../render/chartUtils";
 import { layerColor } from "../styles/palette";
 
 const props = defineProps<{
@@ -30,6 +32,7 @@ const margin = {
 };
 const innerWidth = width - margin.left - margin.right;
 const innerHeight = height - margin.top - margin.bottom;
+const plotArea: PlotArea = { left: margin.left, top: margin.top, width: innerWidth, height: innerHeight };
 const histogramGap = innerHeight * 0.045;
 const histogramRowGap = innerHeight * 0.026;
 const linePlotHeight = innerHeight * 0.66;
@@ -192,14 +195,11 @@ function onMouseMove(event: MouseEvent): void {
   if (!props.dataset || !svgRef.value || !xScale || !yScale || activeLayers.length === 0) {
     return;
   }
-  const rect = svgRef.value.getBoundingClientRect();
-  const localX = clamp(((event.clientX - rect.left) * width) / rect.width - margin.left, 0, innerWidth);
-  const localY = clamp(((event.clientY - rect.top) * height) / rect.height - margin.top, 0, innerHeight);
-  const innerX = localX;
-  const t = xScale.invert(innerX);
-  const i = nearestByValue(props.dataset.times, t);
-  const targetY = yScale.invert(clamp(localY, 0, linePlotHeight));
-  const focusLayer = pickFocusLayerByMedian(i, targetY, activeLayers);
+  const pointer = pointerToPlot(svgRef.value, event, plotArea);
+  const i = nearestIndexByValue(props.dataset.times, xScale.invert(pointer.x));
+  const focusLayer = pointer.insideY && pointer.y <= linePlotHeight
+    ? pickFocusLayerByMedian(i, yScale.invert(pointer.y), activeLayers)
+    : null;
   updateHover(i, focusLayer);
   const text = buildSpaghettiTooltip(i, props.dataset.times, focusLayer, activeLayers);
   emit("hover", { x: event.clientX, y: event.clientY, text });
@@ -210,27 +210,6 @@ function onMouseLeave(): void {
     hoverGroup.selectAll("*").remove();
   }
   emit("hover", null);
-}
-
-function nearestByValue(times: number[], target: number): number {
-  if (times.length <= 1) {
-    return 0;
-  }
-  let left = 0;
-  let right = times.length - 1;
-  while (left < right) {
-    const mid = Math.floor((left + right) / 2);
-    if (times[mid] < target) {
-      left = mid + 1;
-    } else {
-      right = mid;
-    }
-  }
-  if (left <= 0) {
-    return 0;
-  }
-  const prev = left - 1;
-  return Math.abs(times[left] - target) < Math.abs(times[prev] - target) ? left : prev;
 }
 
 function formatTimeTick(value: number): string {
@@ -412,7 +391,7 @@ function drawUncertaintyHistogram(
     .attr("fill", "rgba(14, 165, 233, 0.76)");
 }
 
-function updateHover(timeIndex: number, focusLayer: LayerInput): void {
+function updateHover(timeIndex: number, focusLayer: LayerInput | null): void {
   if (!hoverGroup || !props.dataset || !xScale || !yScale) {
     return;
   }
@@ -435,7 +414,7 @@ function updateHover(timeIndex: number, focusLayer: LayerInput): void {
     x,
     y: yScale!(medianAt(layer, timeIndex)),
     color: layerColor(i, layer.id),
-    focused: layer.id === focusLayer.id
+    focused: layer.id === focusLayer?.id
   }));
 
   hoverGroup
@@ -451,9 +430,9 @@ function updateHover(timeIndex: number, focusLayer: LayerInput): void {
     .attr("opacity", 0.98);
 }
 
-function pickFocusLayerByMedian(timeIndex: number, targetY: number, layers: LayerInput[]): LayerInput {
+function pickFocusLayerByMedian(timeIndex: number, targetY: number, layers: LayerInput[]): LayerInput | null {
   if (layers.length === 0) {
-    return activeLayers[0];
+    return null;
   }
   let best = layers[0];
   let bestDist = Number.POSITIVE_INFINITY;
@@ -467,15 +446,23 @@ function pickFocusLayerByMedian(timeIndex: number, targetY: number, layers: Laye
   return best;
 }
 
-function buildSpaghettiTooltip(timeIndex: number, times: number[], focusLayer: LayerInput, layers: LayerInput[]): string {
+function buildSpaghettiTooltip(timeIndex: number, times: number[], focusLayer: LayerInput | null, layers: LayerInput[]): string {
   const timeLabel = formatTimeTick(times[timeIndex]);
-  const quantiles = quantilesAt(focusLayer, timeIndex);
-  const iqr = iqrAt(focusLayer, timeIndex);
-  const poportion = focusLayer.poportionUnc?.[timeIndex];
   const iqrMean = d3.mean(layers.map((layer) => iqrAt(layer, timeIndex))) ?? 0;
   const poportionValues = layers.map((layer) => layer.poportionUnc?.[timeIndex]).filter((v): v is number => Number.isFinite(v));
   const poportionMean = d3.mean(poportionValues) ?? 0;
 
+  if (!focusLayer) {
+    return [
+      `t=${timeLabel} | selected states=${layers.length}`,
+      `mean(IQR)=${formatCompactNumber(iqrMean)}`,
+      `mean(poportion_unc)=${formatCompactNumber(poportionMean)}`
+    ].join("\n");
+  }
+
+  const quantiles = quantilesAt(focusLayer, timeIndex);
+  const iqr = iqrAt(focusLayer, timeIndex);
+  const poportion = focusLayer.poportionUnc?.[timeIndex];
   const header = `t=${timeLabel} | state=${formatLayerShort(focusLayer.id)}`;
   const qLines = quantiles.map((q) => `${q.key}=${formatCompactNumber(q.value)}`);
   return [
@@ -572,10 +559,6 @@ function areSameSeries(a?: number[], b?: number[]): boolean {
     }
   }
   return true;
-}
-
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
 }
 
 function formatLayerShort(layerId: string): string {

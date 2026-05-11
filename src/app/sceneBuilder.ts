@@ -1,14 +1,16 @@
-import { computeBaseline, computeMultiscaleDistributedBaseline, type SineStreamHooks } from "../core/baseline";
+import { computeBaseline } from "../core/baseline";
 import { computeBraidLayout } from "../core/braid";
 import type { DatasetBundle } from "../core/datasets";
 import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/optimizeOrder";
 import {
-  buildPidCenterOutOrder,
-  computeContourPid,
-  computePidOrdering,
-  computePidOrderingScores,
-  computeTemporalSelfInclusion
-} from "../core/pid";
+  computeOptimizingBaseline,
+  computeOptimizingOrder,
+  optimizingBaselineModeLabel,
+  optimizingStageLabel,
+  orderingScoringLabel,
+  resolveOptimizingVariantConfig,
+  type OptimizingVariantConfig
+} from "../core/optimizingUtils";
 import { clampRoiToParent, normalizeROI } from "../core/roi";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
@@ -18,15 +20,11 @@ import type {
   HorizonFilterMode,
   InvariantSummary,
   LayerInput,
-  OrderingScoringMode,
-  OptimizeMethod,
-  PidBaselineMode,
-  PidUncertaintySource,
   PreparedDataset,
   ROI,
   StackLayout
 } from "../core/types";
-import { layerUncertaintyAt, orderLayers } from "../core/validate";
+import { orderLayers } from "../core/validate";
 import { preprocessDataset } from "../data/transforms";
 import { computeMetrics, type MetricResult } from "../layout/metrics";
 import type { AppState } from "../state/appState";
@@ -43,26 +41,21 @@ export interface SceneBuildResult {
   diagnosticsNotes: string[];
 }
 
-export interface OptimizingVariantConfig {
-  orderingScoringMode: OrderingScoringMode;
-  baselineMode: PidBaselineMode;
-  pidUncertaintySource: PidUncertaintySource;
-  pidTimeAlpha: number;
-  baselineUncertaintyWeight: number;
-  baselineHooks: SineStreamHooks;
-}
+export type { OptimizingVariantConfig } from "../core/optimizingUtils";
 
 export function buildScene(bundle: DatasetBundle, state: AppState): SceneBuildResult {
-  const context = prepareSceneContext(bundle, state, { optimizeScope: "full" });
+  const context = prepareDatasetWindowContext(bundle, state);
+  const orderedLayers = orderLayers(context.dataset.layers, context.dataset.order);
   // 1) Baseline + stack define the reference layout without uncertainty spacing.
-  const baseline = computeBaseline(context.dataset.times, context.orderedLayers, state.baseline, baselineHooksFromState(state));
-  const baseLayout = computeStackedBoundaries(baseline, context.orderedLayers);
+  const baseline = computeBaseline(context.dataset.times, orderedLayers, state.baseline, baselineHooksFromState(state));
+  const baseLayout = computeStackedBoundaries(baseline, orderedLayers);
 
   // 2) Braiding injects uncertainty-aware gaps on top of the base stack.
   const effectiveGapMode = state.enableUncertaintyGap ? state.gapMode : "none";
+  const boundaryPenalty = new Array(Math.max(0, orderedLayers.length - 1)).fill(1);
   const braidedLayout = computeBraidLayout({
     base: baseLayout,
-    orderedLayers: context.orderedLayers,
+    orderedLayers,
     roi: context.insetRoi,
     baselineMode: state.baseline,
     gapMode: effectiveGapMode,
@@ -73,31 +66,31 @@ export function buildScene(bundle: DatasetBundle, state: AppState): SceneBuildRe
     spacingSlopeWeight: state.optimization.spacingSlopeWeight,
     spacingTemporalWeight: state.optimization.spacingTemporalWeight,
     spacingIterations: state.optimization.spacingIterations,
-    boundaryPenalty: context.optimized.boundaryPenalty,
+    boundaryPenalty,
     smoothKernel: state.smoothKernel,
     yScale: (v) => v
   });
 
   if (braidedLayout.diagnostics) {
-    braidedLayout.diagnostics.orderObjectiveBefore = context.optimized.diagnostics.objectiveBefore;
-    braidedLayout.diagnostics.orderObjectiveAfter = context.optimized.diagnostics.objectiveAfter;
-    braidedLayout.diagnostics.clusterCount = context.optimized.diagnostics.clusterCount;
-    braidedLayout.diagnostics.trunkCluster = context.optimized.diagnostics.trunkCluster;
-    braidedLayout.diagnostics.crossClusterBoundaries = context.optimized.diagnostics.crossClusterBoundaries;
+    braidedLayout.diagnostics.orderObjectiveBefore = 0;
+    braidedLayout.diagnostics.orderObjectiveAfter = 0;
+    braidedLayout.diagnostics.clusterCount = 1;
+    braidedLayout.diagnostics.trunkCluster = 0;
+    braidedLayout.diagnostics.crossClusterBoundaries = 0;
   }
 
-  const invariant = runInvariantChecks(context.orderedLayers, baseLayout, braidedLayout, context.insetRoi, {
+  const invariant = runInvariantChecks(orderedLayers, baseLayout, braidedLayout, context.insetRoi, {
     enabled: state.assertEnabled,
     throwOnError: false
   });
-  const metrics = computeMetrics(context.dataset, baseLayout, braidedLayout, context.insetRoi, invariant, context.orderedLayers, {
+  const metrics = computeMetrics(context.dataset, baseLayout, braidedLayout, context.insetRoi, invariant, orderedLayers, {
     includeGlobalRows: true
   });
-  const diagnosticsNotes = [...orderDiagnosticsNotes(context.optimized), ...gapDiagnosticsNotes(braidedLayout)];
+  const diagnosticsNotes = ["main reference: original order + centered baseline", ...gapDiagnosticsNotes(braidedLayout)];
 
   return {
     dataset: context.dataset,
-    orderedLayers: context.orderedLayers,
+    orderedLayers,
     baseLayout,
     braidedLayout,
     roi: context.activeRoi,
@@ -114,14 +107,15 @@ export function buildOptimizingVariantScene(
   config: OptimizingVariantConfig
 ): SceneBuildResult {
   const context = prepareDatasetWindowContext(bundle, state);
-  const orderResult = computeOptimizingOrder(context.dataset, config);
+  const resolvedConfig = resolveOptimizingVariantConfig(config);
+  const orderResult = computeOptimizingOrder(context.dataset, resolvedConfig);
   const orderedLayers = orderLayers(context.dataset.layers, orderResult.displayOrder);
   const baselineResult = computeOptimizingBaseline(
     context.dataset.times,
     orderedLayers,
-    config.baselineMode,
-    config.baselineHooks,
-    config.baselineUncertaintyWeight
+    resolvedConfig.baselineMode,
+    resolvedConfig.baselineHooks,
+    resolvedConfig.baselineUncertaintyWeight
   );
   const layoutStack = computeStackedBoundaries(baselineResult.baseline, orderedLayers);
   const layout = stackToBraidLayout(layoutStack);
@@ -130,12 +124,13 @@ export function buildOptimizingVariantScene(
     includeGlobalRows: true
   });
   const diagnosticsNotes = [
-    `ordering scoring: ${orderingScoringLabel(config.orderingScoringMode)}`,
-    `baseline: ${pidBaselineModeLabel(config.baselineMode)}`,
+    `stage: ${optimizingStageLabel(config.optimizingStage)}`,
+    `ordering scoring: ${orderingScoringLabel(resolvedConfig.orderingScoringMode)}`,
+    `baseline: ${optimizingBaselineModeLabel(resolvedConfig.baselineMode)}`,
     ...orderResult.notes
   ];
   if (baselineResult.multiscaleDiagnostics !== null) {
-    diagnosticsNotes.push(`baseline uncertainty weight: ${Math.max(0, config.baselineUncertaintyWeight).toFixed(3)}`);
+    diagnosticsNotes.push(`baseline uncertainty weight: ${Math.max(0, resolvedConfig.baselineUncertaintyWeight).toFixed(3)}`);
     diagnosticsNotes.push(...multiscaleDiagnosticsNotes(baselineResult.multiscaleDiagnostics));
   }
 
@@ -144,75 +139,6 @@ export function buildOptimizingVariantScene(
     orderedLayers,
     baseLayout: layoutStack,
     braidedLayout: layout,
-    roi: context.activeRoi,
-    insetRoi: context.insetRoi,
-    metrics,
-    notes: context.preprocessedNotes,
-    diagnosticsNotes
-  };
-}
-
-export function buildOptimizeComparisonScene(
-  bundle: DatasetBundle,
-  state: AppState,
-  optimizeMethod: OptimizeMethod
-): SceneBuildResult {
-  const useMultiscale = optimizeMethod === "multiscale";
-  const context = prepareSceneContext(bundle, state, {
-    optimizeScope: state.optimizeWithinROI ? "roi" : "full",
-    orderWithUncertainty: useMultiscale
-  });
-  const hooks = baselineHooksFromState(state);
-  const uncStrength = Math.max(0, state.optimization.baselineUncertaintyWeight ?? 0.45);
-  const beforeBaseline = computeBaseline(context.dataset.times, context.orderedLayers, "sineStream", hooks);
-  const beforeLayout = computeStackedBoundaries(beforeBaseline, context.orderedLayers);
-  let afterBaseline = beforeBaseline.slice();
-  let multiscale: ReturnType<typeof computeMultiscaleDistributedBaseline> | null = null;
-  if (useMultiscale) {
-    multiscale = computeMultiscaleDistributedBaseline(context.dataset.times, context.orderedLayers, uncStrength, hooks, 0.08);
-    afterBaseline = multiscale.baseline;
-  }
-  const afterLayoutStack = computeStackedBoundaries(afterBaseline, context.orderedLayers);
-  const afterLayout = stackToBraidLayout(afterLayoutStack);
-
-  const invariant = {
-    checked: false,
-    violations: [],
-    maxThicknessError: 0
-  };
-  const metrics = computeMetrics(context.dataset, beforeLayout, afterLayout, context.insetRoi, invariant, context.orderedLayers, {
-    semantic:
-      multiscale === null
-        ? undefined
-        : {
-            enableTpidCenterAlignment: true,
-            baselineShiftBeforeAbs: new Array<number>(context.dataset.times.length).fill(0),
-            baselineShiftAfterAbs: multiscale.diagnostics.distributedShiftAbs,
-            uncertaintySaliency: multiscale.diagnostics.uncertaintySaliency
-          },
-    multiscale:
-      multiscale === null
-        ? null
-        : {
-            method: multiscale.diagnostics.method,
-            verified: multiscale.diagnostics.verifiedMultiscale,
-            fallbackUsed: multiscale.diagnostics.fallbackUsed,
-            effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
-            threshold: multiscale.diagnostics.energyThreshold,
-            scaleBands: multiscale.diagnostics.scaleBands.map((band) => ({ scale: band.scale, ratio: band.ratio }))
-          },
-    includeGlobalRows: true
-  });
-  const diagnosticsNotes = [...orderDiagnosticsNotes(context.optimized)];
-  if (multiscale !== null) {
-    diagnosticsNotes.push(`baseline uncertainty weight: ${uncStrength.toFixed(3)}`);
-    diagnosticsNotes.push(...multiscaleDiagnosticsNotes(multiscale.diagnostics));
-  }
-  return {
-    dataset: context.dataset,
-    orderedLayers: context.orderedLayers,
-    baseLayout: beforeLayout,
-    braidedLayout: afterLayout,
     roi: context.activeRoi,
     insetRoi: context.insetRoi,
     metrics,
@@ -288,39 +214,6 @@ export function defaultWindow(length: number): ROI {
   return { t0Index: left, t1Index: right };
 }
 
-export function recommendHighUncertaintyRoi(dataset: PreparedDataset, parent: ROI | null): ROI {
-  const fallback = parent ?? defaultWindow(dataset.times.length);
-  const left = Math.max(0, fallback.t0Index);
-  const right = Math.min(dataset.times.length - 1, fallback.t1Index);
-  const span = right - left + 1;
-  if (span <= 2) {
-    return { t0Index: left, t1Index: right };
-  }
-
-  const subSpan = Math.max(3, Math.floor(span * 0.45));
-  let bestL = left;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  for (let l = left; l + subSpan - 1 <= right; l += 1) {
-    const r = l + subSpan - 1;
-    let score = 0;
-    for (let t = l; t <= r; t += 1) {
-      for (const layer of dataset.layers) {
-        score += layerUncertaintyAt(layer, t);
-      }
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      bestL = l;
-    }
-  }
-
-  return {
-    t0Index: bestL,
-    t1Index: Math.min(right, bestL + subSpan - 1)
-  };
-}
-
 export function applyHorizonFilter(
   dataset: PreparedDataset,
   kind: DatasetKind,
@@ -370,7 +263,7 @@ function prepareDatasetWindowContext(bundle: DatasetBundle, state: AppState): Da
   const activeRoi = normalizeROI(state.ROI, dataset.times.length) ?? defaultWindow(dataset.times.length);
   const insetRoi =
     clampRoiToParent(normalizeROI(state.insetROI, dataset.times.length), activeRoi) ??
-    recommendHighUncertaintyRoi(dataset, activeRoi);
+    activeRoi;
 
   return {
     dataset,
@@ -414,85 +307,6 @@ function prepareSceneContext(bundle: DatasetBundle, state: AppState, options: Sc
   };
 }
 
-function computeOptimizingOrder(
-  dataset: PreparedDataset,
-  config: OptimizingVariantConfig
-): { displayOrder: string[]; notes: string[] } {
-  const uncertaintySource = config.pidUncertaintySource;
-  if (config.orderingScoringMode === "pidMean") {
-    const contourPid = computeContourPid(dataset.layers, {
-      yBins: 180,
-      valueTransform: uncertaintySource === "poportion" ? "linear" : "log1p",
-      centralFraction: 0.5,
-      contourThreshold: 0.5,
-      uncertaintySource
-    });
-    const top = contourPid.scores[0];
-    return {
-      displayOrder: contourPid.displayOrder,
-      notes: [
-        "PID scoring: contour PID-Mean over time-value fuzzy masks",
-        top ? `top PID layer: ${layerLabel(top.id)} depth=${top.depth.toFixed(3)}` : "top PID layer: N/A"
-      ]
-    };
-  }
-
-  const pid = computePidOrdering(dataset.layers, {
-    excludeSelf: true,
-    widthPenaltyPower: 1,
-    minComparators: 2,
-    uncertaintySource
-  });
-
-  if (config.orderingScoringMode === "pidTimeWeighted") {
-    const temporalSelfInclusion = computeTemporalSelfInclusion(pid.depthSeriesByLayerId);
-    const scores = computePidOrderingScores({
-      layerIds: dataset.layers.map((layer) => layer.id),
-      D_cross: pid.depthSeriesByLayerId,
-      temporalSelfInclusion,
-      mode: "layer_pid_time_weighted",
-      alpha: config.pidTimeAlpha
-    });
-    const top = scores[0];
-    return {
-      displayOrder: buildPidCenterOutOrder(scores.map((score) => score.layerId)),
-      notes: [
-        `PID time scoring: alpha=${Math.max(0, Math.min(1, config.pidTimeAlpha)).toFixed(2)}`,
-        top ? `top PID-time layer: ${layerLabel(top.layerId)} score=${top.score.toFixed(3)}` : "top PID-time layer: N/A"
-      ]
-    };
-  }
-
-  const top = pid.scores[0];
-  return {
-    displayOrder: buildPidCenterOutOrder(pid.order),
-    notes: [
-      "one-way inclusion: interval center covered by peer uncertainty bands",
-      top ? `top inclusion layer: ${layerLabel(top.id)} depth=${top.depth.toFixed(3)}` : "top inclusion layer: N/A"
-    ]
-  };
-}
-
-function computeOptimizingBaseline(
-  times: number[],
-  orderedLayers: LayerInput[],
-  mode: PidBaselineMode,
-  hooks: SineStreamHooks,
-  uncertaintyStrength: number
-): { baseline: number[]; multiscaleDiagnostics: ReturnType<typeof computeMultiscaleDistributedBaseline>["diagnostics"] | null } {
-  if (mode === "multiscale") {
-    const result = computeMultiscaleDistributedBaseline(times, orderedLayers, Math.max(0, uncertaintyStrength), hooks, 0.08);
-    return {
-      baseline: result.baseline,
-      multiscaleDiagnostics: result.diagnostics
-    };
-  }
-  return {
-    baseline: computeBaseline(times, orderedLayers, mode as BaselineMode, hooks),
-    multiscaleDiagnostics: null
-  };
-}
-
 function emptyInvariantSummary(): InvariantSummary {
   return {
     checked: false,
@@ -510,33 +324,6 @@ function baselineHooksFromState(state: AppState) {
     irlsIterations: state.optimization.irlsIterations,
     irlsEps: state.optimization.irlsEps
   };
-}
-
-function orderingScoringLabel(mode: OrderingScoringMode): string {
-  if (mode === "pidMean") {
-    return "PID";
-  }
-  if (mode === "pidTimeWeighted") {
-    return "PID + time trend";
-  }
-  return "One-way inclusion";
-}
-
-function pidBaselineModeLabel(mode: PidBaselineMode): string {
-  if (mode === "l1") {
-    return "L1";
-  }
-  if (mode === "l2") {
-    return "L2";
-  }
-  if (mode === "sineStream") {
-    return "SineStream";
-  }
-  return "Multiscale";
-}
-
-function layerLabel(layerId: string): string {
-  return layerId.split("|")[0] ?? layerId;
 }
 
 function orderDiagnosticsNotes(optimized: OrderOptimizationResult): string[] {

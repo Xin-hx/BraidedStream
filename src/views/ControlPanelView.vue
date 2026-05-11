@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { RoiCandidate } from "../layout/roiRecommend";
 import type { AppState } from "../state/appState";
+import OptimizingVariantControls from "./OptimizingVariantControls.vue";
 
 interface SpaghettiStateOption {
   id: string;
@@ -10,8 +10,6 @@ interface SpaghettiStateOption {
 
 defineProps<{
   state: AppState;
-  recommendList: RoiCandidate[];
-  selectedRecommendIndex: number;
   availableStateOptions: SpaghettiStateOption[];
   defaultSpaghettiStateId: string | null;
   effectiveSpaghettiStateIds: string[];
@@ -21,24 +19,15 @@ const emit = defineEmits<{
   (e: "dataset-change"): void;
   (e: "toggle-compare"): void;
   (e: "controls-change"): void;
-  (e: "recommend-roi"): void;
-  (e: "apply-recommend-roi"): void;
-  (e: "recommend-inset-roi"): void;
   (e: "clear-roi"): void;
   (e: "export-svg"): void;
   (e: "export-png"): void;
   (e: "export-json"): void;
-  (e: "update:selected-recommend-index", value: number): void;
   (e: "update:spaghetti-selected-states", value: string[]): void;
 }>();
 
 function onControlsChange(): void {
   emit("controls-change");
-}
-
-function onCandidateChange(event: Event): void {
-  const target = event.target as HTMLSelectElement;
-  emit("update:selected-recommend-index", Math.max(0, Number(target.value) || 0));
 }
 
 function onSpaghettiSelectionChange(event: Event): void {
@@ -66,199 +55,12 @@ function onSpaghettiSelectionChange(event: Event): void {
       </div>
     </div>
 
-    <div v-if="state.enhanceTab === 'optimize' || state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime'" class="control-group control-group--optimize">
-      <div class="control-group__title">Optimizing</div>
-      <div class="control-group__items">
-        <label>
-          Baseline Method
-          <select v-if="state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime'" v-model="state.pidBaselineMode" @change="onControlsChange">
-            <option value="l1">L1</option>
-            <option value="l2">L2</option>
-            <option value="sineStream">SineStream</option>
-            <option value="multiscale">Multiscale</option>
-          </select>
-          <select v-else v-model="state.optimizeMethod" @change="onControlsChange">
-            <option value="sineStream">SineStream</option>
-            <option value="multiscale">Multiscale</option>
-          </select>
-        </label>
-
-        <label v-if="state.datasetKind === 'covid' && (state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime')">
-          PID Source
-          <select v-model="state.pidUncertaintySource" @change="onControlsChange">
-            <option value="value">value</option>
-            <option value="poportion">poportion</option>
-          </select>
-        </label>
-
-        <label v-if="state.enhanceTab === 'pidTime'">
-          PID Time Ordering
-          <select v-model="state.pidTimeOrderMode" @change="onControlsChange">
-            <option value="layer_pid_centrality">Layer PID Overall Centrality</option>
-            <option value="layer_pid_time_weighted">Layer PID + Time Inclusion Weighted</option>
-          </select>
-        </label>
-
-        <label v-if="state.enhanceTab === 'pidTime' && state.pidTimeOrderMode === 'layer_pid_time_weighted'">
-          alpha
-          <input v-model.number="state.pidTimeAlpha" type="range" min="0" max="1" step="0.01" @input="onControlsChange" />
-          <span class="control-inline-note">{{ state.pidTimeAlpha.toFixed(2) }}</span>
-        </label>
-
-        <template v-if="state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew' && state.enhanceTab !== 'pidTime'">
-        <label class="checkbox">
-          <input v-model="state.optimizeWithinROI" type="checkbox" @change="onControlsChange" />
-          Optimize within ROI
-        </label>
-
-        <label>
-          clusterAutoCutScale
-          <input v-model.number="state.optimization.clusterAutoCutScale" type="number" step="0.05" min="0" @change="onControlsChange" />
-        </label>
-
-        <label>
-          clusterBoundaryPenalty
-          <input
-            v-model.number="state.optimization.clusterBoundaryPenalty"
-            type="number"
-            step="0.05"
-            min="0"
-            @change="onControlsChange"
-          />
-        </label>
-
-        <label>
-          orderSimilaritySigma
-          <input
-            v-model.number="state.optimization.orderSimilaritySigma"
-            type="number"
-            step="0.05"
-            min="0.0001"
-            @change="onControlsChange"
-          />
-        </label>
-
-        <label>
-          orderMaxSwapPasses
-          <input v-model.number="state.optimization.orderMaxSwapPasses" type="number" step="1" min="1" @change="onControlsChange" />
-        </label>
-
-        <label>
-          orderUncertaintyWeight
-          <input
-            v-model.number="state.optimization.orderUncertaintyWeight"
-            type="number"
-            step="0.05"
-            min="0"
-            @change="onControlsChange"
-          />
-        </label>
-        </template>
-
-        <label>
-          baselineUncertaintyWeight
-          <input
-            v-model.number="state.optimization.baselineUncertaintyWeight"
-            type="number"
-            step="0.05"
-            min="0"
-            @change="onControlsChange"
-          />
-        </label>
-      </div>
-
-      <div v-if="(state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime') && state.pidBaselineMode === 'l2'" class="control-group__items">
-        <label>
-          wiggleWeightL2
-          <input v-model.number="state.optimization.wiggleWeightL2" type="number" step="0.05" min="0" @change="onControlsChange" />
-        </label>
-        <label>
-          centerAnchorWeight
-          <input
-            v-model.number="state.optimization.centerAnchorWeight"
-            type="number"
-            step="0.05"
-            min="0"
-            @change="onControlsChange"
-          />
-        </label>
-      </div>
-
-      <div v-if="(state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime') && state.pidBaselineMode === 'l1'" class="control-group__items">
-        <label>
-          wiggleWeightL1
-          <input v-model.number="state.optimization.wiggleWeightL1" type="number" step="0.05" min="0" @change="onControlsChange" />
-        </label>
-        <label>
-          centerAnchorWeight
-          <input
-            v-model.number="state.optimization.centerAnchorWeight"
-            type="number"
-            step="0.05"
-            min="0"
-            @change="onControlsChange"
-          />
-        </label>
-        <label>
-          irlsIterations
-          <input v-model.number="state.optimization.irlsIterations" type="number" step="1" min="1" @change="onControlsChange" />
-        </label>
-        <label>
-          irlsEps
-          <input v-model.number="state.optimization.irlsEps" type="number" step="0.0001" min="0.000000001" @change="onControlsChange" />
-        </label>
-      </div>
-
-      <div
-        v-if="
-          ((state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime') &&
-            (state.pidBaselineMode === 'sineStream' || state.pidBaselineMode === 'multiscale')) ||
-          ((state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew' && state.enhanceTab !== 'pidTime') &&
-            (state.optimizeMethod === 'sineStream' || state.optimizeMethod === 'multiscale'))
-        "
-        class="control-group__items"
-      >
-        <label>
-          baselineCenterType
-          <select v-model="state.optimization.baselineCenterType" @change="onControlsChange">
-            <option value="median">median</option>
-            <option value="mean">mean</option>
-            <option value="geometric">geometric</option>
-            <option value="harmonic">harmonic</option>
-          </select>
-        </label>
-        <template v-if="state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew' && state.enhanceTab !== 'pidTime'">
-        <label>
-          orderWeightType
-          <select v-model="state.optimization.orderWeightType" @change="onControlsChange">
-            <option value="max">max</option>
-            <option value="arithmetic">arithmetic</option>
-            <option value="geometric">geometric</option>
-            <option value="harmonic">harmonic</option>
-            <option value="median">median</option>
-          </select>
-        </label>
-        <label class="checkbox">
-          <input v-model="state.optimization.orderUseThicknessWeight" type="checkbox" @change="onControlsChange" />
-          thicknessWeight
-        </label>
-        <label class="checkbox">
-          <input v-model="state.optimization.orderUseLengthWeight" type="checkbox" @change="onControlsChange" />
-          lengthWeight
-        </label>
-        <label>
-          lengthThreshold
-          <input
-            v-model.number="state.optimization.orderLengthWeightThreshold"
-            type="number"
-            step="1"
-            min="1"
-            @change="onControlsChange"
-          />
-        </label>
-        </template>
-      </div>
-    </div>
+    <OptimizingVariantControls
+      v-if="state.enhanceTab === 'optimize'"
+      :state="state"
+      target="current"
+      @controls-change="onControlsChange"
+    />
 
     <div v-if="state.enhanceTab === 'braided'" class="control-group control-group--uncertainty">
       <div class="control-group__title">Braiding Controls</div>
@@ -377,37 +179,15 @@ function onSpaghettiSelectionChange(event: Event): void {
     <div class="control-group control-group--actions">
       <div class="control-group__title">ROI / Export</div>
       <div class="control-group__items">
-        <label>
-          Recommend ROI
-          <select v-model="state.recommendStrategy">
-            <option value="highest uncertainty">highest uncertainty</option>
-            <option value="highest mean slope">highest mean slope</option>
-            <option value="highest wiggle">highest wiggle</option>
-            <option value="largest local change">largest local change</option>
-          </select>
-        </label>
-
-        <button type="button" @click="emit('recommend-roi')">Recommend ROI</button>
-        <select :value="selectedRecommendIndex" title="Recommended ROI candidates" @change="onCandidateChange">
-          <option
-            v-for="(candidate, idx) in recommendList"
-            :key="candidate.label + idx"
-            :value="idx"
-          >
-            {{ candidate.label }} score={{ candidate.score.toFixed(2) }}
-          </option>
-        </select>
-        <button type="button" @click="emit('apply-recommend-roi')">Apply Suggested ROI</button>
-        <button type="button" @click="emit('recommend-inset-roi')">Recommend Inset ROI</button>
-        <button type="button" @click="emit('clear-roi')">Clear ROI</button>
+        <button type="button" @click="emit('clear-roi')">Reset Windows</button>
         <button type="button" @click="emit('export-svg')">Export SVG</button>
         <button type="button" @click="emit('export-png')">Export PNG</button>
         <button type="button" @click="emit('export-json')">Export JSON</button>
       </div>
     </div>
 
-    <button type="button" class="metrics-toggle" @click="emit('toggle-metrics')">
-          {{ state.metricsExpanded ? "Close Metrics" : "Show Metrics" }}
+    <button v-if="state.enhanceTab === 'optimize'" type="button" class="metrics-toggle" @click="emit('toggle-compare')">
+      {{ state.compareExpanded ? "Close Compare" : "Compare" }}
     </button>
   </section>
 </template>

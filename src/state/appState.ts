@@ -6,22 +6,22 @@ import type {
   GapMode,
   HorizonFilterMode,
   InsetViewMode,
+  OptimizingBaselineMode,
+  OptimizingStage,
   OrderingScoringMode,
-  OptimizeMethod,
-  PidBaselineMode,
-  PidTimeOrderMode,
   PidUncertaintySource,
   ROI,
   LayoutOptimizationConfig,
-  RoiRecommendStrategy,
+  OrderWeightType,
   SmoothKernel,
   UncertaintyBandMode
 } from "../core/types";
 import { FIXED_SEED } from "../core/seed";
 
 export interface OptimizingCompareState {
+  optimizingStage: OptimizingStage;
   orderingScoringMode: OrderingScoringMode;
-  baselineMode: PidBaselineMode;
+  baselineMode: OptimizingBaselineMode;
   pidUncertaintySource: PidUncertaintySource;
   pidTimeAlpha: number;
   baselineCenterType: BaselineCenterType;
@@ -31,20 +31,27 @@ export interface OptimizingCompareState {
   centerAnchorWeight: number;
   irlsIterations: number;
   irlsEps: number;
+  sineOrderWeightType: OrderWeightType;
+  sineOrderUseThicknessWeight: boolean;
+  sineOrderUseLengthWeight: boolean;
+  sineOrderLengthWeightThreshold: number;
+  sineOrderUncertaintyWeight: number;
+  clusterAutoCutScale: number;
+  clusterBoundaryPenalty: number;
+  orderSimilaritySigma: number;
+  orderMaxSwapPasses: number;
 }
 
 export interface AppState {
   datasetKind: DatasetKind;
   enhanceTab: EnhanceTab;
   compareExpanded: boolean;
+  optimizingStage: OptimizingStage;
   orderingScoringMode: OrderingScoringMode;
   compare: OptimizingCompareState;
-  optimizeMethod: OptimizeMethod;
-  pidBaselineMode: PidBaselineMode;
-  pidTimeOrderMode: PidTimeOrderMode;
+  optimizingBaselineMode: OptimizingBaselineMode;
   pidTimeAlpha: number;
   pidUncertaintySource: PidUncertaintySource;
-  optimizeWithinROI: boolean;
   spaghettiAllStates: boolean;
   spaghettiSelectedStates: string[];
   fixedSeed: number;
@@ -58,7 +65,6 @@ export interface AppState {
   smoothKernel: SmoothKernel;
   assertEnabled: boolean;
   yZoomInset: number;
-  recommendStrategy: RoiRecommendStrategy;
   covidUncertaintyBand: UncertaintyBandMode;
   covidHorizonFilter: HorizonFilterMode;
   optimization: LayoutOptimizationConfig;
@@ -73,10 +79,12 @@ export function createInitialState(): AppState {
     datasetKind: "covid",
     enhanceTab: "optimize",
     compareExpanded: false,
-    orderingScoringMode: "intervalInclusion",
+    optimizingStage: "tpidMultiscale",
+    orderingScoringMode: "pidTimeWeighted",
     compare: {
-      orderingScoringMode: "pidMean",
-      baselineMode: "multiscale",
+      optimizingStage: "sineStream",
+      orderingScoringMode: "sineStream",
+      baselineMode: "sineStream",
       pidUncertaintySource: "value",
       pidTimeAlpha: 0.8,
       baselineCenterType: "median",
@@ -85,18 +93,24 @@ export function createInitialState(): AppState {
       wiggleWeightL2: 1,
       centerAnchorWeight: 0.35,
       irlsIterations: 12,
-      irlsEps: 1e-3
+      irlsEps: 1e-3,
+      sineOrderWeightType: "max",
+      sineOrderUseThicknessWeight: true,
+      sineOrderUseLengthWeight: true,
+      sineOrderLengthWeightThreshold: 9,
+      sineOrderUncertaintyWeight: 0.35,
+      clusterAutoCutScale: 1,
+      clusterBoundaryPenalty: 0.5,
+      orderSimilaritySigma: 0.75,
+      orderMaxSwapPasses: 20
     },
-    optimizeMethod: "sineStream",
-    pidBaselineMode: "multiscale",
-    pidTimeOrderMode: "layer_pid_centrality",
+    optimizingBaselineMode: "multiscale",
     pidTimeAlpha: 0.8,
     pidUncertaintySource: "value",
-    optimizeWithinROI: true,
     spaghettiAllStates: false,
     spaghettiSelectedStates: [],
     fixedSeed: FIXED_SEED,
-    baseline: "sineStream",
+    baseline: "center",
     gapMode: "uncGap",
     insetViewMode: "split",
     ROI: null,
@@ -106,7 +120,6 @@ export function createInitialState(): AppState {
     smoothKernel: "cubic",
     assertEnabled: true,
     yZoomInset: 1.1,
-    recommendStrategy: "highest uncertainty",
     covidUncertaintyBand: "95",
     covidHorizonFilter: "h1",
     optimization: {

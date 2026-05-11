@@ -9,20 +9,48 @@ export interface HoverInfo {
   layerValues: Array<{ id: string; label: string; mean: number; unc: number }>;
 }
 
+interface HoverLayerEntry {
+  layer: LayerInput;
+  label: string;
+}
+
+export interface HoverInfoResolver {
+  build: (timeIndex: number, times: number[], focusLayerId?: string | null) => HoverInfo;
+}
+
+export function createHoverInfoResolver(layers: LayerInput[]): HoverInfoResolver {
+  const entries = layers.map((layer) => ({ layer, label: formatLayerLabel(layer.id) }));
+  const byId = new Map(entries.map((entry) => [entry.layer.id, entry]));
+  return {
+    build: (timeIndex, times, focusLayerId) => buildHoverInfoFromEntries(timeIndex, times, entries, byId, focusLayerId)
+  };
+}
+
 export function buildHoverInfo(timeIndex: number, times: number[], layers: LayerInput[], focusLayerId?: string | null): HoverInfo {
+  const resolver = createHoverInfoResolver(layers);
+  return resolver.build(timeIndex, times, focusLayerId);
+}
+
+function buildHoverInfoFromEntries(
+  timeIndex: number,
+  times: number[],
+  entries: HoverLayerEntry[],
+  byId: Map<string, HoverLayerEntry>,
+  focusLayerId?: string | null
+): HoverInfo {
   const clamped = Math.max(0, Math.min(times.length - 1, timeIndex));
-  const allValues = layers.map((layer) => ({
-    id: layer.id,
-    label: formatLayerLabel(layer.id),
-    mean: layer.mean[clamped],
-    unc: layer.unc?.[clamped] ?? 0
-  }));
-  const layerValues = focusLayerId ? allValues.filter((item) => item.id === focusLayerId) : allValues;
+  let total = 0;
+  for (const entry of entries) {
+    total += entry.layer.mean[clamped] ?? 0;
+  }
+  const layerValues = focusLayerId
+    ? layerValueAt(byId.get(focusLayerId), clamped)
+    : topLayerValuesAt(entries, clamped, 4);
   return {
     timeIndex: clamped,
     timeValue: times[clamped],
     timeLabel: formatTimeValue(times[clamped]),
-    total: allValues.reduce((acc, item) => acc + item.mean, 0),
+    total,
     focusLayerId: focusLayerId ?? null,
     layerValues
   };
@@ -41,6 +69,44 @@ export function tooltipText(info: HoverInfo, extra: string[]): string {
     top.push("no substream at cursor");
   }
   return [header, ...top, ...extra].join("\n");
+}
+
+function topLayerValuesAt(
+  entries: HoverLayerEntry[],
+  timeIndex: number,
+  limit: number
+): Array<{ id: string; label: string; mean: number; unc: number }> {
+  const top: Array<{ id: string; label: string; mean: number; unc: number }> = [];
+  for (const entry of entries) {
+    const item = layerValue(entry, timeIndex);
+    let insertAt = top.length;
+    while (insertAt > 0 && item.mean > top[insertAt - 1].mean) {
+      insertAt -= 1;
+    }
+    if (insertAt < limit) {
+      top.splice(insertAt, 0, item);
+      if (top.length > limit) {
+        top.pop();
+      }
+    }
+  }
+  return top;
+}
+
+function layerValueAt(
+  entry: HoverLayerEntry | undefined,
+  timeIndex: number
+): Array<{ id: string; label: string; mean: number; unc: number }> {
+  return entry ? [layerValue(entry, timeIndex)] : [];
+}
+
+function layerValue(entry: HoverLayerEntry, timeIndex: number): { id: string; label: string; mean: number; unc: number } {
+  return {
+    id: entry.layer.id,
+    label: entry.label,
+    mean: entry.layer.mean[timeIndex] ?? 0,
+    unc: entry.layer.unc?.[timeIndex] ?? 0
+  };
 }
 
 function formatTimeValue(value: number): string {

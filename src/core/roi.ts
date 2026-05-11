@@ -47,3 +47,32 @@ export function roiBounds(length: number, roi: ROI | null): [number, number] {
   const right = clamp(Math.round(roi.t1Index), 0, length - 1);
   return left <= right ? [left, right] : [right, left];
 }
+
+/** Build an ROI from ISO date strings by snapping each endpoint to the nearest sample. */
+export function roiFromIsoDateRange(times: number[], startIso: string, endIso: string): ROI | null {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || times.length === 0) {
+    return null;
+  }
+  return normalizeROI(
+    {
+      t0Index: nearestTimeIndex(times, start),
+      t1Index: nearestTimeIndex(times, end)
+    },
+    times.length
+  );
+}
+
+function nearestTimeIndex(times: number[], target: number): number {
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < times.length; i += 1) {
+    const distance = Math.abs(times[i] - target);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}

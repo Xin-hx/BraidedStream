@@ -6,9 +6,18 @@ import { roiBounds } from "../core/roi";
 import type { BraidLayout, InsetViewMode, LayerInput, PreparedDataset, ROI, StackLayout } from "../core/types";
 import { clamp01, percentile, range } from "../core/utils";
 import { createAreaPath } from "./paths";
-import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtentForIndices, readChartSize } from "./chartUtils";
+import {
+  angleAxisLabels,
+  drawCrosshair,
+  formatTimeTick,
+  layoutExtentForIndices,
+  plotAreaFromSize,
+  readChartSize,
+  type PlotArea
+} from "./chartUtils";
 import { diffColor, layerColor } from "../styles/palette";
 import { boundaryUncertaintyAt } from "../core/validate";
+import { applyLayerHoverHighlight as applyPathLayerHoverHighlight, type LayerHoverDatum } from "./layerHoverHighlight";
 
 export interface InsetRenderArgs {
   dataset: PreparedDataset;
@@ -30,6 +39,12 @@ export interface InsetRenderResult {
   yScale: d3.ScaleLinear<number, number> | null;
   activeTimes: number[];
   activeStartIndex: number;
+  plotArea: PlotArea;
+}
+
+interface InsetBandDatum extends LayerHoverDatum {
+  path: string;
+  color: string;
 }
 
 export class InsetChart {
@@ -38,6 +53,7 @@ export class InsetChart {
   private readonly margin = { top: 24, right: 16, bottom: 44, left: 52 };
   private readonly innerWidth: number;
   private readonly innerHeight: number;
+  private readonly plotArea: PlotArea;
   private readonly root: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly titleGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly beforeGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
@@ -46,6 +62,7 @@ export class InsetChart {
   private readonly axisX: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly axisY: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly hoverGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
+  private hoveredLayerId: string | null = null;
 
   constructor(private readonly svg: SVGSVGElement) {
     const size = readChartSize(svg, 1180, 300, this.margin);
@@ -53,6 +70,7 @@ export class InsetChart {
     this.height = size.height;
     this.innerWidth = size.innerWidth;
     this.innerHeight = size.innerHeight;
+    this.plotArea = plotAreaFromSize(size);
 
     const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
     this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
@@ -91,7 +109,7 @@ export class InsetChart {
         .attr("y", 0)
         .attr("fill", "#334155")
         .text("No time points available");
-      return { xScale: null, yScale: null, activeTimes: [], activeStartIndex: 0 };
+      return { xScale: null, yScale: null, activeTimes: [], activeStartIndex: 0, plotArea: this.plotArea };
     }
 
     const [left, right] = roiBounds(dataset.times.length, args.roi);
@@ -125,6 +143,7 @@ export class InsetChart {
       fixedSeed
     );
     this.drawDiffAndGapSemantic(orderedLayers, dataset, before, after, left, right, xScale, yScale, viewMode, enableUncertaintyGap);
+    this.applyLayerHoverHighlight();
 
     this.axisX
       .attr("transform", `translate(0,${this.innerHeight})`)
@@ -137,11 +156,19 @@ export class InsetChart {
     angleAxisLabels(this.axisX);
     this.axisY.call(d3.axisLeft(yScale).ticks(6));
 
-    return { xScale, yScale, activeTimes, activeStartIndex: left };
+    return { xScale, yScale, activeTimes, activeStartIndex: left, plotArea: this.plotArea };
   }
 
   setHover(timeValue: number | null, xScale: d3.ScaleLinear<number, number> | null): void {
     drawCrosshair(this.hoverGroup, timeValue, xScale, this.innerHeight, "#7c2d12", 0.5, "4,2");
+  }
+
+  setLayerHover(layerId: string | null): void {
+    if (this.hoveredLayerId === layerId) {
+      return;
+    }
+    this.hoveredLayerId = layerId;
+    this.applyLayerHoverHighlight();
   }
 
   private drawTitle(viewMode: InsetViewMode, enableUncertaintyGap: boolean, enableJaggedEdge: boolean): void {
@@ -180,7 +207,11 @@ export class InsetChart {
     const onlyAfter = viewMode === "after";
     const showBothInDiff = viewMode === "diff";
 
-    const pathsBefore = orderedLayers.map((layer, k) => ({
+    const beforeFillOpacity = split ? 0.44 : showBothInDiff ? 0.25 : 0.8;
+    const beforeStrokeOpacity = showBothInDiff ? 0.35 : 0.12;
+    const afterFillOpacity = split ? 0.78 : showBothInDiff ? 0.56 : 0.84;
+
+    const pathsBefore: InsetBandDatum[] = orderedLayers.map((layer, k) => ({
       id: layer.id,
       path: createAreaPath(
         dataset.times.slice(left, right + 1),
@@ -199,9 +230,13 @@ export class InsetChart {
           uncertainty: layer.unc?.slice(left, right + 1)
         }
       ),
-      color: layerColor(k, layer.id)
+      color: layerColor(k, layer.id),
+      fillOpacity: beforeFillOpacity,
+      stroke: "#1e293b",
+      strokeOpacity: beforeStrokeOpacity,
+      strokeWidth: 0.8
     }));
-    const pathsAfter = orderedLayers.map((layer, k) => ({
+    const pathsAfter: InsetBandDatum[] = orderedLayers.map((layer, k) => ({
       id: layer.id,
       path: createAreaPath(
         dataset.times.slice(left, right + 1),
@@ -220,7 +255,11 @@ export class InsetChart {
           uncertainty: layer.unc?.slice(left, right + 1)
         }
       ),
-      color: layerColor(k, layer.id)
+      color: layerColor(k, layer.id),
+      fillOpacity: afterFillOpacity,
+      stroke: "#f8fafc",
+      strokeOpacity: 1,
+      strokeWidth: 0.8
     }));
 
     this.beforeGroup
@@ -229,10 +268,10 @@ export class InsetChart {
       .join((enter) => enter.append("path").attr("class", "before-band"), (update) => update, (exit) => exit.remove())
       .attr("d", (d) => d.path)
       .attr("fill", (d) => d.color)
-      .attr("fill-opacity", split ? 0.44 : showBothInDiff ? 0.25 : 0.8)
-      .attr("stroke", "#1e293b")
-      .attr("stroke-opacity", showBothInDiff ? 0.35 : 0.12)
-      .attr("stroke-width", 0.8);
+      .attr("fill-opacity", (d) => d.fillOpacity)
+      .attr("stroke", (d) => d.stroke)
+      .attr("stroke-opacity", (d) => d.strokeOpacity)
+      .attr("stroke-width", (d) => d.strokeWidth);
 
     this.afterGroup
       .selectAll<SVGPathElement, (typeof pathsAfter)[number]>("path.after-band")
@@ -240,9 +279,27 @@ export class InsetChart {
       .join((enter) => enter.append("path").attr("class", "after-band"), (update) => update, (exit) => exit.remove())
       .attr("d", (d) => d.path)
       .attr("fill", (d) => d.color)
-      .attr("fill-opacity", split ? 0.78 : showBothInDiff ? 0.56 : 0.84)
-      .attr("stroke", "#f8fafc")
-      .attr("stroke-width", 0.8);
+      .attr("fill-opacity", (d) => d.fillOpacity)
+      .attr("stroke", (d) => d.stroke)
+      .attr("stroke-opacity", (d) => d.strokeOpacity)
+      .attr("stroke-width", (d) => d.strokeWidth);
+  }
+
+  private applyLayerHoverHighlight(): void {
+    const options = {
+      dimFillOpacity: 0.2,
+      dimStrokeOpacity: 0.06,
+      hoverFillBoost: 0.16,
+      hoverStroke: "#0f172a",
+      hoverStrokeOpacity: 0.88,
+      hoverStrokeWidthFactor: 2.2
+    };
+    applyPathLayerHoverHighlight(this.beforeGroup.selectAll<SVGPathElement, InsetBandDatum>("path.before-band"), this.hoveredLayerId, {
+      ...options,
+      dimFillOpacity: 0.14
+    });
+    applyPathLayerHoverHighlight(this.afterGroup.selectAll<SVGPathElement, InsetBandDatum>("path.after-band"), this.hoveredLayerId, options);
+    this.overlayGroup.attr("opacity", this.hoveredLayerId ? 0.45 : 1);
   }
 
   private drawDiffAndGapSemantic(

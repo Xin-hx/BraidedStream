@@ -5,24 +5,24 @@ import {
   buildOptimizingVariantScene,
   buildScene,
   defaultWindow,
-  recommendHighUncertaintyRoi,
   type OptimizingVariantConfig,
   type SceneBuildResult
 } from "./app/sceneBuilder";
 import type { SineStreamHooks } from "./core/baseline";
 import type { DatasetBundle } from "./core/datasets";
 import { applyCovidUncertaintyBand, createSyntheticBundle, loadCovidBundle } from "./core/datasets";
+import { clampRoiToParent, roiFromIsoDateRange } from "./core/roi";
 import { FIXED_SEED } from "./core/seed";
 import type { BaselineMode, DatasetKind, LayerInput, ROI } from "./core/types";
 import { exportConfigJson, exportSnapshotPng, exportSnapshotSvg } from "./interactions/export";
 import { computeMetrics, type MetricResult } from "./layout/metrics";
-import { type RoiCandidate, recommendRoiWindows } from "./layout/roiRecommend";
 import { createInitialState } from "./state/appState";
 import type { AppState } from "./state/appState";
 import ControlPanelView from "./views/ControlPanelView.vue";
 import GlobalStreamView from "./views/GlobalStreamView.vue";
 import InsetDetailView from "./views/InsetDetailView.vue";
 import MetricsView from "./views/MetricsView.vue";
+import OptimizingVariantControls from "./views/OptimizingVariantControls.vue";
 import SpaghettiView from "./views/SpaghettiView.vue";
 import "./styles.css";
 
@@ -45,13 +45,14 @@ interface SpaghettiViewExpose {
   getSpaghettiSvg: () => SVGSVGElement | null;
 }
 
-type MainBaselineBranch = "center" | "zero";
-
 interface SpaghettiStateOption {
   id: string;
   label: string;
   total: number;
 }
+
+const DEFAULT_MAIN_WINDOW = { start: "2021-08-26", end: "2022-04-15" };
+const DEFAULT_ROI_WINDOW = { start: "2021-12-11", end: "2022-03-12" };
 
 const defaultState = createInitialState();
 const state = reactive(createInitialState());
@@ -67,10 +68,7 @@ const mainScene = ref<SceneBuildResult | null>(null);
 const optimizeScene = ref<SceneBuildResult | null>(null);
 const braidedScene = ref<SceneBuildResult | null>(null);
 
-const recommendList = ref<RoiCandidate[]>([]);
-const selectedRecommendIndex = ref(0);
 const hover = ref<HoverPayload | null>(null);
-const mainBaselineBranch = ref<MainBaselineBranch>(state.baseline === "zero" ? "zero" : "center");
 
 const globalViewRef = ref<GlobalViewExpose | null>(null);
 const insetViewRef = ref<InsetViewExpose | null>(null);
@@ -194,11 +192,20 @@ async function activateDataset(kind: DatasetKind): Promise<void> {
   state.datasetKind = resolvedKind;
 
   syncActiveCovidUncertainty();
-  state.ROI = defaultWindow(bundle.dataset.times.length);
-  state.insetROI = recommendHighUncertaintyRoi(bundle.dataset, state.ROI);
+  applyDefaultWindows(bundle.dataset.times);
   state.spaghettiAllStates = false;
   state.spaghettiSelectedStates = [];
   recomputeScene();
+}
+
+function applyDefaultWindows(times: number[]): void {
+  const mainWindow =
+    roiFromIsoDateRange(times, DEFAULT_MAIN_WINDOW.start, DEFAULT_MAIN_WINDOW.end) ?? defaultWindow(times.length);
+  const detailWindow =
+    clampRoiToParent(roiFromIsoDateRange(times, DEFAULT_ROI_WINDOW.start, DEFAULT_ROI_WINDOW.end), mainWindow) ??
+    mainWindow;
+  state.ROI = mainWindow;
+  state.insetROI = detailWindow;
 }
 
 function syncActiveCovidUncertainty(): void {
@@ -218,7 +225,7 @@ function recomputeScene(): void {
 
   const mainState = {
     ...state,
-    baseline: mainBaselineBranch.value as BaselineMode,
+    baseline: "center",
     enableJaggedEdge: false
   };
   const enhanceState = {
@@ -231,7 +238,7 @@ function recomputeScene(): void {
   const nextOptimize = buildOptimizingVariantScene(activeBundle.value, enhanceState, buildCurrentVariantConfig());
   const nextBraided = buildBraidedEnhanceScene(activeBundle.value, enhanceState, enhanceBaselineMode.value);
 
-  state.baseline = mainBaselineBranch.value;
+  state.baseline = "center";
   state.ROI = nextMain.roi;
   state.insetROI = nextMain.insetRoi;
   state.enableJaggedEdge = false;
@@ -243,23 +250,59 @@ function recomputeScene(): void {
 
 function buildCurrentVariantConfig(): OptimizingVariantConfig {
   return {
+    optimizingStage: state.optimizingStage,
     orderingScoringMode: state.orderingScoringMode,
-    baselineMode: state.pidBaselineMode,
+    baselineMode: state.optimizingBaselineMode,
     pidUncertaintySource: state.pidUncertaintySource,
     pidTimeAlpha: state.pidTimeAlpha,
     baselineUncertaintyWeight: state.optimization.baselineUncertaintyWeight ?? 0.45,
-    baselineHooks: baselineHooksFromState()
+    baselineHooks: baselineHooksFromState(),
+    orderRoi: state.ROI,
+    sineOrder: sineOrderConfigFromState()
   };
 }
 
 function buildCompareVariantConfig(): OptimizingVariantConfig {
   return {
+    optimizingStage: state.compare.optimizingStage,
     orderingScoringMode: state.compare.orderingScoringMode,
     baselineMode: state.compare.baselineMode,
     pidUncertaintySource: state.compare.pidUncertaintySource,
     pidTimeAlpha: state.compare.pidTimeAlpha,
     baselineUncertaintyWeight: state.compare.baselineUncertaintyWeight,
-    baselineHooks: baselineHooksFromCompare()
+    baselineHooks: baselineHooksFromCompare(),
+    orderRoi: state.ROI,
+    sineOrder: sineOrderConfigFromCompare()
+  };
+}
+
+function sineOrderConfigFromState(): OptimizingVariantConfig["sineOrder"] {
+  return {
+    clusterAutoCutScale: state.optimization.clusterAutoCutScale,
+    clusterBoundaryPenalty: state.optimization.clusterBoundaryPenalty,
+    orderSimilaritySigma: state.optimization.orderSimilaritySigma,
+    orderMaxSwapPasses: state.optimization.orderMaxSwapPasses,
+    orderWeightType: state.optimization.orderWeightType ?? "max",
+    orderUseThicknessWeight: state.optimization.orderUseThicknessWeight !== false,
+    orderUseLengthWeight: state.optimization.orderUseLengthWeight !== false,
+    orderLengthWeightThreshold: state.optimization.orderLengthWeightThreshold ?? 9,
+    orderUncertaintyWeight: state.optimization.orderUncertaintyWeight ?? 0.35,
+    fixedSeed: state.fixedSeed
+  };
+}
+
+function sineOrderConfigFromCompare(): OptimizingVariantConfig["sineOrder"] {
+  return {
+    clusterAutoCutScale: state.compare.clusterAutoCutScale,
+    clusterBoundaryPenalty: state.compare.clusterBoundaryPenalty,
+    orderSimilaritySigma: state.compare.orderSimilaritySigma,
+    orderMaxSwapPasses: state.compare.orderMaxSwapPasses,
+    orderWeightType: state.compare.sineOrderWeightType,
+    orderUseThicknessWeight: state.compare.sineOrderUseThicknessWeight,
+    orderUseLengthWeight: state.compare.sineOrderUseLengthWeight,
+    orderLengthWeightThreshold: state.compare.sineOrderLengthWeightThreshold,
+    orderUncertaintyWeight: state.compare.sineOrderUncertaintyWeight,
+    fixedSeed: state.fixedSeed
   };
 }
 
@@ -291,12 +334,15 @@ function applyRoiChange(roi: ROI | null): void {
     return;
   }
   state.ROI = roi ?? defaultWindow(source.dataset.times.length);
-  state.insetROI = recommendHighUncertaintyRoi(source.dataset, state.ROI);
+  state.insetROI =
+    clampRoiToParent(state.insetROI, state.ROI) ??
+    clampRoiToParent(roiFromIsoDateRange(source.dataset.times, DEFAULT_ROI_WINDOW.start, DEFAULT_ROI_WINDOW.end), state.ROI) ??
+    state.ROI;
   recomputeScene();
 }
 
 function applyInsetRoiChange(roi: ROI | null): void {
-  state.insetROI = roi;
+  state.insetROI = clampRoiToParent(roi, state.ROI) ?? state.ROI;
   recomputeScene();
 }
 
@@ -333,53 +379,12 @@ function onSpaghettiSelectedStatesChange(next: string[]): void {
   sanitizeSpaghettiSelection();
 }
 
-function onRecommendRoi(): void {
-  const source = mainScene.value ?? optimizeScene.value ?? braidedScene.value;
-  if (!source) {
-    return;
-  }
-  const windowSize = state.ROI
-    ? state.ROI.t1Index - state.ROI.t0Index + 1
-    : Math.max(14, Math.floor(source.dataset.times.length * 0.1));
-  recommendList.value = recommendRoiWindows(source.dataset, state.recommendStrategy, windowSize, 8);
-  selectedRecommendIndex.value = 0;
-  if (recommendList.value.length > 0) {
-    state.ROI = recommendList.value[0].roi;
-    state.insetROI = recommendHighUncertaintyRoi(source.dataset, state.ROI);
-    recomputeScene();
-  }
-}
-
-function onApplyRecommendedRoi(): void {
-  const source = mainScene.value ?? optimizeScene.value ?? braidedScene.value;
-  if (!source) {
-    return;
-  }
-  const candidate = recommendList.value[selectedRecommendIndex.value];
-  if (!candidate) {
-    return;
-  }
-  state.ROI = candidate.roi;
-  state.insetROI = recommendHighUncertaintyRoi(source.dataset, state.ROI);
-  recomputeScene();
-}
-
-function onRecommendInsetRoi(): void {
-  const source = mainScene.value ?? optimizeScene.value ?? braidedScene.value;
-  if (!source) {
-    return;
-  }
-  state.insetROI = recommendHighUncertaintyRoi(source.dataset, state.ROI);
-  recomputeScene();
-}
-
 function onClearRoi(): void {
   const source = mainScene.value ?? optimizeScene.value ?? braidedScene.value;
   if (!source) {
     return;
   }
-  state.ROI = defaultWindow(source.dataset.times.length);
-  state.insetROI = recommendHighUncertaintyRoi(source.dataset, state.ROI);
+  applyDefaultWindows(source.dataset.times);
   recomputeScene();
 }
 
@@ -389,9 +394,10 @@ function snapshotConfig(): Record<string, unknown> {
     dataset: activeKind.value,
     fixedSeed: state.fixedSeed,
     viewBranches: {
-      mainBaseline: mainBaselineBranch.value,
+      mainBaseline: "center",
+      optimizingStage: state.optimizingStage,
       orderingScoringMode: state.orderingScoringMode,
-      optimizingBaseline: state.pidBaselineMode,
+      optimizingBaseline: state.optimizingBaselineMode,
       enhanceTab: state.enhanceTab
     },
     state: {
@@ -436,22 +442,12 @@ function currentDetailSvg(): SVGSVGElement | null {
   return insetViewRef.value?.getInsetSvg() ?? null;
 }
 
-function onMainBaselineBranchChange(next: MainBaselineBranch): void {
-  if (mainBaselineBranch.value === next) {
-    return;
-  }
-  mainBaselineBranch.value = next;
-  state.baseline = next;
-  recomputeScene();
-}
-
 function sanitizeState(): void {
   if (state.datasetKind === "covid") {
     state.covidHorizonFilter = "h1";
   }
   state.fixedSeed = FIXED_SEED;
   state.enableJaggedEdge = false;
-  state.optimizeWithinROI = state.optimizeWithinROI !== false;
   state.gapAlphaPx = finiteAtLeast(state.gapAlphaPx, defaultState.gapAlphaPx, 0);
   state.maxExtraHeightPx = finiteAtLeast(state.maxExtraHeightPx, defaultState.maxExtraHeightPx, 1);
   state.insetJaggedAmplitude = finiteAtLeast(state.insetJaggedAmplitude, defaultState.insetJaggedAmplitude, 0);
@@ -634,19 +630,13 @@ function layerStateLabel(layerId: string): string {
       <aside class="workspace-sidebar">
         <ControlPanelView
           :state="state"
-          :recommend-list="recommendList"
-          :selected-recommend-index="selectedRecommendIndex"
           :available-state-options="availableStateOptions"
           :default-spaghetti-state-id="defaultSpaghettiStateId"
           :effective-spaghetti-state-ids="effectiveSpaghettiStateIds"
-          @update:selected-recommend-index="selectedRecommendIndex = $event"
           @dataset-change="onDatasetChanged"
           @toggle-compare="onToggleCompare"
           @update:spaghetti-selected-states="onSpaghettiSelectedStatesChange"
           @controls-change="onControlsChanged"
-          @recommend-roi="onRecommendRoi"
-          @apply-recommend-roi="onApplyRecommendedRoi"
-          @recommend-inset-roi="onRecommendInsetRoi"
           @clear-roi="onClearRoi"
           @export-svg="onExportSvg"
           @export-png="onExportPng"
@@ -658,10 +648,8 @@ function layerStateLabel(layerId: string): string {
         <GlobalStreamView
           ref="globalViewRef"
           :scene="mainScene"
-          :main-baseline-branch="mainBaselineBranch"
           @update-roi="applyRoiChange"
           @update-inset-roi="applyInsetRoiChange"
-          @update-main-baseline-branch="onMainBaselineBranchChange"
           @hover="onHover"
         />
 
@@ -687,6 +675,7 @@ function layerStateLabel(layerId: string): string {
           :state="state"
           forced-view-mode="after"
           :forced-uncertainty-gap="false"
+          :enable-layer-hover-highlight="true"
           @hover="onHover"
         />
 
@@ -718,79 +707,7 @@ function layerStateLabel(layerId: string): string {
       </div>
 
       <div class="compare-controls">
-        <div class="control-group control-group--ordering">
-          <div class="control-group__title">Compare Ordering</div>
-          <div class="control-group__items">
-            <label>
-              Scoring
-              <select v-model="state.compare.orderingScoringMode" @change="onCompareControlsChanged">
-                <option value="intervalInclusion">One-way inclusion</option>
-                <option value="pidMean">PID</option>
-                <option value="pidTimeWeighted">PID + time trend</option>
-              </select>
-            </label>
-            <label v-if="state.datasetKind === 'covid'">
-              PID Source
-              <select v-model="state.compare.pidUncertaintySource" @change="onCompareControlsChanged">
-                <option value="value">value</option>
-                <option value="poportion">poportion</option>
-              </select>
-            </label>
-            <label v-if="state.compare.orderingScoringMode === 'pidTimeWeighted'">
-              alpha
-              <input v-model.number="state.compare.pidTimeAlpha" type="range" min="0" max="1" step="0.01" @input="onCompareControlsChanged" />
-              <span class="control-inline-note">{{ state.compare.pidTimeAlpha.toFixed(2) }}</span>
-            </label>
-          </div>
-        </div>
-
-        <div class="control-group control-group--optimize">
-          <div class="control-group__title">Compare Baseline</div>
-          <div class="control-group__items">
-            <label>
-              Baseline Method
-              <select v-model="state.compare.baselineMode" @change="onCompareControlsChanged">
-                <option value="l1">L1</option>
-                <option value="l2">L2</option>
-                <option value="sineStream">SineStream</option>
-                <option value="multiscale">Multiscale</option>
-              </select>
-            </label>
-            <label v-if="state.compare.baselineMode === 'multiscale'">
-              baselineUncertaintyWeight
-              <input v-model.number="state.compare.baselineUncertaintyWeight" type="number" step="0.05" min="0" @change="onCompareControlsChanged" />
-            </label>
-            <label v-if="state.compare.baselineMode === 'sineStream' || state.compare.baselineMode === 'multiscale'">
-              baselineCenterType
-              <select v-model="state.compare.baselineCenterType" @change="onCompareControlsChanged">
-                <option value="median">median</option>
-                <option value="mean">mean</option>
-                <option value="geometric">geometric</option>
-                <option value="harmonic">harmonic</option>
-              </select>
-            </label>
-            <label v-if="state.compare.baselineMode === 'l1'">
-              wiggleWeightL1
-              <input v-model.number="state.compare.wiggleWeightL1" type="number" step="0.05" min="0" @change="onCompareControlsChanged" />
-            </label>
-            <label v-if="state.compare.baselineMode === 'l2'">
-              wiggleWeightL2
-              <input v-model.number="state.compare.wiggleWeightL2" type="number" step="0.05" min="0" @change="onCompareControlsChanged" />
-            </label>
-            <label v-if="state.compare.baselineMode === 'l1' || state.compare.baselineMode === 'l2'">
-              centerAnchorWeight
-              <input v-model.number="state.compare.centerAnchorWeight" type="number" step="0.05" min="0" @change="onCompareControlsChanged" />
-            </label>
-            <label v-if="state.compare.baselineMode === 'l1'">
-              irlsIterations
-              <input v-model.number="state.compare.irlsIterations" type="number" step="1" min="1" @change="onCompareControlsChanged" />
-            </label>
-            <label v-if="state.compare.baselineMode === 'l1'">
-              irlsEps
-              <input v-model.number="state.compare.irlsEps" type="number" step="0.0001" min="0.000000001" @change="onCompareControlsChanged" />
-            </label>
-          </div>
-        </div>
+        <OptimizingVariantControls :state="state" target="compare" @controls-change="onCompareControlsChanged" />
       </div>
 
       <InsetDetailView
@@ -799,6 +716,7 @@ function layerStateLabel(layerId: string): string {
         :state="state"
         forced-view-mode="after"
         :forced-uncertainty-gap="false"
+        :enable-layer-hover-highlight="true"
         @hover="onHover"
       />
 

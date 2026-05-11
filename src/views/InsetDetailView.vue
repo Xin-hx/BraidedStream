@@ -2,9 +2,11 @@
 import * as d3 from "d3";
 import { onMounted, ref, watch } from "vue";
 import type { SceneBuildResult } from "../app/sceneBuilder";
-import type { InsetViewMode, LayerInput, StackLayout } from "../core/types";
+import type { InsetViewMode, StackLayout } from "../core/types";
 import type { AppState } from "../state/appState";
-import { buildHoverInfo, tooltipText } from "../interactions/hover";
+import { createHoverInfoResolver, tooltipText, type HoverInfoResolver } from "../interactions/hover";
+import { layerIdAtY, pointerToPlot, timeIndexAtPlotX } from "../interactions/hitTest";
+import type { PlotArea } from "../render/chartUtils";
 import { InsetChart } from "../render/insetChart";
 
 const props = defineProps<{
@@ -12,6 +14,7 @@ const props = defineProps<{
   state: AppState;
   forcedViewMode?: InsetViewMode | null;
   forcedUncertaintyGap?: boolean | null;
+  enableLayerHoverHighlight?: boolean | null;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +27,8 @@ let lastInsetXScale: d3.ScaleLinear<number, number> | null = null;
 let lastInsetYScale: d3.ScaleLinear<number, number> | null = null;
 let lastInsetTimes: number[] = [];
 let lastInsetStartIndex = 0;
+let lastInsetPlotArea: PlotArea | null = null;
+let hoverInfo: HoverInfoResolver | null = null;
 
 onMounted(() => {
   if (insetSvg.value) {
@@ -41,7 +46,8 @@ watch(
     props.state.insetJaggedAmplitude,
     props.state.insetJaggedFrequency,
     props.forcedViewMode,
-    props.forcedUncertaintyGap
+    props.forcedUncertaintyGap,
+    props.enableLayerHoverHighlight
   ],
   () => {
     renderChart();
@@ -51,8 +57,10 @@ watch(
 
 function renderChart(): void {
   if (!props.scene || !insetChart) {
+    hoverInfo = null;
     return;
   }
+  hoverInfo = createHoverInfoResolver(props.scene.dataset.layers);
   const result = insetChart.render({
     dataset: props.scene.dataset,
     orderedLayers: props.scene.orderedLayers,
@@ -71,43 +79,49 @@ function renderChart(): void {
   lastInsetYScale = result.yScale;
   lastInsetTimes = result.activeTimes;
   lastInsetStartIndex = result.activeStartIndex;
+  lastInsetPlotArea = result.plotArea;
+  if (!props.enableLayerHoverHighlight) {
+    insetChart.setLayerHover(null);
+  }
 }
 
 function onInsetMove(event: MouseEvent): void {
-  if (!props.scene || !insetSvg.value || !lastInsetXScale) {
+  if (!props.scene || !insetSvg.value || !lastInsetXScale || !lastInsetPlotArea || !hoverInfo) {
     return;
   }
   if (lastInsetTimes.length === 0) {
     return;
   }
-  const x = pointerX(insetSvg.value, event);
-  const timeValue = lastInsetXScale.invert(x);
-  const localIndex = nearestByValue(lastInsetTimes, timeValue);
+  const pointer = pointerToPlot(insetSvg.value, event, lastInsetPlotArea);
+  const localIndex = timeIndexAtPlotX(lastInsetTimes, lastInsetXScale, pointer.x);
   const i = lastInsetStartIndex + localIndex;
-  const y = pointerY(insetSvg.value, event);
+  const hoverLayout = currentHoverLayout();
   const focusLayerId =
-    lastInsetYScale !== null
-      ? selectLayerIdAtPosition(
+    lastInsetYScale !== null && pointer.insideY
+      ? layerIdAtY(
           i,
-          lastInsetYScale.invert(y),
+          lastInsetYScale.invert(pointer.y),
           props.scene.orderedLayers,
-          props.scene.braidedLayout.yBottom,
-          props.scene.braidedLayout.yTop
+          hoverLayout
         )
       : null;
   if (insetChart && lastInsetXScale) {
     insetChart.setHover(props.scene.dataset.times[i], lastInsetXScale);
+    if (props.enableLayerHoverHighlight) {
+      insetChart.setLayerHover(focusLayerId);
+    }
   }
   emit("hover", {
     x: event.clientX,
     y: event.clientY,
-    text: tooltipText(buildHoverInfo(i, props.scene.dataset.times, props.scene.dataset.layers, focusLayerId), ["enhanced"])
+    text: tooltipText(hoverInfo.build(i, props.scene.dataset.times, focusLayerId), ["enhanced"])
   });
 }
 
 function onLeave(): void {
   if (insetChart) {
     insetChart.setHover(null, null);
+    insetChart.setLayerHover(null);
   }
   emit("hover", null);
 }
@@ -116,52 +130,12 @@ defineExpose({
   getInsetSvg: () => insetSvg.value
 });
 
-function pointerX(svg: SVGSVGElement, event: MouseEvent): number {
-  const rect = svg.getBoundingClientRect();
-  return Math.max(0, Math.min(rect.width, event.clientX - rect.left));
-}
-
-function pointerY(svg: SVGSVGElement, event: MouseEvent): number {
-  const rect = svg.getBoundingClientRect();
-  return Math.max(0, Math.min(rect.height, event.clientY - rect.top));
-}
-
-function nearestByValue(times: number[], target: number): number {
-  if (times.length <= 1) {
-    return 0;
+function currentHoverLayout(): StackLayout {
+  if (!props.scene) {
+    return { baseline: [], yBottom: [], yTop: [] };
   }
-  let left = 0;
-  let right = times.length - 1;
-  while (left < right) {
-    const mid = Math.floor((left + right) / 2);
-    if (times[mid] < target) {
-      left = mid + 1;
-    } else {
-      right = mid;
-    }
-  }
-  if (left <= 0) {
-    return 0;
-  }
-  const prev = left - 1;
-  return Math.abs(times[left] - target) < Math.abs(times[prev] - target) ? left : prev;
-}
-
-function selectLayerIdAtPosition(
-  timeIndex: number,
-  yValue: number,
-  orderedLayers: LayerInput[],
-  yBottom: number[][],
-  yTop: number[][]
-): string | null {
-  for (let k = orderedLayers.length - 1; k >= 0; k -= 1) {
-    const lo = yBottom[k][timeIndex];
-    const hi = yTop[k][timeIndex];
-    if (yValue >= lo && yValue <= hi) {
-      return orderedLayers[k].id;
-    }
-  }
-  return null;
+  const mode = props.forcedViewMode ?? props.state.insetViewMode;
+  return mode === "before" ? props.scene.baseLayout : props.scene.braidedLayout;
 }
 </script>
 

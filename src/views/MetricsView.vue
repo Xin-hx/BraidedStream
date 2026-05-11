@@ -83,8 +83,8 @@ function pct(value: number): number {
         <thead>
           <tr>
             <th>Metric</th>
-            <th>Before</th>
-            <th>After</th>
+            <th>Compare</th>
+            <th>Current</th>
             <th>Delta</th>
             <th>Status</th>
           </tr>
@@ -110,8 +110,8 @@ function pct(value: number): number {
           <thead>
             <tr>
               <th>Metric</th>
-              <th>Before</th>
-              <th>After</th>
+              <th>Compare</th>
+              <th>Current</th>
               <th>Delta</th>
               <th>Status</th>
             </tr>

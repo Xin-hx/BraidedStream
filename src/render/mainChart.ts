@@ -5,7 +5,16 @@ import * as d3 from "d3";
 import { roiBounds } from "../core/roi";
 import type { LayerInput, PreparedDataset, ROI, StackLayout } from "../core/types";
 import { createAreaPath } from "./paths";
-import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtent, readChartSize, roiXRange } from "./chartUtils";
+import {
+  angleAxisLabels,
+  drawCrosshair,
+  formatTimeTick,
+  layoutExtent,
+  plotAreaFromSize,
+  readChartSize,
+  roiXRange,
+  type PlotArea
+} from "./chartUtils";
 import { layerColor } from "../styles/palette";
 import { createRoiBrush, type RoiBrushController } from "../ui/brush";
 
@@ -18,12 +27,19 @@ export interface MainChartRenderArgs {
   onInsetRoiChange: (roi: ROI | null) => void;
 }
 
+export interface MainChartRenderResult {
+  xScale: d3.ScaleLinear<number, number>;
+  yScale: d3.ScaleLinear<number, number>;
+  plotArea: PlotArea;
+}
+
 export class MainChart {
   private readonly width: number;
   private readonly height: number;
   private readonly margin = { top: 22, right: 16, bottom: 44, left: 52 };
   private readonly innerWidth: number;
   private readonly innerHeight: number;
+  private readonly plotArea: PlotArea;
   private readonly root: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly layersGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly roiGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
@@ -41,6 +57,7 @@ export class MainChart {
     this.height = size.height;
     this.innerWidth = size.innerWidth;
     this.innerHeight = size.innerHeight;
+    this.plotArea = plotAreaFromSize(size);
 
     const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
     this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
@@ -63,7 +80,7 @@ export class MainChart {
     );
   }
 
-  render(args: MainChartRenderArgs): { xScale: d3.ScaleLinear<number, number>; yScale: d3.ScaleLinear<number, number> } {
+  render(args: MainChartRenderArgs): MainChartRenderResult {
     const { dataset, orderedLayers, layout, insetRoi, onInsetRoiChange } = args;
     const [left, right] = roiBounds(dataset.times.length, args.roi);
     const domainStart = dataset.times[left];
@@ -122,7 +139,7 @@ export class MainChart {
     angleAxisLabels(this.axisX);
     this.axisY.call(d3.axisLeft(yScale).ticks(7));
 
-    return { xScale, yScale };
+    return { xScale, yScale, plotArea: this.plotArea };
   }
 
   private drawInsetRoi(roi: ROI | null, times: number[], xScale: d3.ScaleLinear<number, number>): void {

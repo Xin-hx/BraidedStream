@@ -3,18 +3,18 @@
  */
 
 export type BaselineMode = "sineStream" | "center" | "zero" | "l1" | "l2";
+export type OptimizingBaselineMode = BaselineMode | "multiscale";
 export type GapMode = "none" | "uncGap" | "fixedGap";
 export type SmoothKernel = "cubic";
 export type DatasetKind = "synthetic" | "covid";
 export type InsetViewMode = "before" | "after" | "diff" | "split";
 export type EnhanceTab = "optimize" | "braided" | "spaghetti";
-export type OptimizeMethod = "sineStream" | "multiscale";
-export type PidBaselineMode = "l1" | "l2" | "sineStream" | "multiscale";
 export type PidUncertaintySource = "value" | "poportion";
 export type PidTimeOrderMode = "layer_pid_centrality" | "layer_pid_time_weighted";
-export type OrderingScoringMode = "intervalInclusion" | "pidMean" | "pidTimeWeighted";
+export type OptimizingStage = "plainStream" | "stackedGeometry" | "sineStream" | "tpidMultiscale" | "custom";
+export type OrderingScoringMode = "input" | "insideOut" | "sineStream" | "intervalInclusion" | "pidMean" | "pidTimeWeighted";
 export type BaselineCenterType = "median" | "mean" | "geometric" | "harmonic";
-export type RoiRecommendStrategy = "highest uncertainty" | "highest mean slope" | "highest wiggle" | "largest local change";
+export type OrderWeightType = "max" | "arithmetic" | "geometric" | "harmonic" | "median";
 export type UncertaintyBandMode = "50" | "95";
 export type HorizonFilterMode = "h1" | "h2" | "h3" | "h4";
 
@@ -45,7 +45,7 @@ export interface LayoutOptimizationConfig {
   /** SineStream baseline center type: "median" | "mean" | "geometric" | "harmonic" */
   baselineCenterType?: BaselineCenterType;
   /** SineStream layer ordering weight type: "max" | "arithmetic" | "geometric" | "harmonic" | "median" */
-  orderWeightType?: "max" | "arithmetic" | "geometric" | "harmonic" | "median";
+  orderWeightType?: OrderWeightType;
   /** Enable thickness weighting in layer ordering */
   orderUseThicknessWeight?: boolean;
   /** Enable length weighting in layer ordering */
