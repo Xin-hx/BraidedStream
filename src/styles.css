@@ -293,6 +293,14 @@ button:hover {
   border-radius: 8px;
 }
 
+#pid-time-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 8px;
+}
+
 .main-stream-divider {
   border-top: 1px dashed rgba(71, 85, 105, 0.45);
   margin-top: 2px;

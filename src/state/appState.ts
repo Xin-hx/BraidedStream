@@ -1,12 +1,15 @@
 import type {
   BaselineMode,
+  BaselineCenterType,
   DatasetKind,
   EnhanceTab,
   GapMode,
   HorizonFilterMode,
   InsetViewMode,
+  OrderingScoringMode,
   OptimizeMethod,
   PidBaselineMode,
+  PidTimeOrderMode,
   PidUncertaintySource,
   ROI,
   LayoutOptimizationConfig,
@@ -16,12 +19,30 @@ import type {
 } from "../core/types";
 import { FIXED_SEED } from "../core/seed";
 
+export interface OptimizingCompareState {
+  orderingScoringMode: OrderingScoringMode;
+  baselineMode: PidBaselineMode;
+  pidUncertaintySource: PidUncertaintySource;
+  pidTimeAlpha: number;
+  baselineCenterType: BaselineCenterType;
+  baselineUncertaintyWeight: number;
+  wiggleWeightL1: number;
+  wiggleWeightL2: number;
+  centerAnchorWeight: number;
+  irlsIterations: number;
+  irlsEps: number;
+}
+
 export interface AppState {
   datasetKind: DatasetKind;
   enhanceTab: EnhanceTab;
-  metricsExpanded: boolean;
+  compareExpanded: boolean;
+  orderingScoringMode: OrderingScoringMode;
+  compare: OptimizingCompareState;
   optimizeMethod: OptimizeMethod;
   pidBaselineMode: PidBaselineMode;
+  pidTimeOrderMode: PidTimeOrderMode;
+  pidTimeAlpha: number;
   pidUncertaintySource: PidUncertaintySource;
   optimizeWithinROI: boolean;
   spaghettiAllStates: boolean;
@@ -51,9 +72,25 @@ export function createInitialState(): AppState {
   return {
     datasetKind: "covid",
     enhanceTab: "optimize",
-    metricsExpanded: false,
+    compareExpanded: false,
+    orderingScoringMode: "intervalInclusion",
+    compare: {
+      orderingScoringMode: "pidMean",
+      baselineMode: "multiscale",
+      pidUncertaintySource: "value",
+      pidTimeAlpha: 0.8,
+      baselineCenterType: "median",
+      baselineUncertaintyWeight: 0.45,
+      wiggleWeightL1: 1,
+      wiggleWeightL2: 1,
+      centerAnchorWeight: 0.35,
+      irlsIterations: 12,
+      irlsEps: 1e-3
+    },
     optimizeMethod: "sineStream",
     pidBaselineMode: "multiscale",
+    pidTimeOrderMode: "layer_pid_centrality",
+    pidTimeAlpha: 0.8,
     pidUncertaintySource: "value",
     optimizeWithinROI: true,
     spaghettiAllStates: false,

@@ -19,7 +19,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: "dataset-change"): void;
-  (e: "toggle-metrics"): void;
+  (e: "toggle-compare"): void;
   (e: "controls-change"): void;
   (e: "recommend-roi"): void;
   (e: "apply-recommend-roi"): void;
@@ -66,12 +66,12 @@ function onSpaghettiSelectionChange(event: Event): void {
       </div>
     </div>
 
-    <div v-if="state.enhanceTab === 'optimize' || state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew'" class="control-group control-group--optimize">
+    <div v-if="state.enhanceTab === 'optimize' || state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime'" class="control-group control-group--optimize">
       <div class="control-group__title">Optimizing</div>
       <div class="control-group__items">
         <label>
           Baseline Method
-          <select v-if="state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew'" v-model="state.pidBaselineMode" @change="onControlsChange">
+          <select v-if="state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime'" v-model="state.pidBaselineMode" @change="onControlsChange">
             <option value="l1">L1</option>
             <option value="l2">L2</option>
             <option value="sineStream">SineStream</option>
@@ -83,7 +83,7 @@ function onSpaghettiSelectionChange(event: Event): void {
           </select>
         </label>
 
-        <label v-if="state.datasetKind === 'covid' && (state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew')">
+        <label v-if="state.datasetKind === 'covid' && (state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime')">
           PID Source
           <select v-model="state.pidUncertaintySource" @change="onControlsChange">
             <option value="value">value</option>
@@ -91,7 +91,21 @@ function onSpaghettiSelectionChange(event: Event): void {
           </select>
         </label>
 
-        <template v-if="state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew'">
+        <label v-if="state.enhanceTab === 'pidTime'">
+          PID Time Ordering
+          <select v-model="state.pidTimeOrderMode" @change="onControlsChange">
+            <option value="layer_pid_centrality">Layer PID Overall Centrality</option>
+            <option value="layer_pid_time_weighted">Layer PID + Time Inclusion Weighted</option>
+          </select>
+        </label>
+
+        <label v-if="state.enhanceTab === 'pidTime' && state.pidTimeOrderMode === 'layer_pid_time_weighted'">
+          alpha
+          <input v-model.number="state.pidTimeAlpha" type="range" min="0" max="1" step="0.01" @input="onControlsChange" />
+          <span class="control-inline-note">{{ state.pidTimeAlpha.toFixed(2) }}</span>
+        </label>
+
+        <template v-if="state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew' && state.enhanceTab !== 'pidTime'">
         <label class="checkbox">
           <input v-model="state.optimizeWithinROI" type="checkbox" @change="onControlsChange" />
           Optimize within ROI
@@ -153,7 +167,7 @@ function onSpaghettiSelectionChange(event: Event): void {
         </label>
       </div>
 
-      <div v-if="(state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew') && state.pidBaselineMode === 'l2'" class="control-group__items">
+      <div v-if="(state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime') && state.pidBaselineMode === 'l2'" class="control-group__items">
         <label>
           wiggleWeightL2
           <input v-model.number="state.optimization.wiggleWeightL2" type="number" step="0.05" min="0" @change="onControlsChange" />
@@ -170,7 +184,7 @@ function onSpaghettiSelectionChange(event: Event): void {
         </label>
       </div>
 
-      <div v-if="(state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew') && state.pidBaselineMode === 'l1'" class="control-group__items">
+      <div v-if="(state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime') && state.pidBaselineMode === 'l1'" class="control-group__items">
         <label>
           wiggleWeightL1
           <input v-model.number="state.optimization.wiggleWeightL1" type="number" step="0.05" min="0" @change="onControlsChange" />
@@ -197,9 +211,9 @@ function onSpaghettiSelectionChange(event: Event): void {
 
       <div
         v-if="
-          ((state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew') &&
+          ((state.enhanceTab === 'pidOrdering' || state.enhanceTab === 'pidNew' || state.enhanceTab === 'pidTime') &&
             (state.pidBaselineMode === 'sineStream' || state.pidBaselineMode === 'multiscale')) ||
-          ((state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew') &&
+          ((state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew' && state.enhanceTab !== 'pidTime') &&
             (state.optimizeMethod === 'sineStream' || state.optimizeMethod === 'multiscale'))
         "
         class="control-group__items"
@@ -213,7 +227,7 @@ function onSpaghettiSelectionChange(event: Event): void {
             <option value="harmonic">harmonic</option>
           </select>
         </label>
-        <template v-if="state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew'">
+        <template v-if="state.enhanceTab !== 'pidOrdering' && state.enhanceTab !== 'pidNew' && state.enhanceTab !== 'pidTime'">
         <label>
           orderWeightType
           <select v-model="state.optimization.orderWeightType" @change="onControlsChange">

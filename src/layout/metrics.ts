@@ -44,6 +44,8 @@ export interface MetricsComputeOptions {
   semantic?: MetricsSemanticOptions;
   multiscale?: MultiscaleDiagnosticsSummary | null;
   includeGlobalRows?: boolean;
+  orderedLayersBefore?: LayerInput[];
+  orderedLayersAfter?: LayerInput[];
 }
 
 interface MetricsSemanticOptions {
@@ -67,9 +69,19 @@ export function computeMetrics(
   const idxGlobal = range(0, dataset.times.length);
   const centersBefore = centers(beforeLayout);
   const centersAfter = centers(afterLayout);
-  const referenceLayers = orderedLayersForAfter ?? dataset.layers;
+  const afterLayers = options.orderedLayersAfter ?? orderedLayersForAfter ?? dataset.layers;
+  const beforeLayers = options.orderedLayersBefore ?? afterLayers;
   const semantic = options.semantic ?? {};
-  const rows = buildRowsForIndices(idx, beforeLayout, afterLayout, centersBefore, centersAfter, referenceLayers, semantic);
+  const rows = buildRowsForIndices(
+    idx,
+    beforeLayout,
+    afterLayout,
+    centersBefore,
+    centersAfter,
+    beforeLayers,
+    afterLayers,
+    semantic
+  );
   const includeGlobalRows = options.includeGlobalRows === true;
   const globalRows = includeGlobalRows
     ? buildRowsForIndices(
@@ -78,7 +90,8 @@ export function computeMetrics(
         afterLayout,
         centersBefore,
         centersAfter,
-        referenceLayers,
+        beforeLayers,
+        afterLayers,
         semantic
       )
     : null;
@@ -99,7 +112,8 @@ function buildRowsForIndices(
   afterLayout: BraidLayout,
   centersBefore: number[][],
   centersAfter: number[][],
-  referenceLayers: LayerInput[],
+  beforeLayers: LayerInput[],
+  afterLayers: LayerInput[],
   semantic: MetricsSemanticOptions
 ): MetricRow[] {
   const rows: MetricRow[] = [
@@ -112,7 +126,7 @@ function buildRowsForIndices(
     row("extraSpace", "Extra space used", 0, mean(afterLayout.sumGapPx, idx), "down"),
     row("compact", "Compactness loss", compactness(beforeLayout, idx), compactness(afterLayout, idx), "down"),
     row("boundary", "Boundary distortion", 0, roiBoundaryDistortion(beforeLayout, afterLayout, idx), "down"),
-    row("thickness", "Thickness invariance error", 0, thicknessError(referenceLayers, afterLayout, idx), "down"),
+    row("thickness", "Thickness invariance error", 0, thicknessError(afterLayers, afterLayout, idx), "down"),
     row("order", "Order stability", 1, orderStability(afterLayout, idx), "up")
   ];
 
@@ -121,8 +135,8 @@ function buildRowsForIndices(
       row(
         "tpidCenterAlignment",
         "TPID Center Alignment",
-        tpidCenterAlignment(referenceLayers, beforeLayout, idx, semantic),
-        tpidCenterAlignment(referenceLayers, afterLayout, idx, semantic),
+        tpidCenterAlignment(beforeLayers, beforeLayout, idx, semantic),
+        tpidCenterAlignment(afterLayers, afterLayout, idx, semantic),
         "up"
       )
     );

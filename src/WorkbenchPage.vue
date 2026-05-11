@@ -2,20 +2,20 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import {
   buildBraidedEnhanceScene,
-  buildOptimizeComparisonScene,
+  buildOptimizingVariantScene,
   buildScene,
   defaultWindow,
   recommendHighUncertaintyRoi,
+  type OptimizingVariantConfig,
   type SceneBuildResult
 } from "./app/sceneBuilder";
+import type { SineStreamHooks } from "./core/baseline";
 import type { DatasetBundle } from "./core/datasets";
 import { applyCovidUncertaintyBand, createSyntheticBundle, loadCovidBundle } from "./core/datasets";
-import { normalizeOrderForComparison } from "./core/orderCompare";
-import { optimizeLayerOrder } from "./core/optimizeOrder";
 import { FIXED_SEED } from "./core/seed";
 import type { BaselineMode, DatasetKind, LayerInput, ROI } from "./core/types";
 import { exportConfigJson, exportSnapshotPng, exportSnapshotSvg } from "./interactions/export";
-import { computePidOrderingMetrics } from "./layout/pidMetrics";
+import { computeMetrics, type MetricResult } from "./layout/metrics";
 import { type RoiCandidate, recommendRoiWindows } from "./layout/roiRecommend";
 import { createInitialState } from "./state/appState";
 import type { AppState } from "./state/appState";
@@ -23,8 +23,6 @@ import ControlPanelView from "./views/ControlPanelView.vue";
 import GlobalStreamView from "./views/GlobalStreamView.vue";
 import InsetDetailView from "./views/InsetDetailView.vue";
 import MetricsView from "./views/MetricsView.vue";
-import PidNewView from "./views/PidNewView.vue";
-import PidOrderingView from "./views/PidOrderingView.vue";
 import SpaghettiView from "./views/SpaghettiView.vue";
 import "./styles.css";
 
@@ -45,14 +43,6 @@ interface InsetViewExpose {
 
 interface SpaghettiViewExpose {
   getSpaghettiSvg: () => SVGSVGElement | null;
-}
-
-interface PidOrderingViewExpose {
-  getPidOrderingSvg: () => SVGSVGElement | null;
-}
-
-interface PidNewViewExpose {
-  getPidNewSvg: () => SVGSVGElement | null;
 }
 
 type MainBaselineBranch = "center" | "zero";
@@ -85,51 +75,16 @@ const mainBaselineBranch = ref<MainBaselineBranch>(state.baseline === "zero" ? "
 const globalViewRef = ref<GlobalViewExpose | null>(null);
 const insetViewRef = ref<InsetViewExpose | null>(null);
 const spaghettiViewRef = ref<SpaghettiViewExpose | null>(null);
-const pidOrderingViewRef = ref<PidOrderingViewExpose | null>(null);
-const pidNewViewRef = ref<PidNewViewExpose | null>(null);
+const compareViewRef = ref<InsetViewExpose | null>(null);
 
 const enhanceTabs: Array<{ key: AppState["enhanceTab"]; label: string }> = [
   { key: "optimize", label: "Optimizing" },
   { key: "braided", label: "Braided" },
-  { key: "spaghetti", label: "spaghetti" },
-  { key: "pidOrdering", label: "PID ordering" },
-  { key: "pidNew", label: "PID new" }
+  { key: "spaghetti", label: "spaghetti" }
 ];
 
 const enhanceBaselineMode = computed<BaselineMode>(() => {
   return "sineStream";
-});
-
-const pidSineReferenceOrder = computed<string[]>(() => {
-  const dataset = optimizeScene.value?.dataset ?? null;
-  if (!dataset || dataset.layers.length === 0) {
-    return [];
-  }
-
-  const optimized = optimizeLayerOrder(
-    dataset.layers,
-    null,
-    {
-      clusterAutoCutScale: state.optimization.clusterAutoCutScale,
-      clusterBoundaryPenalty: state.optimization.clusterBoundaryPenalty,
-      similaritySigma: state.optimization.orderSimilaritySigma,
-      maxSwapPasses: state.optimization.orderMaxSwapPasses,
-      weightType: state.optimization.orderWeightType ?? "max",
-      useThicknessWeight: state.optimization.orderUseThicknessWeight !== false,
-      useLengthWeight: state.optimization.orderUseLengthWeight !== false,
-      lengthWeightThreshold: state.optimization.orderLengthWeightThreshold ?? 9,
-      shuffleSeed: state.fixedSeed,
-      useUncertaintyTerm: false,
-      uncertaintyWeight: 0
-    },
-    dataset.order
-  );
-
-  return normalizeOrderForComparison(
-    optimized.order,
-    dataset.layers.map((layer) => layer.id),
-    dataset.order
-  );
 });
 
 const availableStateOptions = computed<SpaghettiStateOption[]>(() => {
@@ -165,35 +120,6 @@ const effectiveSpaghettiStateIds = computed<string[]>(() => {
   return allIds.length > 0 ? [allIds[0]] : [];
 });
 
-const activeMetrics = computed(() => {
-  if (state.enhanceTab === "optimize") {
-    return optimizeScene.value?.metrics ?? null;
-  }
-  if (state.enhanceTab === "braided") {
-    return braidedScene.value?.metrics ?? null;
-  }
-  if (state.enhanceTab === "pidOrdering") {
-    return pidMetricsBundle.value?.metrics ?? null;
-  }
-  return null;
-});
-
-const metricsTitle = computed(() => {
-  if (state.enhanceTab === "optimize") {
-    return "Metrics: Optimizing";
-  }
-  if (state.enhanceTab === "braided") {
-    return "Metrics: Braided";
-  }
-  if (state.enhanceTab === "pidOrdering") {
-    return "Metrics: PID ordering";
-  }
-  if (state.enhanceTab === "pidNew") {
-    return "Metrics: PID new";
-  }
-  return "Metrics: spaghetti";
-});
-
 const spaghettiMetricsSummary = computed(() => ({
   selectedCount: effectiveSpaghettiStateIds.value.length,
   totalCount: availableStateOptions.value.length,
@@ -201,76 +127,41 @@ const spaghettiMetricsSummary = computed(() => ({
   defaultStateLabel: defaultSpaghettiStateId.value ? layerStateLabel(defaultSpaghettiStateId.value) : "N/A"
 }));
 
-const pidMetricsBundle = computed(() => {
-  const scene = optimizeScene.value;
-  const dataset = scene?.dataset ?? null;
-  if (!dataset || dataset.layers.length === 0 || dataset.times.length === 0) {
+const compareScene = computed<SceneBuildResult | null>(() => {
+  if (state.enhanceTab !== "optimize") {
     return null;
   }
-  return computePidOrderingMetrics({
-    dataset,
-    roi: scene?.insetRoi ?? null,
-    sineOrder: pidSineReferenceOrder.value,
-    uncertaintyStrength: Math.max(0, state.optimization.baselineUncertaintyWeight ?? 0.45),
-    uncertaintySource: state.pidUncertaintySource,
-    baselineHooks: {
-      centerType: state.optimization.baselineCenterType ?? "median",
-      wiggleWeightL1: state.optimization.wiggleWeightL1,
-      wiggleWeightL2: state.optimization.wiggleWeightL2,
-      centerAnchorWeight: state.optimization.centerAnchorWeight,
-      irlsIterations: state.optimization.irlsIterations,
-      irlsEps: state.optimization.irlsEps
-    }
-  });
+  return buildOptimizingVariantScene(activeBundle.value, state, buildCompareVariantConfig());
 });
 
-const metricsNotes = computed(() => {
-  const notes = [...activeBundle.value.notes];
-  if (state.enhanceTab === "optimize" && optimizeScene.value) {
-    notes.push(`[optimize method=${state.optimizeMethod}]`, ...optimizeScene.value.diagnosticsNotes, ...optimizeScene.value.notes);
-  } else if (state.enhanceTab === "braided" && braidedScene.value) {
-    notes.push(`[optimize method=${enhanceBaselineMode.value}]`, ...braidedScene.value.diagnosticsNotes, ...braidedScene.value.notes);
-  } else if (state.enhanceTab === "pidOrdering") {
-    const bundle = pidMetricsBundle.value;
-    if (!bundle) {
-      notes.push("PID ordering metrics: N/A");
-    } else {
-      const summary = bundle.summary;
-      const topLabel = summary.topPidLayerId ? layerStateLabel(summary.topPidLayerId) : "N/A";
-      notes.push(
-        `[pid display baseline=${state.pidBaselineMode}]`,
-        "PID display baseline is selectable: L1 / L2 / SineStream / Multiscale",
-        "PID metrics baseline comparison is fixed: Sine -> Multiscale",
-        `baseline uncertainty weight: ${Math.max(0, state.optimization.baselineUncertaintyWeight ?? 0.45).toFixed(3)}`,
-        "PID definition: self-excluded weighted inclusion depth (wide intervals down-weighted)",
-        "PID display order: deepest near center, then alternating upper/lower insertion",
-        "IEEE-style order agreement: Spearman rho and Kendall tau",
-        "sine reference ordering: full timeline (ROI-independent)",
-        `top PID layer: ${topLabel} (depth=${summary.topPidDepth.toFixed(3)})`,
-        `top PID valid-time ratio: ${(summary.topPidValidRatio * 100).toFixed(1)}% (${summary.timeCount} time points)`,
-        `rank changed layers: ${summary.changedCount}/${summary.layerCount}`,
-        `avg |rank shift|: ${summary.averageAbsShift.toFixed(2)}`,
-        `max |rank shift|: ${summary.maxAbsShift}`,
-        `spearman rho: ${summary.spearmanRho.toFixed(3)}`,
-        `kendall tau: ${summary.kendallTau.toFixed(3)}`
-      );
+const compareMetrics = computed<MetricResult | null>(() => {
+  const current = optimizeScene.value;
+  const compare = compareScene.value;
+  if (!current || !compare) {
+    return null;
+  }
+  return computeMetrics(
+    current.dataset,
+    compare.braidedLayout,
+    current.braidedLayout,
+    current.insetRoi,
+    { checked: false, violations: [], maxThicknessError: 0 },
+    current.orderedLayers,
+    {
+      orderedLayersBefore: compare.orderedLayers,
+      orderedLayersAfter: current.orderedLayers,
+      includeGlobalRows: true
     }
-  } else if (state.enhanceTab === "pidNew") {
-    notes.push(
-      `[pid_new display baseline=${state.pidBaselineMode}]`,
-      "PID new metrics: N/A in v1",
-      "PID new definition: PID-Mean over time-value fuzzy masks",
-      "mask space: time x log1p(value)",
-      "membership: p25-p75 core with p025-p975 fuzzy shoulders",
-      "display order: deepest contour-PID layer near center, then alternating upper/lower insertion"
-    );
-  } else {
-    notes.push(
-      `spaghetti metrics: N/A`,
-      `selected states: ${spaghettiMetricsSummary.value.selectedCount}/${spaghettiMetricsSummary.value.totalCount}`,
-      `all states selected: ${spaghettiMetricsSummary.value.allSelected ? "yes" : "no"}`,
-      `default state: ${spaghettiMetricsSummary.value.defaultStateLabel}`
-    );
+  );
+});
+
+const compareNotes = computed(() => {
+  const notes = [...activeBundle.value.notes];
+  if (optimizeScene.value) {
+    notes.push("Current", ...optimizeScene.value.diagnosticsNotes, ...optimizeScene.value.notes);
+  }
+  if (compareScene.value) {
+    notes.push("Compare", ...compareScene.value.diagnosticsNotes, ...compareScene.value.notes);
   }
   return notes;
 });
@@ -337,7 +228,7 @@ function recomputeScene(): void {
   };
 
   const nextMain = buildScene(activeBundle.value, mainState);
-  const nextOptimize = buildOptimizeComparisonScene(activeBundle.value, enhanceState, state.optimizeMethod);
+  const nextOptimize = buildOptimizingVariantScene(activeBundle.value, enhanceState, buildCurrentVariantConfig());
   const nextBraided = buildBraidedEnhanceScene(activeBundle.value, enhanceState, enhanceBaselineMode.value);
 
   state.baseline = mainBaselineBranch.value;
@@ -348,6 +239,50 @@ function recomputeScene(): void {
   optimizeScene.value = nextOptimize;
   braidedScene.value = nextBraided;
   sanitizeSpaghettiSelection();
+}
+
+function buildCurrentVariantConfig(): OptimizingVariantConfig {
+  return {
+    orderingScoringMode: state.orderingScoringMode,
+    baselineMode: state.pidBaselineMode,
+    pidUncertaintySource: state.pidUncertaintySource,
+    pidTimeAlpha: state.pidTimeAlpha,
+    baselineUncertaintyWeight: state.optimization.baselineUncertaintyWeight ?? 0.45,
+    baselineHooks: baselineHooksFromState()
+  };
+}
+
+function buildCompareVariantConfig(): OptimizingVariantConfig {
+  return {
+    orderingScoringMode: state.compare.orderingScoringMode,
+    baselineMode: state.compare.baselineMode,
+    pidUncertaintySource: state.compare.pidUncertaintySource,
+    pidTimeAlpha: state.compare.pidTimeAlpha,
+    baselineUncertaintyWeight: state.compare.baselineUncertaintyWeight,
+    baselineHooks: baselineHooksFromCompare()
+  };
+}
+
+function baselineHooksFromState(): SineStreamHooks {
+  return {
+    centerType: state.optimization.baselineCenterType ?? "median",
+    wiggleWeightL1: state.optimization.wiggleWeightL1,
+    wiggleWeightL2: state.optimization.wiggleWeightL2,
+    centerAnchorWeight: state.optimization.centerAnchorWeight,
+    irlsIterations: state.optimization.irlsIterations,
+    irlsEps: state.optimization.irlsEps
+  };
+}
+
+function baselineHooksFromCompare(): SineStreamHooks {
+  return {
+    centerType: state.compare.baselineCenterType,
+    wiggleWeightL1: state.compare.wiggleWeightL1,
+    wiggleWeightL2: state.compare.wiggleWeightL2,
+    centerAnchorWeight: state.compare.centerAnchorWeight,
+    irlsIterations: state.compare.irlsIterations,
+    irlsEps: state.compare.irlsEps
+  };
 }
 
 function applyRoiChange(roi: ROI | null): void {
@@ -380,10 +315,17 @@ function onEnhanceTabChange(next: AppState["enhanceTab"]): void {
   }
   hover.value = null;
   state.enhanceTab = next;
+  if (next !== "optimize") {
+    state.compareExpanded = false;
+  }
 }
 
-function onToggleMetrics(): void {
-  state.metricsExpanded = !state.metricsExpanded;
+function onToggleCompare(): void {
+  state.compareExpanded = !state.compareExpanded;
+}
+
+function onCompareControlsChanged(): void {
+  sanitizeState();
 }
 
 function onSpaghettiSelectedStatesChange(next: string[]): void {
@@ -448,7 +390,8 @@ function snapshotConfig(): Record<string, unknown> {
     fixedSeed: state.fixedSeed,
     viewBranches: {
       mainBaseline: mainBaselineBranch.value,
-      optimizeMethod: state.optimizeMethod,
+      orderingScoringMode: state.orderingScoringMode,
+      optimizingBaseline: state.pidBaselineMode,
       enhanceTab: state.enhanceTab
     },
     state: {
@@ -489,12 +432,6 @@ function onHover(payload: HoverPayload | null): void {
 function currentDetailSvg(): SVGSVGElement | null {
   if (state.enhanceTab === "spaghetti") {
     return spaghettiViewRef.value?.getSpaghettiSvg() ?? null;
-  }
-  if (state.enhanceTab === "pidOrdering") {
-    return pidOrderingViewRef.value?.getPidOrderingSvg() ?? null;
-  }
-  if (state.enhanceTab === "pidNew") {
-    return pidNewViewRef.value?.getPidNewSvg() ?? null;
   }
   return insetViewRef.value?.getInsetSvg() ?? null;
 }
@@ -584,6 +521,25 @@ function sanitizeState(): void {
     defaultState.optimization.baselineUncertaintyWeight ?? 0.45,
     0
   );
+  state.pidTimeAlpha = finiteBetween(state.pidTimeAlpha, defaultState.pidTimeAlpha, 0, 1);
+  state.compare.pidTimeAlpha = finiteBetween(state.compare.pidTimeAlpha, defaultState.compare.pidTimeAlpha, 0, 1);
+  state.compare.baselineUncertaintyWeight = finiteAtLeast(
+    state.compare.baselineUncertaintyWeight,
+    defaultState.compare.baselineUncertaintyWeight,
+    0
+  );
+  state.compare.wiggleWeightL1 = finiteAtLeast(state.compare.wiggleWeightL1, defaultState.compare.wiggleWeightL1, 0);
+  state.compare.wiggleWeightL2 = finiteAtLeast(state.compare.wiggleWeightL2, defaultState.compare.wiggleWeightL2, 0);
+  state.compare.centerAnchorWeight = finiteAtLeast(
+    state.compare.centerAnchorWeight,
+    defaultState.compare.centerAnchorWeight,
+    0
+  );
+  state.compare.irlsIterations = Math.max(
+    1,
+    Math.round(finiteAtLeast(state.compare.irlsIterations, defaultState.compare.irlsIterations, 1))
+  );
+  state.compare.irlsEps = finiteAtLeast(state.compare.irlsEps, defaultState.compare.irlsEps, 1e-9);
   state.optimization.wiggleWeightL1 = finiteAtLeast(
     state.optimization.wiggleWeightL1,
     defaultState.optimization.wiggleWeightL1,
@@ -685,7 +641,7 @@ function layerStateLabel(layerId: string): string {
           :effective-spaghetti-state-ids="effectiveSpaghettiStateIds"
           @update:selected-recommend-index="selectedRecommendIndex = $event"
           @dataset-change="onDatasetChanged"
-          @toggle-metrics="onToggleMetrics"
+          @toggle-compare="onToggleCompare"
           @update:spaghetti-selected-states="onSpaghettiSelectedStatesChange"
           @controls-change="onControlsChanged"
           @recommend-roi="onRecommendRoi"
@@ -752,34 +708,101 @@ function layerStateLabel(layerId: string): string {
           @hover="onHover"
         />
 
-        <PidOrderingView
-          v-else-if="state.enhanceTab === 'pidOrdering'"
-          ref="pidOrderingViewRef"
-          :dataset="optimizeScene?.dataset ?? null"
-          :sine-order="pidSineReferenceOrder"
-          :roi="optimizeScene?.insetRoi ?? null"
-          :state="state"
-          @hover="onHover"
-        />
-
-        <PidNewView
-          v-else
-          ref="pidNewViewRef"
-          :dataset="optimizeScene?.dataset ?? null"
-          :roi="optimizeScene?.insetRoi ?? null"
-          :state="state"
-          @hover="onHover"
-        />
       </section>
     </div>
 
-    <section v-if="state.metricsExpanded" class="panel metrics-drawer">
-      <MetricsView
-        :title="metricsTitle"
-        :metrics="activeMetrics"
-        :notes="metricsNotes"
-        :spaghetti-summary="state.enhanceTab === 'spaghetti' ? spaghettiMetricsSummary : null"
+    <section v-if="state.compareExpanded && state.enhanceTab === 'optimize'" class="panel compare-drawer">
+      <div class="compare-header">
+        <strong>Compare</strong>
+        <span>Delta is Current - Compare</span>
+      </div>
+
+      <div class="compare-controls">
+        <div class="control-group control-group--ordering">
+          <div class="control-group__title">Compare Ordering</div>
+          <div class="control-group__items">
+            <label>
+              Scoring
+              <select v-model="state.compare.orderingScoringMode" @change="onCompareControlsChanged">
+                <option value="intervalInclusion">One-way inclusion</option>
+                <option value="pidMean">PID</option>
+                <option value="pidTimeWeighted">PID + time trend</option>
+              </select>
+            </label>
+            <label v-if="state.datasetKind === 'covid'">
+              PID Source
+              <select v-model="state.compare.pidUncertaintySource" @change="onCompareControlsChanged">
+                <option value="value">value</option>
+                <option value="poportion">poportion</option>
+              </select>
+            </label>
+            <label v-if="state.compare.orderingScoringMode === 'pidTimeWeighted'">
+              alpha
+              <input v-model.number="state.compare.pidTimeAlpha" type="range" min="0" max="1" step="0.01" @input="onCompareControlsChanged" />
+              <span class="control-inline-note">{{ state.compare.pidTimeAlpha.toFixed(2) }}</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="control-group control-group--optimize">
+          <div class="control-group__title">Compare Baseline</div>
+          <div class="control-group__items">
+            <label>
+              Baseline Method
+              <select v-model="state.compare.baselineMode" @change="onCompareControlsChanged">
+                <option value="l1">L1</option>
+                <option value="l2">L2</option>
+                <option value="sineStream">SineStream</option>
+                <option value="multiscale">Multiscale</option>
+              </select>
+            </label>
+            <label v-if="state.compare.baselineMode === 'multiscale'">
+              baselineUncertaintyWeight
+              <input v-model.number="state.compare.baselineUncertaintyWeight" type="number" step="0.05" min="0" @change="onCompareControlsChanged" />
+            </label>
+            <label v-if="state.compare.baselineMode === 'sineStream' || state.compare.baselineMode === 'multiscale'">
+              baselineCenterType
+              <select v-model="state.compare.baselineCenterType" @change="onCompareControlsChanged">
+                <option value="median">median</option>
+                <option value="mean">mean</option>
+                <option value="geometric">geometric</option>
+                <option value="harmonic">harmonic</option>
+              </select>
+            </label>
+            <label v-if="state.compare.baselineMode === 'l1'">
+              wiggleWeightL1
+              <input v-model.number="state.compare.wiggleWeightL1" type="number" step="0.05" min="0" @change="onCompareControlsChanged" />
+            </label>
+            <label v-if="state.compare.baselineMode === 'l2'">
+              wiggleWeightL2
+              <input v-model.number="state.compare.wiggleWeightL2" type="number" step="0.05" min="0" @change="onCompareControlsChanged" />
+            </label>
+            <label v-if="state.compare.baselineMode === 'l1' || state.compare.baselineMode === 'l2'">
+              centerAnchorWeight
+              <input v-model.number="state.compare.centerAnchorWeight" type="number" step="0.05" min="0" @change="onCompareControlsChanged" />
+            </label>
+            <label v-if="state.compare.baselineMode === 'l1'">
+              irlsIterations
+              <input v-model.number="state.compare.irlsIterations" type="number" step="1" min="1" @change="onCompareControlsChanged" />
+            </label>
+            <label v-if="state.compare.baselineMode === 'l1'">
+              irlsEps
+              <input v-model.number="state.compare.irlsEps" type="number" step="0.0001" min="0.000000001" @change="onCompareControlsChanged" />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <InsetDetailView
+        ref="compareViewRef"
+        :scene="compareScene"
+        :state="state"
+        forced-view-mode="after"
+        :forced-uncertainty-gap="false"
+        @hover="onHover"
       />
+
+      <MetricsView title="Compare: Current - Compare" :metrics="compareMetrics" :notes="compareNotes" />
     </section>
 
     <div

@@ -11,6 +11,7 @@ import type {
   BaselineMode,
   LayerInput,
   PidBaselineMode,
+  PidTimeOrderMode,
   PidUncertaintySource,
   PreparedDataset,
   ROI,
@@ -37,6 +38,21 @@ export interface PidOrderingResult {
   scores: PidOrderingScore[];
   depthByLayerId: Map<string, number>;
   depthSeriesByLayerId: Map<string, number[]>;
+}
+
+export interface PidOrderingCompositeScore {
+  layerId: string;
+  C: number;
+  R: number;
+  score: number;
+}
+
+export interface ComputePidOrderingScoresInput {
+  layerIds: string[];
+  D_cross: ReadonlyMap<string, number[]>;
+  temporalSelfInclusion?: ReadonlyMap<string, number[]>;
+  mode: PidTimeOrderMode;
+  alpha?: number;
 }
 
 interface LayerBand {
@@ -218,6 +234,65 @@ export function buildPidCenterOutOrder(depthSortedOrder: string[]): string[] {
   }
 
   return out.filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+/**
+ * Compute adjacent-time temporal self-inclusion (TSI) for each layer.
+ */
+export function computeTemporalSelfInclusion(
+  depthSeriesByLayerId: ReadonlyMap<string, number[]>
+): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  for (const [layerId, series] of depthSeriesByLayerId.entries()) {
+    const tsi: number[] = [];
+    for (let t = 1; t < series.length; t += 1) {
+      const prev = series[t - 1];
+      const next = series[t];
+      if (!Number.isFinite(prev) || !Number.isFinite(next)) {
+        tsi.push(Number.NaN);
+        continue;
+      }
+      tsi.push(clamp(1 - Math.abs(next - prev), 0, 1));
+    }
+    out.set(layerId, tsi);
+  }
+  return out;
+}
+
+/**
+ * Build layer-wise ordering scores for PID time ordering modes.
+ */
+export function computePidOrderingScores(input: ComputePidOrderingScoresInput): PidOrderingCompositeScore[] {
+  const alpha = clamp(input.alpha ?? 0.8, 0, 1);
+  const out: PidOrderingCompositeScore[] = [];
+
+  for (const layerId of input.layerIds) {
+    const dSeries = input.D_cross.get(layerId) ?? [];
+    const cValues = dSeries.filter((value) => Number.isFinite(value));
+    const C = cValues.length > 0 ? sum(cValues) / cValues.length : 0;
+
+    const tsiSeries = input.temporalSelfInclusion?.get(layerId) ?? [];
+    const rValues = tsiSeries.filter((value) => Number.isFinite(value));
+    const R = rValues.length > 0 ? sum(rValues) / rValues.length : 0;
+
+    const score = input.mode === "layer_pid_time_weighted" ? alpha * C + (1 - alpha) * R : C;
+    out.push({ layerId, C, R, score });
+  }
+
+  out.sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    if (b.C !== a.C) {
+      return b.C - a.C;
+    }
+    if (b.R !== a.R) {
+      return b.R - a.R;
+    }
+    return a.layerId.localeCompare(b.layerId);
+  });
+
+  return out;
 }
 
 function buildLayerBand(layer: LayerInput, tLength: number, uncertaintySource: PidUncertaintySource): LayerBand {
@@ -653,6 +728,11 @@ export interface PidNewSceneOptions {
   contourOptions?: ContourPidOptions;
 }
 
+export interface PidTimeSceneOptions extends PidNewSceneOptions {
+  orderMode: PidTimeOrderMode;
+  alpha?: number;
+}
+
 export interface PidNewScene {
   dataset: PreparedDataset;
   contourPid: ContourPidResult;
@@ -661,6 +741,7 @@ export interface PidNewScene {
   activeIndices: number[];
   activeTimes: number[];
   uncertaintySource: PidUncertaintySource;
+  pidTimeScores?: Map<string, PidOrderingCompositeScore>;
 }
 
 /** Build the data, ordering, and stack geometry needed by the PID-new renderer. */
@@ -701,6 +782,75 @@ export function buildPidNewScene(options: PidNewSceneOptions): PidNewScene | nul
     activeIndices,
     activeTimes,
     uncertaintySource
+  };
+}
+
+/**
+ * Build PID time scene by replacing layer ordering with PID-time scores while
+ * keeping PID-new contour and river rendering unchanged.
+ */
+export function buildPidTimeScene(options: PidTimeSceneOptions): PidNewScene | null {
+  const { dataset, roi, baselineMode, baselineHooks, uncertaintyStrength, orderMode } = options;
+  if (dataset.layers.length === 0 || dataset.times.length === 0) {
+    return null;
+  }
+
+  const uncertaintySource = options.uncertaintySource ?? "value";
+  const [left, right] = roiBounds(dataset.times.length, roi);
+  const activeIndices = range(left, right + 1);
+  const activeTimes = activeIndices.map((index) => dataset.times[index]);
+  const contourPid = computeContourPid(dataset.layers, {
+    yBins: 180,
+    valueTransform: uncertaintySource === "poportion" ? "linear" : "log1p",
+    centralFraction: 0.5,
+    contourThreshold: 0.5,
+    uncertaintySource,
+    ...options.contourOptions
+  });
+
+  const crossPid = computePidOrdering(dataset.layers, {
+    excludeSelf: true,
+    widthPenaltyPower: 1,
+    minComparators: 2,
+    uncertaintySource
+  });
+  const temporalSelfInclusion = computeTemporalSelfInclusion(crossPid.depthSeriesByLayerId);
+  const layerIds = dataset.layers.map((layer) => layer.id);
+  const scores = computePidOrderingScores({
+    layerIds,
+    D_cross: crossPid.depthSeriesByLayerId,
+    temporalSelfInclusion,
+    mode: orderMode,
+    alpha: options.alpha ?? 0.8
+  });
+
+  const missingDepth = crossPid.scores.some((item) => item.validTimeCount <= 0);
+  if (missingDepth) {
+    console.warn(
+      "[PID Time] Missing cross-layer depth for one or more layers; fallback to existing contour-PID ordering."
+    );
+  }
+  const depthSortedOrder = missingDepth ? contourPid.depthOrder : scores.map((item) => item.layerId);
+  const displayOrder = buildPidCenterOutOrder(depthSortedOrder);
+  const orderedLayers = orderLayers(dataset.layers, displayOrder);
+  const baseline = computePidNewBaseline(
+    dataset.times,
+    orderedLayers,
+    baselineMode,
+    baselineHooks,
+    Math.max(0, uncertaintyStrength)
+  );
+  const layout = computeStackedBoundaries(baseline, orderedLayers);
+
+  return {
+    dataset,
+    contourPid,
+    orderedLayers,
+    layout,
+    activeIndices,
+    activeTimes,
+    uncertaintySource,
+    pidTimeScores: new Map(scores.map((item) => [item.layerId, item]))
   };
 }
 
