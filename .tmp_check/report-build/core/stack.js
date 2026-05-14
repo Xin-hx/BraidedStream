@@ -1,3 +1,4 @@
+/** Convert layer thickness series into bottom/top boundaries. */
 export function computeStackedBoundaries(baseline, orderedLayers) {
     const tLength = baseline.length;
     const kLength = orderedLayers.length;

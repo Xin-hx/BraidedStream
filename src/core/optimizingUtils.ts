@@ -1,12 +1,11 @@
 import { computeBaseline, computeMultiscaleDistributedBaseline, type SineStreamHooks } from "./baseline";
 import {
-  buildPidCenterOutOrder,
   computeContourPid,
-  computePidOrdering,
-  computePidOrderingScores,
-  computeTemporalSelfInclusion
+  computePidOrdering
 } from "./pid";
-import { optimizeLayerOrder } from "./optimizeOrder";
+import { buildCenterOutOrder, buildInsideOutOrder, normalizedInputOrder } from "./layerOrdering";
+import { computePidOrderingScores, computeTemporalSelfInclusion } from "./layerScoring";
+import { optimizeLayerOrder } from "./sineStreamOrder";
 import type {
   BaselineMode,
   LayerInput,
@@ -39,6 +38,7 @@ export interface OptimizingVariantConfig {
   pidUncertaintySource: PidUncertaintySource;
   pidTimeAlpha: number;
   baselineUncertaintyWeight: number;
+  multiscaleEnergyThreshold: number;
   baselineHooks: SineStreamHooks;
   orderRoi: ROI | null;
   sineOrder: SineStreamOrderConfig;
@@ -136,7 +136,7 @@ export function computeOptimizingOrder(dataset: PreparedDataset, config: Optimiz
     });
     const top = scores[0];
     return {
-      displayOrder: buildPidCenterOutOrder(scores.map((score) => score.layerId)),
+      displayOrder: buildCenterOutOrder(scores.map((score) => score.layerId)),
       notes: [
         `TPID scoring: alpha=${Math.max(0, Math.min(1, resolved.pidTimeAlpha)).toFixed(2)}`,
         top ? `top PID-time layer: ${layerLabel(top.layerId)} score=${top.score.toFixed(3)}` : "top PID-time layer: N/A"
@@ -146,7 +146,7 @@ export function computeOptimizingOrder(dataset: PreparedDataset, config: Optimiz
 
   const top = pid.scores[0];
   return {
-    displayOrder: buildPidCenterOutOrder(pid.order),
+    displayOrder: buildCenterOutOrder(pid.order),
     notes: [
       "one-way inclusion: interval center covered by peer uncertainty bands",
       top ? `top inclusion layer: ${layerLabel(top.id)} depth=${top.depth.toFixed(3)}` : "top inclusion layer: N/A"
@@ -159,10 +159,17 @@ export function computeOptimizingBaseline(
   orderedLayers: LayerInput[],
   mode: OptimizingBaselineMode,
   hooks: SineStreamHooks,
-  uncertaintyStrength: number
+  waveStrength: number,
+  energyThreshold = 0.08
 ): OptimizingBaselineResult {
   if (mode === "multiscale") {
-    const result = computeMultiscaleDistributedBaseline(times, orderedLayers, Math.max(0, uncertaintyStrength), hooks, 0.08);
+    const result = computeMultiscaleDistributedBaseline(
+      times,
+      orderedLayers,
+      Math.max(0, waveStrength),
+      hooks,
+      energyThreshold
+    );
     return {
       baseline: result.baseline,
       multiscaleDiagnostics: result.diagnostics
@@ -262,49 +269,4 @@ export function resolveOptimizingVariantConfig(config: OptimizingVariantConfig):
 
 function layerLabel(layerId: string): string {
   return layerId.split("|")[0] ?? layerId;
-}
-
-function normalizedInputOrder(dataset: PreparedDataset): string[] {
-  const layerIds = dataset.layers.map((layer) => layer.id);
-  const seen = new Set<string>();
-  const order: string[] = [];
-  for (const id of dataset.order) {
-    if (layerIds.includes(id) && !seen.has(id)) {
-      seen.add(id);
-      order.push(id);
-    }
-  }
-  for (const id of layerIds) {
-    if (!seen.has(id)) {
-      order.push(id);
-    }
-  }
-  return order;
-}
-
-function buildInsideOutOrder(layers: LayerInput[], inputOrder: string[]): string[] {
-  const byId = new Map(layers.map((layer) => [layer.id, layer]));
-  const totals = inputOrder
-    .map((id) => ({ id, total: byId.get(id)?.mean.reduce((acc, value) => acc + Math.max(0, value), 0) ?? 0 }))
-    .sort((a, b) => {
-      if (b.total !== a.total) {
-        return b.total - a.total;
-      }
-      return a.id.localeCompare(b.id);
-    });
-
-  const lower: string[] = [];
-  const upper: string[] = [];
-  let lowerLoad = 0;
-  let upperLoad = 0;
-  for (const item of totals) {
-    if (lowerLoad <= upperLoad) {
-      lower.unshift(item.id);
-      lowerLoad += item.total;
-    } else {
-      upper.push(item.id);
-      upperLoad += item.total;
-    }
-  }
-  return lower.concat(upper);
 }

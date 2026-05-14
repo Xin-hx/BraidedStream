@@ -26,6 +26,7 @@ export interface OptimizingCompareState {
   pidTimeAlpha: number;
   baselineCenterType: BaselineCenterType;
   baselineUncertaintyWeight: number;
+  multiscaleEnergyThreshold: number;
   wiggleWeightL1: number;
   wiggleWeightL2: number;
   centerAnchorWeight: number;
@@ -52,6 +53,11 @@ export interface AppState {
   optimizingBaselineMode: OptimizingBaselineMode;
   pidTimeAlpha: number;
   pidUncertaintySource: PidUncertaintySource;
+  showContourBoxplot: boolean;
+  contourBoxplotYBins: number;
+  contourBoxplotThreshold: number;
+  contourBoxplotCentralFraction: number;
+  contourBoxplotOpacity: number;
   spaghettiAllStates: boolean;
   spaghettiSelectedStates: string[];
   fixedSeed: number;
@@ -89,6 +95,7 @@ export function createInitialState(): AppState {
       pidTimeAlpha: 0.8,
       baselineCenterType: "median",
       baselineUncertaintyWeight: 0.45,
+      multiscaleEnergyThreshold: 0.08,
       wiggleWeightL1: 1,
       wiggleWeightL2: 1,
       centerAnchorWeight: 0.35,
@@ -107,6 +114,11 @@ export function createInitialState(): AppState {
     optimizingBaselineMode: "multiscale",
     pidTimeAlpha: 0.8,
     pidUncertaintySource: "value",
+    showContourBoxplot: true,
+    contourBoxplotYBins: 180,
+    contourBoxplotThreshold: 0.5,
+    contourBoxplotCentralFraction: 0.5,
+    contourBoxplotOpacity: 0.82,
     spaghettiAllStates: false,
     spaghettiSelectedStates: [],
     fixedSeed: FIXED_SEED,
@@ -144,7 +156,8 @@ export function createInitialState(): AppState {
       orderUseLengthWeight: true,
       orderLengthWeightThreshold: 9,
       orderUncertaintyWeight: 0.35,
-      baselineUncertaintyWeight: 0.45
+      baselineUncertaintyWeight: 0.45,
+      multiscaleEnergyThreshold: 0.08
     },
     enableUncertaintyGap: true,
     // Keep the knob for future extension, but current release keeps jagged disabled.

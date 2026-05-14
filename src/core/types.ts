@@ -56,6 +56,8 @@ export interface LayoutOptimizationConfig {
   orderUncertaintyWeight?: number;
   /** Uncertainty strength in uncertainty-aware baseline solver */
   baselineUncertaintyWeight?: number;
+  /** Minimum normalized Haar-band energy included by multiscale baseline optimization */
+  multiscaleEnergyThreshold?: number;
   /** Seed used by SineStream pre-shuffle in hierarchical ordering */
   shuffleSeed?: number;
 }
@@ -79,7 +81,11 @@ export interface LayerInput {
   mean: number[];
   quantiles?: QuantileBands;
   unc?: number[];
+  poportionMean?: number[];
+  poportionQuantiles?: QuantileBands;
   poportionUnc?: number[];
+  poportionLower?: number[];
+  poportionUpper?: number[];
   lower?: number[];
   upper?: number[];
 }

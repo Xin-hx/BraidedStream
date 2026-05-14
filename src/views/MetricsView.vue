@@ -138,9 +138,23 @@ function pct(value: number): number {
           <span>method={{ metrics.multiscale.method }}</span>
           <span>verified={{ metrics.multiscale.verified ? "yes" : "no" }}</span>
           <span>fallback={{ metrics.multiscale.fallbackUsed ? "yes" : "no" }}</span>
-          <span>effective scales={{ metrics.multiscale.effectiveScaleCount }}</span>
+          <span>selected/effective={{ metrics.multiscale.selectedScaleCount ?? metrics.multiscale.effectiveScaleCount }}/{{ metrics.multiscale.effectiveScaleCount }}</span>
           <span>threshold={{ metrics.multiscale.threshold.toFixed(2) }}</span>
           <span>bands={{ multiscaleBandCount }}</span>
+          <span v-if="metrics.multiscale.objectiveBefore !== undefined && metrics.multiscale.objectiveAfter !== undefined">
+            objective={{ metrics.multiscale.objectiveBefore.toFixed(2) }} -> {{ metrics.multiscale.objectiveAfter.toFixed(2) }}
+          </span>
+          <span v-if="metrics.multiscale.globalMeanSlopeGuardrailPassed !== undefined">
+            slope-cap={{ metrics.multiscale.globalMeanSlopeGuardrailPassed ? "pass" : "soft breach" }}
+          </span>
+          <span
+            v-if="
+              metrics.multiscale.centerlineSlopeCoverageBefore !== undefined &&
+              metrics.multiscale.centerlineSlopeCoverageAfter !== undefined
+            "
+          >
+            coverage={{ metrics.multiscale.centerlineSlopeCoverageBefore.toFixed(2) }} -> {{ metrics.multiscale.centerlineSlopeCoverageAfter.toFixed(2) }}
+          </span>
         </div>
         <div class="multiscale-bars">
           <div

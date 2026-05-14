@@ -292,7 +292,7 @@ function countValues(minValue: number, maxValue: number, stepValue: number): num
     <header class="multiscale-lab-page__header">
       <h1>Multiscale Parameter Lab</h1>
       <p>
-        Grid-search `baselineUncertaintyWeight` / `energyThreshold` / `baselineCenterType`,
+        Grid-search `waveStrength` / `energyThreshold` / `baselineCenterType`,
         ranking by ROI first and guarding global regressions.
       </p>
     </header>
@@ -329,15 +329,15 @@ function countValues(minValue: number, maxValue: number, stepValue: number): num
       <h2>Search Space</h2>
       <div class="multiscale-lab-grid multiscale-lab-grid--6">
         <label>
-          weight min
+          wave min
           <input v-model.number="state.strengthMin" type="number" step="0.01" min="0" :disabled="runningSearch" />
         </label>
         <label>
-          weight max
+          wave max
           <input v-model.number="state.strengthMax" type="number" step="0.01" min="0" :disabled="runningSearch" />
         </label>
         <label>
-          weight step
+          wave step
           <input v-model.number="state.strengthStep" type="number" step="0.01" min="0.001" :disabled="runningSearch" />
         </label>
         <label>
@@ -412,7 +412,7 @@ function countValues(minValue: number, maxValue: number, stepValue: number): num
           <strong>Best Params</strong>
           <div>
             centerType={{ bestCandidate.params.baselineCenterType }},
-            weight={{ bestCandidate.params.baselineUncertaintyWeight.toFixed(3) }},
+            wave={{ bestCandidate.params.baselineUncertaintyWeight.toFixed(3) }},
             threshold={{ bestCandidate.params.energyThreshold.toFixed(3) }}
           </div>
           <div>
@@ -450,7 +450,7 @@ function countValues(minValue: number, maxValue: number, stepValue: number): num
             <td :class="candidate.pass ? 'lab-status-pass' : 'lab-status-fail'">{{ candidate.pass ? "PASS" : "FAIL" }}</td>
             <td>
               c={{ candidate.params.baselineCenterType }},
-              w={{ candidate.params.baselineUncertaintyWeight.toFixed(2) }},
+              wave={{ candidate.params.baselineUncertaintyWeight.toFixed(2) }},
               t={{ candidate.params.energyThreshold.toFixed(2) }}
             </td>
             <td>

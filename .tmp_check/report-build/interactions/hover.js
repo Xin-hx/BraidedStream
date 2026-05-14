@@ -1,17 +1,28 @@
+export function createHoverInfoResolver(layers) {
+    const entries = layers.map((layer) => ({ layer, label: formatLayerLabel(layer.id) }));
+    const byId = new Map(entries.map((entry) => [entry.layer.id, entry]));
+    return {
+        build: (timeIndex, times, focusLayerId) => buildHoverInfoFromEntries(timeIndex, times, entries, byId, focusLayerId)
+    };
+}
 export function buildHoverInfo(timeIndex, times, layers, focusLayerId) {
+    const resolver = createHoverInfoResolver(layers);
+    return resolver.build(timeIndex, times, focusLayerId);
+}
+function buildHoverInfoFromEntries(timeIndex, times, entries, byId, focusLayerId) {
     const clamped = Math.max(0, Math.min(times.length - 1, timeIndex));
-    const allValues = layers.map((layer) => ({
-        id: layer.id,
-        label: formatLayerLabel(layer.id),
-        mean: layer.mean[clamped],
-        unc: layer.unc?.[clamped] ?? 0
-    }));
-    const layerValues = focusLayerId ? allValues.filter((item) => item.id === focusLayerId) : allValues;
+    let total = 0;
+    for (const entry of entries) {
+        total += entry.layer.mean[clamped] ?? 0;
+    }
+    const layerValues = focusLayerId
+        ? layerValueAt(byId.get(focusLayerId), clamped)
+        : topLayerValuesAt(entries, clamped, 4);
     return {
         timeIndex: clamped,
         timeValue: times[clamped],
         timeLabel: formatTimeValue(times[clamped]),
-        total: allValues.reduce((acc, item) => acc + item.mean, 0),
+        total,
         focusLayerId: focusLayerId ?? null,
         layerValues
     };
@@ -29,6 +40,34 @@ export function tooltipText(info, extra) {
         top.push("no substream at cursor");
     }
     return [header, ...top, ...extra].join("\n");
+}
+function topLayerValuesAt(entries, timeIndex, limit) {
+    const top = [];
+    for (const entry of entries) {
+        const item = layerValue(entry, timeIndex);
+        let insertAt = top.length;
+        while (insertAt > 0 && item.mean > top[insertAt - 1].mean) {
+            insertAt -= 1;
+        }
+        if (insertAt < limit) {
+            top.splice(insertAt, 0, item);
+            if (top.length > limit) {
+                top.pop();
+            }
+        }
+    }
+    return top;
+}
+function layerValueAt(entry, timeIndex) {
+    return entry ? [layerValue(entry, timeIndex)] : [];
+}
+function layerValue(entry, timeIndex) {
+    return {
+        id: entry.layer.id,
+        label: entry.label,
+        mean: entry.layer.mean[timeIndex] ?? 0,
+        unc: entry.layer.unc?.[timeIndex] ?? 0
+    };
 }
 function formatTimeValue(value) {
     if (!Number.isFinite(value)) {

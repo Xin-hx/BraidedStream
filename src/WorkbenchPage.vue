@@ -256,6 +256,7 @@ function buildCurrentVariantConfig(): OptimizingVariantConfig {
     pidUncertaintySource: state.pidUncertaintySource,
     pidTimeAlpha: state.pidTimeAlpha,
     baselineUncertaintyWeight: state.optimization.baselineUncertaintyWeight ?? 0.45,
+    multiscaleEnergyThreshold: state.optimization.multiscaleEnergyThreshold ?? 0.08,
     baselineHooks: baselineHooksFromState(),
     orderRoi: state.ROI,
     sineOrder: sineOrderConfigFromState()
@@ -270,6 +271,7 @@ function buildCompareVariantConfig(): OptimizingVariantConfig {
     pidUncertaintySource: state.compare.pidUncertaintySource,
     pidTimeAlpha: state.compare.pidTimeAlpha,
     baselineUncertaintyWeight: state.compare.baselineUncertaintyWeight,
+    multiscaleEnergyThreshold: state.compare.multiscaleEnergyThreshold,
     baselineHooks: baselineHooksFromCompare(),
     orderRoi: state.ROI,
     sineOrder: sineOrderConfigFromCompare()
@@ -517,12 +519,46 @@ function sanitizeState(): void {
     defaultState.optimization.baselineUncertaintyWeight ?? 0.45,
     0
   );
+  state.optimization.multiscaleEnergyThreshold = finiteBetween(
+    state.optimization.multiscaleEnergyThreshold ?? defaultState.optimization.multiscaleEnergyThreshold ?? 0.08,
+    defaultState.optimization.multiscaleEnergyThreshold ?? 0.08,
+    0,
+    1
+  );
   state.pidTimeAlpha = finiteBetween(state.pidTimeAlpha, defaultState.pidTimeAlpha, 0, 1);
+  state.contourBoxplotYBins = Math.max(
+    24,
+    Math.min(420, Math.round(finiteAtLeast(state.contourBoxplotYBins, defaultState.contourBoxplotYBins, 24)))
+  );
+  state.contourBoxplotThreshold = finiteBetween(
+    state.contourBoxplotThreshold,
+    defaultState.contourBoxplotThreshold,
+    0.01,
+    0.99
+  );
+  state.contourBoxplotCentralFraction = finiteBetween(
+    state.contourBoxplotCentralFraction,
+    defaultState.contourBoxplotCentralFraction,
+    0.05,
+    1
+  );
+  state.contourBoxplotOpacity = finiteBetween(
+    state.contourBoxplotOpacity,
+    defaultState.contourBoxplotOpacity,
+    0.1,
+    1
+  );
   state.compare.pidTimeAlpha = finiteBetween(state.compare.pidTimeAlpha, defaultState.compare.pidTimeAlpha, 0, 1);
   state.compare.baselineUncertaintyWeight = finiteAtLeast(
     state.compare.baselineUncertaintyWeight,
     defaultState.compare.baselineUncertaintyWeight,
     0
+  );
+  state.compare.multiscaleEnergyThreshold = finiteBetween(
+    state.compare.multiscaleEnergyThreshold,
+    defaultState.compare.multiscaleEnergyThreshold,
+    0,
+    1
   );
   state.compare.wiggleWeightL1 = finiteAtLeast(state.compare.wiggleWeightL1, defaultState.compare.wiggleWeightL1, 0);
   state.compare.wiggleWeightL2 = finiteAtLeast(state.compare.wiggleWeightL2, defaultState.compare.wiggleWeightL2, 0);

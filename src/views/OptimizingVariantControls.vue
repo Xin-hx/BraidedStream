@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { optimizingBaselineModeLabel, orderingScoringLabel } from "../core/optimizingUtils";
 import type { AppState } from "../state/appState";
 import type {
   BaselineCenterType,
@@ -98,6 +99,20 @@ const baselineUncertaintyWeight = computed<number>({
       props.state.compare.baselineUncertaintyWeight = value;
     } else {
       props.state.optimization.baselineUncertaintyWeight = value;
+    }
+  }
+});
+
+const multiscaleEnergyThreshold = computed<number>({
+  get: () =>
+    isCompare.value
+      ? props.state.compare.multiscaleEnergyThreshold
+      : props.state.optimization.multiscaleEnergyThreshold ?? 0.08,
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.multiscaleEnergyThreshold = value;
+    } else {
+      props.state.optimization.multiscaleEnergyThreshold = value;
     }
   }
 });
@@ -288,6 +303,8 @@ const showBaselineCenter = computed(() => ["sineStream", "multiscale"].includes(
 const showMultiscaleControls = computed(() => effectiveBaselineMode.value === "multiscale");
 const showL1Controls = computed(() => effectiveBaselineMode.value === "l1");
 const showL2Controls = computed(() => effectiveBaselineMode.value === "l2");
+const effectiveOrderingLabel = computed(() => orderingScoringLabel(effectiveOrderingMode.value));
+const effectiveBaselineLabel = computed(() => optimizingBaselineModeLabel(effectiveBaselineMode.value));
 
 function onControlsChange(): void {
   emit("controls-change");
@@ -296,10 +313,10 @@ function onControlsChange(): void {
 
 <template>
   <div class="control-group control-group--stage">
-    <div class="control-group__title">{{ isCompare ? "Compare Stage" : "Optimizing Stage" }}</div>
+    <div class="control-group__title">{{ isCompare ? "Compare Preset" : "Preset" }}</div>
     <div class="control-group__items">
       <label>
-        Stage
+        Preset
         <select v-model="optimizingStage" @change="onControlsChange">
           <option value="plainStream">Plain Stream</option>
           <option value="stackedGeometry">Stacked Graphs - Geometry</option>
@@ -308,6 +325,17 @@ function onControlsChange(): void {
           <option value="custom">Custom</option>
         </select>
       </label>
+
+      <div class="effective-summary" aria-label="Effective optimization modes">
+        <div class="effective-summary__row">
+          <span class="effective-summary__label">Ordering:</span>
+          <span class="effective-summary__value">{{ effectiveOrderingLabel }}</span>
+        </div>
+        <div class="effective-summary__row">
+          <span class="effective-summary__label">Baseline:</span>
+          <span class="effective-summary__value">{{ effectiveBaselineLabel }}</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -338,6 +366,55 @@ function onControlsChange(): void {
         alpha
         <input v-model.number="pidTimeAlpha" type="range" min="0" max="1" step="0.01" @input="onControlsChange" />
         <span class="control-inline-note">{{ pidTimeAlpha.toFixed(2) }}</span>
+      </label>
+
+      <label v-if="showPidControls" class="checkbox">
+        <input v-model="state.showContourBoxplot" type="checkbox" @change="onControlsChange" />
+        contour boxplot
+      </label>
+
+      <label v-if="showPidControls && state.showContourBoxplot">
+        boxplot top
+        <input
+          v-model.number="state.contourBoxplotCentralFraction"
+          type="range"
+          min="0.1"
+          max="1"
+          step="0.05"
+          @input="onControlsChange"
+        />
+        <span class="control-inline-note">{{ Math.round(state.contourBoxplotCentralFraction * 100) }}%</span>
+      </label>
+
+      <label v-if="showPidControls && state.showContourBoxplot">
+        mask threshold
+        <input
+          v-model.number="state.contourBoxplotThreshold"
+          type="range"
+          min="0.05"
+          max="0.95"
+          step="0.05"
+          @input="onControlsChange"
+        />
+        <span class="control-inline-note">{{ state.contourBoxplotThreshold.toFixed(2) }}</span>
+      </label>
+
+      <label v-if="showPidControls && state.showContourBoxplot">
+        yBins
+        <input v-model.number="state.contourBoxplotYBins" type="number" step="10" min="24" max="420" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showPidControls && state.showContourBoxplot">
+        boxplot opacity
+        <input
+          v-model.number="state.contourBoxplotOpacity"
+          type="range"
+          min="0.1"
+          max="1"
+          step="0.05"
+          @input="onControlsChange"
+        />
+        <span class="control-inline-note">{{ state.contourBoxplotOpacity.toFixed(2) }}</span>
       </label>
 
       <label v-if="showSineOrderingControls">
@@ -404,8 +481,13 @@ function onControlsChange(): void {
       </label>
 
       <label v-if="showMultiscaleControls">
-        baselineUncertaintyWeight
+        waveStrength
         <input v-model.number="baselineUncertaintyWeight" type="number" step="0.05" min="0" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showMultiscaleControls">
+        energyThreshold
+        <input v-model.number="multiscaleEnergyThreshold" type="number" step="0.01" min="0" max="1" @change="onControlsChange" />
       </label>
 
       <label v-if="showBaselineCenter">

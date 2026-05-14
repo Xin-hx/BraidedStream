@@ -1,22 +1,24 @@
-import { runInvariantChecks } from "../core/assertions.js";
-import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline.js";
+import { computeBaseline } from "../core/baseline.js";
 import { computeBraidLayout } from "../core/braid.js";
 import { optimizeLayerOrder } from "../core/optimizeOrder.js";
+import { computeOptimizingBaseline, computeOptimizingOrder, optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../core/optimizingUtils.js";
 import { clampRoiToParent, normalizeROI } from "../core/roi.js";
 import { computeStackedBoundaries } from "../core/stack.js";
-import { layerUncertaintyAt, orderLayers } from "../core/validate.js";
+import { orderLayers } from "../core/validate.js";
 import { preprocessDataset } from "../data/transforms.js";
 import { computeMetrics } from "../layout/metrics.js";
 export function buildScene(bundle, state) {
-    const context = prepareSceneContext(bundle, state, { optimizeScope: "full" });
+    const context = prepareDatasetWindowContext(bundle, state);
+    const orderedLayers = orderLayers(context.dataset.layers, context.dataset.order);
     // 1) Baseline + stack define the reference layout without uncertainty spacing.
-    const baseline = computeBaseline(context.dataset.times, context.orderedLayers, state.baseline, baselineHooksFromState(state));
-    const baseLayout = computeStackedBoundaries(baseline, context.orderedLayers);
+    const baseline = computeBaseline(context.dataset.times, orderedLayers, state.baseline, baselineHooksFromState(state));
+    const baseLayout = computeStackedBoundaries(baseline, orderedLayers);
     // 2) Braiding injects uncertainty-aware gaps on top of the base stack.
     const effectiveGapMode = state.enableUncertaintyGap ? state.gapMode : "none";
+    const boundaryPenalty = new Array(Math.max(0, orderedLayers.length - 1)).fill(1);
     const braidedLayout = computeBraidLayout({
         base: baseLayout,
-        orderedLayers: context.orderedLayers,
+        orderedLayers,
         roi: context.insetRoi,
         baselineMode: state.baseline,
         gapMode: effectiveGapMode,
@@ -27,96 +29,104 @@ export function buildScene(bundle, state) {
         spacingSlopeWeight: state.optimization.spacingSlopeWeight,
         spacingTemporalWeight: state.optimization.spacingTemporalWeight,
         spacingIterations: state.optimization.spacingIterations,
-        boundaryPenalty: context.optimized.boundaryPenalty,
+        boundaryPenalty,
         smoothKernel: state.smoothKernel,
         yScale: (v) => v
     });
     if (braidedLayout.diagnostics) {
-        braidedLayout.diagnostics.orderObjectiveBefore = context.optimized.diagnostics.objectiveBefore;
-        braidedLayout.diagnostics.orderObjectiveAfter = context.optimized.diagnostics.objectiveAfter;
-        braidedLayout.diagnostics.clusterCount = context.optimized.diagnostics.clusterCount;
-        braidedLayout.diagnostics.trunkCluster = context.optimized.diagnostics.trunkCluster;
-        braidedLayout.diagnostics.crossClusterBoundaries = context.optimized.diagnostics.crossClusterBoundaries;
+        braidedLayout.diagnostics.orderObjectiveBefore = 0;
+        braidedLayout.diagnostics.orderObjectiveAfter = 0;
+        braidedLayout.diagnostics.clusterCount = 1;
+        braidedLayout.diagnostics.trunkCluster = 0;
+        braidedLayout.diagnostics.crossClusterBoundaries = 0;
     }
-    const invariant = runInvariantChecks(context.orderedLayers, baseLayout, braidedLayout, context.insetRoi, {
+    const invariant = runInvariantChecks(orderedLayers, baseLayout, braidedLayout, context.insetRoi, {
         enabled: state.assertEnabled,
         throwOnError: false
     });
-    const metrics = computeMetrics(context.dataset, baseLayout, braidedLayout, context.insetRoi, invariant, context.orderedLayers, {
+    const metrics = computeMetrics(context.dataset, baseLayout, braidedLayout, context.insetRoi, invariant, orderedLayers, {
         includeGlobalRows: true
     });
-    const diagnosticsNotes = [...orderDiagnosticsNotes(context.optimized), ...gapDiagnosticsNotes(braidedLayout)];
+    const diagnosticsNotes = ["main reference: original order + centered baseline", ...gapDiagnosticsNotes(braidedLayout)];
     return {
         dataset: context.dataset,
-        orderedLayers: context.orderedLayers,
+        orderedLayers,
         baseLayout,
         braidedLayout,
         roi: context.activeRoi,
         insetRoi: context.insetRoi,
         metrics,
         notes: context.preprocessedNotes,
-        diagnosticsNotes
+        diagnosticsNotes,
+        usesPid: false,
+        pidUncertaintySource: null
     };
 }
-export function buildOptimizeComparisonScene(bundle, state, optimizeMethod) {
-    const useMultiscale = optimizeMethod === "multiscale";
-    const context = prepareSceneContext(bundle, state, {
-        optimizeScope: state.optimizeWithinROI ? "roi" : "full",
-        orderWithUncertainty: useMultiscale
+export function buildOptimizingVariantScene(bundle, state, config) {
+    const context = prepareDatasetWindowContext(bundle, state);
+    const resolvedConfig = resolveOptimizingVariantConfig(config);
+    const orderResult = computeOptimizingOrder(context.dataset, resolvedConfig);
+    const orderedLayers = orderLayers(context.dataset.layers, orderResult.displayOrder);
+    const baselineResult = computeOptimizingBaseline(context.dataset.times, orderedLayers, resolvedConfig.baselineMode, resolvedConfig.baselineHooks, resolvedConfig.baselineUncertaintyWeight, resolvedConfig.multiscaleEnergyThreshold);
+    const layoutStack = computeStackedBoundaries(baselineResult.baseline, orderedLayers);
+    const layout = stackToBraidLayout(layoutStack);
+    const invariant = emptyInvariantSummary();
+    const metrics = computeMetrics(context.dataset, layoutStack, layout, context.insetRoi, invariant, orderedLayers, {
+        includeGlobalRows: true,
+        multiscale: baselineResult.multiscaleDiagnostics
+            ? {
+                method: baselineResult.multiscaleDiagnostics.method,
+                verified: baselineResult.multiscaleDiagnostics.verifiedMultiscale,
+                fallbackUsed: baselineResult.multiscaleDiagnostics.fallbackUsed,
+                effectiveScaleCount: baselineResult.multiscaleDiagnostics.effectiveScaleCount,
+                selectedScaleCount: baselineResult.multiscaleDiagnostics.selectedScaleCount,
+                threshold: baselineResult.multiscaleDiagnostics.energyThreshold,
+                scaleBands: baselineResult.multiscaleDiagnostics.scaleBands.map((band) => ({
+                    scale: band.scale,
+                    ratio: band.ratio
+                })),
+                scaleCoefficients: baselineResult.multiscaleDiagnostics.scaleCoefficients,
+                objectiveBefore: baselineResult.multiscaleDiagnostics.objectiveBefore,
+                objectiveAfter: baselineResult.multiscaleDiagnostics.objectiveAfter,
+                meanSlopeBefore: baselineResult.multiscaleDiagnostics.meanSlopeBefore,
+                meanSlopeAfter: baselineResult.multiscaleDiagnostics.meanSlopeAfter,
+                maxSlopeBefore: baselineResult.multiscaleDiagnostics.maxSlopeBefore,
+                maxSlopeAfter: baselineResult.multiscaleDiagnostics.maxSlopeAfter,
+                curvatureBefore: baselineResult.multiscaleDiagnostics.curvatureBefore,
+                curvatureAfter: baselineResult.multiscaleDiagnostics.curvatureAfter,
+                burstBefore: baselineResult.multiscaleDiagnostics.burstBefore,
+                burstAfter: baselineResult.multiscaleDiagnostics.burstAfter,
+                derivativeConcentrationBefore: baselineResult.multiscaleDiagnostics.derivativeConcentrationBefore,
+                derivativeConcentrationAfter: baselineResult.multiscaleDiagnostics.derivativeConcentrationAfter,
+                centerlineSlopeCoverageBefore: baselineResult.multiscaleDiagnostics.centerlineSlopeCoverageBefore,
+                centerlineSlopeCoverageAfter: baselineResult.multiscaleDiagnostics.centerlineSlopeCoverageAfter,
+                globalMeanSlopeGuardrailPassed: baselineResult.multiscaleDiagnostics.globalMeanSlopeGuardrailPassed
+            }
+            : null
     });
-    const hooks = baselineHooksFromState(state);
-    const uncStrength = Math.max(0, state.optimization.baselineUncertaintyWeight ?? 0.45);
-    const beforeBaseline = computeBaseline(context.dataset.times, context.orderedLayers, "sineStream", hooks);
-    const beforeLayout = computeStackedBoundaries(beforeBaseline, context.orderedLayers);
-    let afterBaseline = beforeBaseline.slice();
-    let multiscale = null;
-    if (useMultiscale) {
-        multiscale = computeMultiscaleDistributedBaseline(context.dataset.times, context.orderedLayers, uncStrength, hooks, 0.08);
-        afterBaseline = multiscale.baseline;
+    const diagnosticsNotes = [
+        `stage: ${optimizingStageLabel(config.optimizingStage)}`,
+        `ordering scoring: ${orderingScoringLabel(resolvedConfig.orderingScoringMode)}`,
+        `baseline: ${optimizingBaselineModeLabel(resolvedConfig.baselineMode)}`,
+        ...orderResult.notes
+    ];
+    if (baselineResult.multiscaleDiagnostics !== null) {
+        diagnosticsNotes.push(`multiscale wave strength: ${Math.max(0, resolvedConfig.baselineUncertaintyWeight).toFixed(3)}`);
+        diagnosticsNotes.push(...multiscaleDiagnosticsNotes(baselineResult.multiscaleDiagnostics));
     }
-    const afterLayoutStack = computeStackedBoundaries(afterBaseline, context.orderedLayers);
-    const afterLayout = stackToBraidLayout(afterLayoutStack);
-    const invariant = {
-        checked: false,
-        violations: [],
-        maxThicknessError: 0
-    };
-    const metrics = computeMetrics(context.dataset, beforeLayout, afterLayout, context.insetRoi, invariant, context.orderedLayers, {
-        semantic: multiscale === null
-            ? undefined
-            : {
-                enableTpidCenterAlignment: true,
-                baselineShiftBeforeAbs: new Array(context.dataset.times.length).fill(0),
-                baselineShiftAfterAbs: multiscale.diagnostics.distributedShiftAbs,
-                uncertaintySaliency: multiscale.diagnostics.uncertaintySaliency
-            },
-        multiscale: multiscale === null
-            ? null
-            : {
-                method: multiscale.diagnostics.method,
-                verified: multiscale.diagnostics.verifiedMultiscale,
-                fallbackUsed: multiscale.diagnostics.fallbackUsed,
-                effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
-                threshold: multiscale.diagnostics.energyThreshold,
-                scaleBands: multiscale.diagnostics.scaleBands.map((band) => ({ scale: band.scale, ratio: band.ratio }))
-            },
-        includeGlobalRows: true
-    });
-    const diagnosticsNotes = [...orderDiagnosticsNotes(context.optimized)];
-    if (multiscale !== null) {
-        diagnosticsNotes.push(`baseline uncertainty weight: ${uncStrength.toFixed(3)}`);
-        diagnosticsNotes.push(...multiscaleDiagnosticsNotes(multiscale.diagnostics));
-    }
+    const usesPid = isPidOrderingMode(resolvedConfig.orderingScoringMode);
     return {
         dataset: context.dataset,
-        orderedLayers: context.orderedLayers,
-        baseLayout: beforeLayout,
-        braidedLayout: afterLayout,
+        orderedLayers,
+        baseLayout: layoutStack,
+        braidedLayout: layout,
         roi: context.activeRoi,
         insetRoi: context.insetRoi,
         metrics,
         notes: context.preprocessedNotes,
-        diagnosticsNotes
+        diagnosticsNotes,
+        usesPid,
+        pidUncertaintySource: usesPid ? resolvedConfig.pidUncertaintySource : null
     };
 }
 export function buildBraidedEnhanceScene(bundle, state, baselineMode) {
@@ -164,7 +174,9 @@ export function buildBraidedEnhanceScene(bundle, state, baselineMode) {
         insetRoi: context.insetRoi,
         metrics,
         notes: context.preprocessedNotes,
-        diagnosticsNotes: [...orderDiagnosticsNotes(context.optimized), ...gapDiagnosticsNotes(braidedLayout)]
+        diagnosticsNotes: [...orderDiagnosticsNotes(context.optimized), ...gapDiagnosticsNotes(braidedLayout)],
+        usesPid: false,
+        pidUncertaintySource: null
     };
 }
 export function defaultWindow(length) {
@@ -175,35 +187,6 @@ export function defaultWindow(length) {
     const right = length - 1;
     const left = Math.max(0, right - span);
     return { t0Index: left, t1Index: right };
-}
-export function recommendHighUncertaintyRoi(dataset, parent) {
-    const fallback = parent ?? defaultWindow(dataset.times.length);
-    const left = Math.max(0, fallback.t0Index);
-    const right = Math.min(dataset.times.length - 1, fallback.t1Index);
-    const span = right - left + 1;
-    if (span <= 2) {
-        return { t0Index: left, t1Index: right };
-    }
-    const subSpan = Math.max(3, Math.floor(span * 0.45));
-    let bestL = left;
-    let bestScore = Number.NEGATIVE_INFINITY;
-    for (let l = left; l + subSpan - 1 <= right; l += 1) {
-        const r = l + subSpan - 1;
-        let score = 0;
-        for (let t = l; t <= r; t += 1) {
-            for (const layer of dataset.layers) {
-                score += layerUncertaintyAt(layer, t);
-            }
-        }
-        if (score > bestScore) {
-            bestScore = score;
-            bestL = l;
-        }
-    }
-    return {
-        t0Index: bestL,
-        t1Index: Math.min(right, bestL + subSpan - 1)
-    };
 }
 export function applyHorizonFilter(dataset, kind, horizon) {
     if (kind !== "covid") {
@@ -220,18 +203,27 @@ export function applyHorizonFilter(dataset, kind, horizon) {
         order: dataset.order.filter((id) => selected.has(id))
     };
 }
-function prepareSceneContext(bundle, state, options) {
+function prepareDatasetWindowContext(bundle, state) {
     // Clone/normalize incoming dataset first so scene building stays side-effect free.
     const preprocessed = preprocessDataset(bundle.dataset);
     // Covid horizon selection changes layer set but preserves the original timeline.
     const dataset = applyHorizonFilter(preprocessed.dataset, bundle.kind, state.covidHorizonFilter);
     const activeRoi = normalizeROI(state.ROI, dataset.times.length) ?? defaultWindow(dataset.times.length);
     const insetRoi = clampRoiToParent(normalizeROI(state.insetROI, dataset.times.length), activeRoi) ??
-        recommendHighUncertaintyRoi(dataset, activeRoi);
-    const orderRoi = options.optimizeScope === "roi" ? activeRoi : null;
+        activeRoi;
+    return {
+        dataset,
+        activeRoi,
+        insetRoi,
+        preprocessedNotes: preprocessed.notes
+    };
+}
+function prepareSceneContext(bundle, state, options) {
+    const base = prepareDatasetWindowContext(bundle, state);
+    const orderRoi = options.optimizeScope === "roi" ? base.activeRoi : null;
     const orderWithUncertainty = options.orderWithUncertainty === true;
     // Optimizing tab may focus ordering on ROI; other views keep full-timeline ordering.
-    const optimized = optimizeLayerOrder(dataset.layers, orderRoi, {
+    const optimized = optimizeLayerOrder(base.dataset.layers, orderRoi, {
         clusterAutoCutScale: state.optimization.clusterAutoCutScale,
         clusterBoundaryPenalty: state.optimization.clusterBoundaryPenalty,
         similaritySigma: state.optimization.orderSimilaritySigma,
@@ -243,15 +235,22 @@ function prepareSceneContext(bundle, state, options) {
         shuffleSeed: state.fixedSeed,
         useUncertaintyTerm: orderWithUncertainty,
         uncertaintyWeight: orderWithUncertainty ? Math.max(0, state.optimization.orderUncertaintyWeight ?? 0.35) : 0
-    }, dataset.order);
-    const orderedLayers = orderLayers(dataset.layers, optimized.order);
+    }, base.dataset.order);
+    const orderedLayers = orderLayers(base.dataset.layers, optimized.order);
     return {
-        dataset,
-        activeRoi,
-        insetRoi,
+        dataset: base.dataset,
+        activeRoi: base.activeRoi,
+        insetRoi: base.insetRoi,
         optimized,
         orderedLayers,
-        preprocessedNotes: preprocessed.notes
+        preprocessedNotes: base.preprocessedNotes
+    };
+}
+function emptyInvariantSummary() {
+    return {
+        checked: false,
+        violations: [],
+        maxThicknessError: 0
     };
 }
 function baselineHooksFromState(state) {
@@ -285,13 +284,172 @@ function multiscaleDiagnosticsNotes(diagnostics) {
         .slice(0, 3)
         .map((band) => `${band.scale}:${(band.ratio * 100).toFixed(1)}%`)
         .join(", ");
+    const coefficients = (diagnostics.scaleCoefficients ?? [])
+        .filter((item) => Math.abs(item.coefficient) > 1e-6)
+        .map((item) => `${item.scale}:${item.coefficient.toFixed(2)}`)
+        .join(", ");
+    const objective = Number.isFinite(diagnostics.objectiveBefore) && Number.isFinite(diagnostics.objectiveAfter)
+        ? `multiscale objective: ${diagnostics.objectiveBefore?.toFixed(3)} -> ${diagnostics.objectiveAfter?.toFixed(3)}, slope-cap=${diagnostics.globalMeanSlopeGuardrailPassed ? "pass" : "soft breach"}`
+        : "";
+    const coverage = Number.isFinite(diagnostics.centerlineSlopeCoverageBefore) &&
+        Number.isFinite(diagnostics.centerlineSlopeCoverageAfter)
+        ? `centerline slope coverage: ${diagnostics.centerlineSlopeCoverageBefore?.toFixed(3)} -> ${diagnostics.centerlineSlopeCoverageAfter?.toFixed(3)}`
+        : "";
     return [
         `multiscale baseline: verified=${diagnostics.verifiedMultiscale ? "yes" : "no"}, fallback=${diagnostics.fallbackUsed ? "yes" : "no"}`,
-        `multiscale effective scales: ${diagnostics.effectiveScaleCount} (threshold=${diagnostics.energyThreshold.toFixed(2)})`,
+        `multiscale selected/effective scales: ${diagnostics.selectedScaleCount ?? diagnostics.effectiveScaleCount}/${diagnostics.effectiveScaleCount} (threshold=${diagnostics.energyThreshold.toFixed(2)})`,
         `multiscale shift budget: local=${diagnostics.localShiftBudget.toFixed(3)}, distributed=${diagnostics.distributedShiftBudget.toFixed(3)}`,
+        objective,
+        coverage,
         diagnostics.fallbackUsed && diagnostics.fallbackReason ? `multiscale fallback reason: ${diagnostics.fallbackReason}` : "",
-        topBands ? `multiscale top scale ratios: ${topBands}` : ""
+        topBands ? `multiscale top scale ratios: ${topBands}` : "",
+        coefficients ? `multiscale active coefficients: ${coefficients}` : "multiscale active coefficients: none"
     ].filter((text) => text.length > 0);
+}
+function isPidOrderingMode(mode) {
+    return mode === "intervalInclusion" || mode === "pidMean" || mode === "pidTimeWeighted";
+}
+/** Scene-local invariant checks for braid development and diagnostics. */
+function runInvariantChecks(orderedLayers, base, braided, _roi, options) {
+    if (!options.enabled) {
+        return { checked: false, violations: [], maxThicknessError: 0 };
+    }
+    const eps = options.epsilon ?? 1e-6;
+    const maxMessages = options.maxMessages ?? 30;
+    const tLength = base.baseline.length;
+    const kLength = orderedLayers.length;
+    const support = braided.roiSupport;
+    const violations = [];
+    let skipped = 0;
+    let maxThicknessError = 0;
+    const pushViolation = (message) => {
+        if (violations.length < maxMessages) {
+            violations.push(message);
+        }
+        else {
+            skipped += 1;
+        }
+    };
+    for (let k = 0; k < kLength; k += 1) {
+        for (let t = 0; t < tLength; t += 1) {
+            const thickness = braided.yTop[k][t] - braided.yBottom[k][t];
+            const err = Math.abs(thickness - orderedLayers[k].mean[t]);
+            maxThicknessError = Math.max(maxThicknessError, err);
+            if (err > eps) {
+                pushViolation(`A thickness mismatch at k=${k}, t=${t}, err=${err.toExponential(3)}`);
+            }
+        }
+    }
+    for (let t = 0; t < tLength; t += 1) {
+        const outsideSupport = !support || t < support.supportStart || t > support.supportEnd;
+        if (outsideSupport) {
+            for (let k = 0; k < braided.gapsValue.length; k += 1) {
+                if (Math.abs(braided.gapsValue[k][t]) > eps) {
+                    pushViolation(`B non-zero gap outside ROI +/- tau at boundary=${k}, t=${t}`);
+                }
+            }
+            for (let k = 0; k < kLength; k += 1) {
+                const deltaBottom = Math.abs(braided.yBottom[k][t] - base.yBottom[k][t]);
+                const deltaTop = Math.abs(braided.yTop[k][t] - base.yTop[k][t]);
+                if (deltaBottom > eps || deltaTop > eps) {
+                    pushViolation(`B y differs outside ROI +/- tau at k=${k}, t=${t}`);
+                }
+            }
+        }
+    }
+    for (let t = 0; t < tLength; t += 1) {
+        const sumGap = braided.sumGapPx[t] ?? 0;
+        if (sumGap < -eps) {
+            pushViolation(`B sumGap negative at t=${t}`);
+        }
+    }
+    for (let t = 0; t < tLength; t += 1) {
+        const outsideSupport = !support || t < support.supportStart || t > support.supportEnd;
+        if (outsideSupport && Math.abs(braided.omega[t]) > eps) {
+            pushViolation(`D omega not zero outside support at t=${t}`);
+        }
+    }
+    for (let k = 0; k < kLength - 1; k += 1) {
+        for (let t = 0; t < tLength; t += 1) {
+            if (braided.yBottom[k + 1][t] + eps < braided.yTop[k][t]) {
+                pushViolation(`C overlap at between k=${k} and k+1, t=${t}`);
+            }
+        }
+    }
+    for (let t = 0; t < tLength; t += 1) {
+        const value = braided.omega[t];
+        if (!Number.isFinite(value)) {
+            pushViolation(`D omega is non-finite at t=${t}`);
+        }
+        else if (value < -eps || value > 1 + eps) {
+            pushViolation(`D omega outside [0,1] at t=${t}: ${value.toFixed(4)}`);
+        }
+    }
+    if (support) {
+        checkRoiSupportContinuity(base, braided, kLength, tLength, eps, pushViolation);
+    }
+    if (skipped > 0) {
+        violations.push(`... and ${skipped} more violations`);
+    }
+    if (options.throwOnError && violations.length > 0) {
+        throw new Error(violations.join("\n"));
+    }
+    return {
+        checked: true,
+        violations,
+        maxThicknessError
+    };
+}
+function checkRoiSupportContinuity(base, braided, kLength, tLength, eps, pushViolation) {
+    const support = braided.roiSupport;
+    if (!support) {
+        return;
+    }
+    const fullLeftRamp = support.coreStart - support.tau >= 0;
+    const fullRightRamp = support.coreEnd + support.tau <= tLength - 1;
+    if (fullLeftRamp && Math.abs(braided.omega[support.supportStart]) > eps) {
+        pushViolation(`D omega at supportStart should be 0, t=${support.supportStart}`);
+    }
+    if (fullRightRamp && Math.abs(braided.omega[support.supportEnd]) > eps) {
+        pushViolation(`D omega at supportEnd should be 0, t=${support.supportEnd}`);
+    }
+    if (Math.abs(braided.omega[support.coreStart] - 1) > eps) {
+        pushViolation(`D omega at coreStart should be 1, t=${support.coreStart}`);
+    }
+    if (Math.abs(braided.omega[support.coreEnd] - 1) > eps) {
+        pushViolation(`D omega at coreEnd should be 1, t=${support.coreEnd}`);
+    }
+    const maxOmegaDelta = support.tau > 0 ? 1.7 / support.tau : 1;
+    for (let t = 1; t < tLength; t += 1) {
+        const delta = Math.abs(braided.omega[t] - braided.omega[t - 1]);
+        if (delta > maxOmegaDelta + 1e-3) {
+            pushViolation(`D omega jump too large at t=${t}, delta=${delta.toFixed(4)}`);
+        }
+    }
+    const s0 = support.supportStart;
+    const s1 = support.supportEnd;
+    for (let k = 0; k < kLength; k += 1) {
+        const deltaStart = braided.yBottom[k][s0] - base.yBottom[k][s0];
+        const deltaEnd = braided.yBottom[k][s1] - base.yBottom[k][s1];
+        if (fullLeftRamp && Math.abs(deltaStart) > eps) {
+            pushViolation(`D delta at supportStart not zero at k=${k}, t=${s0}`);
+        }
+        if (fullRightRamp && Math.abs(deltaEnd) > eps) {
+            pushViolation(`D delta at supportEnd not zero at k=${k}, t=${s1}`);
+        }
+        if (fullLeftRamp && s0 > 0) {
+            const before = braided.yBottom[k][s0 - 1] - base.yBottom[k][s0 - 1];
+            if (Math.abs(before) > eps) {
+                pushViolation(`D delta before supportStart not zero at k=${k}, t=${s0 - 1}`);
+            }
+        }
+        if (fullRightRamp && s1 < tLength - 1) {
+            const after = braided.yBottom[k][s1 + 1] - base.yBottom[k][s1 + 1];
+            if (Math.abs(after) > eps) {
+                pushViolation(`D delta after supportEnd not zero at k=${k}, t=${s1 + 1}`);
+            }
+        }
+    }
 }
 function stackToBraidLayout(layout) {
     const tLength = layout.baseline.length;

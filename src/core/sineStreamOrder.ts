@@ -1,5 +1,5 @@
 /**
- * Layer order optimization using SineStream-style hierarchical ordering.
+ * SineStream layer order optimization using hierarchical ordering.
  *
  * The public entry point prepares distance options and diagnostics; the helper
  * groups below build the hierarchy, solve optimal leaf ordering, and evaluate

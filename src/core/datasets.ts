@@ -190,7 +190,7 @@ function normalizeEnsembleCovidRows(rows: EnsembleCovidRow[]): { times: number[]
       if (quantile === null || value === null) {
         continue;
       }
-      const poportionValue = toFiniteNumber(row.poportion_minmax) ?? toFiniteNumber(row.poportion);
+      const poportionValue = toFiniteNumber(row.poportion) ?? toFiniteNumber(row.poportion_minmax);
       const v = Math.max(0, value);
       const assigned = assignCovidQuantile(rawCounts, quantile, index, v);
       if (assigned && poportionValue !== null) {
@@ -292,7 +292,10 @@ function buildCovidLayer(
     id: `${abbreviation}|h1`,
     mean: counts.q50.slice(),
     unc: wideSeries.slice(),
+    poportionMean: poportion.q50.slice(),
     poportionUnc: poportionUncSeries.slice(),
+    poportionLower: poportionLowerSeries.slice(),
+    poportionUpper: poportionUpperSeries.slice(),
     lower: lower95Series.slice(),
     upper: upper95Series.slice(),
     unc50Series: iqrSeries.slice(),
@@ -302,6 +305,17 @@ function buildCovidLayer(
     upper50Series: counts.q75.slice(),
     lower95Series: lower95Series.slice(),
     upper95Series: upper95Series.slice(),
+    poportionQuantiles: {
+      p05: poportionLowerSeries.slice(),
+      p25: poportion.q25.slice(),
+      p50: poportion.q50.slice(),
+      p75: poportion.q75.slice(),
+      p95: poportionUpperSeries.slice(),
+      p025: poportionLowerSeries.slice(),
+      p10: poportion.q10.slice(),
+      p90: poportion.q90.slice(),
+      p975: poportionUpperSeries.slice()
+    },
     quantiles: {
       // Keep legacy keys for compatibility, and include the full quantile set for spaghetti views.
       p05: lower95Series.slice(),

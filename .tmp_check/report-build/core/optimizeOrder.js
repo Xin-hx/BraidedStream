@@ -1,4 +1,13 @@
+/**
+ * Layer order optimization using SineStream-style hierarchical ordering.
+ *
+ * The public entry point prepares distance options and diagnostics; the helper
+ * groups below build the hierarchy, solve optimal leaf ordering, and evaluate
+ * pairwise distances.
+ */
 import { FIXED_SEED } from "./seed.js";
+import { roiBounds } from "./roi.js";
+import { median, seededShuffleIndices } from "./utils.js";
 import { layerUncertaintyAt } from "./validate.js";
 const ORIENTATION_ENUM = [
     [0, 0, 1, 1],
@@ -6,6 +15,7 @@ const ORIENTATION_ENUM = [
     [1, 0, 0, 1],
     [1, 1, 0, 0]
 ];
+/** Optimize bottom-to-top layer order within an optional ROI. */
 export function optimizeLayerOrder(layers, roi, config, initialOrder) {
     if (layers.length <= 1) {
         return {
@@ -30,7 +40,8 @@ export function optimizeLayerOrder(layers, roi, config, initialOrder) {
         useUncertaintyTerm: config.useUncertaintyTerm === true,
         uncertaintyWeight: Math.max(0, config.uncertaintyWeight ?? 0)
     };
-    const shuffledLayerIndices = seededShuffleIndices(layers.length, config.shuffleSeed ?? FIXED_SEED);
+    const shuffleSeed = Number.isFinite(config.shuffleSeed) ? config.shuffleSeed : FIXED_SEED;
+    const shuffledLayerIndices = seededShuffleIndices(layers.length, shuffleSeed);
     const leafNodes = buildLeafNodes(layers, shuffledLayerIndices);
     const totalNodeCount = layers.length * 2 - 1;
     const distanceMatrix = Array.from({ length: totalNodeCount }, () => new Array(totalNodeCount).fill(-1));
@@ -107,15 +118,6 @@ export function optimizeLayerOrder(layers, roi, config, initialOrder) {
             crossClusterBoundaries: 0
         }
     };
-}
-function roiBounds(length, roi) {
-    if (!roi) {
-        return [0, Math.max(0, length - 1)];
-    }
-    return [
-        Math.max(0, Math.min(length - 1, roi.t0Index)),
-        Math.max(0, Math.min(length - 1, roi.t1Index))
-    ];
 }
 function buildLeafNodes(layers, shuffledIndices) {
     const nodes = [];
@@ -452,39 +454,4 @@ function computeUncertaintyScale(layers, left, right) {
         maxMean = Math.max(maxMean, acc / safeSpan);
     }
     return Math.max(1e-9, maxMean);
-}
-function median(values) {
-    if (values.length === 0) {
-        return 0;
-    }
-    const sorted = values.slice().sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    if (sorted.length % 2 !== 0) {
-        return sorted[mid];
-    }
-    return 0.5 * (sorted[mid - 1] + sorted[mid]);
-}
-function seededShuffleIndices(count, seed) {
-    const out = Array.from({ length: count }, (_v, i) => i);
-    const random = mulberry32(normalizeSeed(seed));
-    for (let i = out.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(random() * (i + 1));
-        [out[i], out[j]] = [out[j], out[i]];
-    }
-    return out;
-}
-function normalizeSeed(seed) {
-    if (!Number.isFinite(seed)) {
-        return FIXED_SEED >>> 0;
-    }
-    return (Math.floor(seed) >>> 0) || 1;
-}
-function mulberry32(seed) {
-    let state = seed >>> 0;
-    return () => {
-        state = (state + 0x6d2b79f5) >>> 0;
-        let t = Math.imul(state ^ (state >>> 15), 1 | state);
-        t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
 }

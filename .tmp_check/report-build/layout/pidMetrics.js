@@ -1,16 +1,18 @@
 import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline.js";
 import { normalizeOrderForComparison, rankMap } from "../core/orderCompare.js";
-import { buildPidCenterOutOrder, computePidOrdering } from "../core/pidOrdering.js";
+import { buildPidCenterOutOrder, computePidOrdering } from "../core/pid.js";
 import { computeStackedBoundaries } from "../core/stack.js";
 import { orderLayers } from "../core/validate.js";
 import { computeMetrics } from "./metrics.js";
+import { stackToBraidLayout } from "./searchUtils.js";
 export function computePidOrderingMetrics(input) {
     const layerIds = input.dataset.layers.map((layer) => layer.id);
     const sineBaseOrder = normalizeOrderForComparison(input.sineOrder, layerIds, input.dataset.order);
     const pid = computePidOrdering(input.dataset.layers, {
         excludeSelf: true,
         widthPenaltyPower: 1,
-        minComparators: 2
+        minComparators: 2,
+        uncertaintySource: input.uncertaintySource ?? "value"
     });
     const pidDepthOrder = normalizeOrderForComparison(pid.order, layerIds, input.dataset.order);
     // Use the same center-out placement rule for both layouts to isolate ordering effects.
@@ -37,6 +39,7 @@ export function computePidOrderingMetrics(input) {
     const core = computeMetrics(input.dataset, beforeLayout, afterLayout, input.roi, invariant, pidDisplayLayers, {
         semantic: {
             enableTpidCenterAlignment: true,
+            pidUncertaintySource: input.uncertaintySource ?? "value",
             baselineShiftBeforeAbs: multiscale.diagnostics.localShiftAbs,
             baselineShiftAfterAbs: multiscale.diagnostics.distributedShiftAbs,
             uncertaintySaliency: multiscale.diagnostics.uncertaintySaliency
@@ -139,19 +142,5 @@ function metricRow(key, label, before, after, better) {
         after,
         delta: after - before,
         better
-    };
-}
-function stackToBraidLayout(layout) {
-    const tLength = layout.baseline.length;
-    const gapCount = Math.max(0, layout.yBottom.length - 1);
-    return {
-        baseline: layout.baseline.slice(),
-        yBottom: layout.yBottom.map((row) => row.slice()),
-        yTop: layout.yTop.map((row) => row.slice()),
-        omega: new Array(tLength).fill(0),
-        gapsPx: Array.from({ length: gapCount }, () => new Array(tLength).fill(0)),
-        gapsValue: Array.from({ length: gapCount }, () => new Array(tLength).fill(0)),
-        sumGapPx: new Array(tLength).fill(0),
-        roiSupport: null
     };
 }

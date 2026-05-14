@@ -1,15 +1,25 @@
+/**
+ * Inset renderer for before/after/diff/split layout comparisons.
+ */
 import * as d3 from "d3";
+import { roiBounds } from "../core/roi.js";
+import { clamp01, percentile, range } from "../core/utils.js";
 import { createAreaPath } from "./paths.js";
+import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtentForIndices, plotAreaFromSize, readChartSize } from "./chartUtils.js";
 import { diffColor, layerColor } from "../styles/palette.js";
 import { boundaryUncertaintyAt } from "../core/validate.js";
+import { applyLayerHoverHighlight as applyPathLayerHoverHighlight } from "./layerHoverHighlight.js";
 export class InsetChart {
     constructor(svg) {
         this.svg = svg;
         this.margin = { top: 24, right: 16, bottom: 44, left: 52 };
-        this.width = Number(svg.getAttribute("width") ?? "1180");
-        this.height = Number(svg.getAttribute("height") ?? "300");
-        this.innerWidth = this.width - this.margin.left - this.margin.right;
-        this.innerHeight = this.height - this.margin.top - this.margin.bottom;
+        this.hoveredLayerId = null;
+        const size = readChartSize(svg, 1180, 300, this.margin);
+        this.width = size.width;
+        this.height = size.height;
+        this.innerWidth = size.innerWidth;
+        this.innerHeight = size.innerHeight;
+        this.plotArea = plotAreaFromSize(size);
         const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
         this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
         this.titleGroup = this.root.append("g").attr("class", "inset-title");
@@ -34,13 +44,14 @@ export class InsetChart {
                 .attr("y", 0)
                 .attr("fill", "#334155")
                 .text("No time points available");
-            return { xScale: null, yScale: null, activeTimes: [], activeStartIndex: 0 };
+            return { xScale: null, yScale: null, activeTimes: [], activeStartIndex: 0, plotArea: this.plotArea };
         }
         const [left, right] = roiBounds(dataset.times.length, args.roi);
         const activeTimes = dataset.times.slice(left, right + 1);
+        const activeIndices = range(left, right + 1);
         const xScale = d3.scaleLinear().domain([activeTimes[0], activeTimes[activeTimes.length - 1]]).range([0, this.innerWidth]);
-        const eBefore = extentCrop(before, left, right);
-        const eAfter = extentCrop(after, left, right);
+        const eBefore = layoutExtentForIndices(before, activeIndices);
+        const eAfter = layoutExtentForIndices(after, activeIndices);
         const minV = Math.min(eBefore[0], eAfter[0]);
         const maxV = Math.max(eBefore[1], eAfter[1]);
         const center = 0.5 * (minV + maxV);
@@ -49,36 +60,26 @@ export class InsetChart {
         this.drawTitle(viewMode, enableUncertaintyGap, enableJaggedEdge);
         this.drawBeforeAfter(dataset, orderedLayers, before, after, left, right, xScale, yScale, viewMode, enableJaggedEdge, jaggedAmplitude, jaggedFrequency, fixedSeed);
         this.drawDiffAndGapSemantic(orderedLayers, dataset, before, after, left, right, xScale, yScale, viewMode, enableUncertaintyGap);
+        this.applyLayerHoverHighlight();
         this.axisX
             .attr("transform", `translate(0,${this.innerHeight})`)
             .call(d3
             .axisBottom(xScale)
             .ticks(Math.max(3, Math.floor(this.innerWidth / 160)))
             .tickFormat((value) => formatTimeTick(Number(value))));
-        this.axisX
-            .selectAll("text")
-            .attr("text-anchor", "end")
-            .attr("dx", "-0.45em")
-            .attr("dy", "0.35em")
-            .attr("transform", "rotate(-35)");
+        angleAxisLabels(this.axisX);
         this.axisY.call(d3.axisLeft(yScale).ticks(6));
-        return { xScale, yScale, activeTimes, activeStartIndex: left };
+        return { xScale, yScale, activeTimes, activeStartIndex: left, plotArea: this.plotArea };
     }
     setHover(timeValue, xScale) {
-        if (xScale === null || timeValue === null) {
-            this.hoverGroup.selectAll("*").remove();
+        drawCrosshair(this.hoverGroup, timeValue, xScale, this.innerHeight, "#7c2d12", 0.5, "4,2");
+    }
+    setLayerHover(layerId) {
+        if (this.hoveredLayerId === layerId) {
             return;
         }
-        const lineSel = this.hoverGroup.selectAll("line.crosshair").data([timeValue]);
-        lineSel
-            .join((enter) => enter.append("line").attr("class", "crosshair"), (update) => update, (exit) => exit.remove())
-            .attr("x1", (d) => xScale(d))
-            .attr("x2", (d) => xScale(d))
-            .attr("y1", 0)
-            .attr("y2", this.innerHeight)
-            .attr("stroke", "#7c2d12")
-            .attr("stroke-opacity", 0.5)
-            .attr("stroke-dasharray", "4,2");
+        this.hoveredLayerId = layerId;
+        this.applyLayerHoverHighlight();
     }
     drawTitle(viewMode, enableUncertaintyGap, enableJaggedEdge) {
         const modeText = viewMode.toUpperCase();
@@ -100,6 +101,9 @@ export class InsetChart {
         const onlyBefore = viewMode === "before";
         const onlyAfter = viewMode === "after";
         const showBothInDiff = viewMode === "diff";
+        const beforeFillOpacity = split ? 0.44 : showBothInDiff ? 0.25 : 0.8;
+        const beforeStrokeOpacity = showBothInDiff ? 0.35 : 0.12;
+        const afterFillOpacity = split ? 0.78 : showBothInDiff ? 0.56 : 0.84;
         const pathsBefore = orderedLayers.map((layer, k) => ({
             id: layer.id,
             path: createAreaPath(dataset.times.slice(left, right + 1), before.yBottom[k].slice(left, right + 1), before.yTop[k].slice(left, right + 1), xScale, yScale, {
@@ -112,7 +116,11 @@ export class InsetChart {
                 fixedSeed,
                 uncertainty: layer.unc?.slice(left, right + 1)
             }),
-            color: layerColor(k, layer.id)
+            color: layerColor(k, layer.id),
+            fillOpacity: beforeFillOpacity,
+            stroke: "#1e293b",
+            strokeOpacity: beforeStrokeOpacity,
+            strokeWidth: 0.8
         }));
         const pathsAfter = orderedLayers.map((layer, k) => ({
             id: layer.id,
@@ -126,7 +134,11 @@ export class InsetChart {
                 fixedSeed,
                 uncertainty: layer.unc?.slice(left, right + 1)
             }),
-            color: layerColor(k, layer.id)
+            color: layerColor(k, layer.id),
+            fillOpacity: afterFillOpacity,
+            stroke: "#f8fafc",
+            strokeOpacity: 1,
+            strokeWidth: 0.8
         }));
         this.beforeGroup
             .selectAll("path.before-band")
@@ -134,19 +146,36 @@ export class InsetChart {
             .join((enter) => enter.append("path").attr("class", "before-band"), (update) => update, (exit) => exit.remove())
             .attr("d", (d) => d.path)
             .attr("fill", (d) => d.color)
-            .attr("fill-opacity", split ? 0.44 : showBothInDiff ? 0.25 : 0.8)
-            .attr("stroke", "#1e293b")
-            .attr("stroke-opacity", showBothInDiff ? 0.35 : 0.12)
-            .attr("stroke-width", 0.8);
+            .attr("fill-opacity", (d) => d.fillOpacity)
+            .attr("stroke", (d) => d.stroke)
+            .attr("stroke-opacity", (d) => d.strokeOpacity)
+            .attr("stroke-width", (d) => d.strokeWidth);
         this.afterGroup
             .selectAll("path.after-band")
             .data(onlyAfter || split || showBothInDiff ? pathsAfter : [], (d) => d.id)
             .join((enter) => enter.append("path").attr("class", "after-band"), (update) => update, (exit) => exit.remove())
             .attr("d", (d) => d.path)
             .attr("fill", (d) => d.color)
-            .attr("fill-opacity", split ? 0.78 : showBothInDiff ? 0.56 : 0.84)
-            .attr("stroke", "#f8fafc")
-            .attr("stroke-width", 0.8);
+            .attr("fill-opacity", (d) => d.fillOpacity)
+            .attr("stroke", (d) => d.stroke)
+            .attr("stroke-opacity", (d) => d.strokeOpacity)
+            .attr("stroke-width", (d) => d.strokeWidth);
+    }
+    applyLayerHoverHighlight() {
+        const options = {
+            dimFillOpacity: 0.2,
+            dimStrokeOpacity: 0.06,
+            hoverFillBoost: 0.16,
+            hoverStroke: "#0f172a",
+            hoverStrokeOpacity: 0.88,
+            hoverStrokeWidthFactor: 2.2
+        };
+        applyPathLayerHoverHighlight(this.beforeGroup.selectAll("path.before-band"), this.hoveredLayerId, {
+            ...options,
+            dimFillOpacity: 0.14
+        });
+        applyPathLayerHoverHighlight(this.afterGroup.selectAll("path.after-band"), this.hoveredLayerId, options);
+        this.overlayGroup.attr("opacity", this.hoveredLayerId ? 0.45 : 1);
     }
     drawDiffAndGapSemantic(orderedLayers, dataset, before, after, left, right, xScale, yScale, viewMode, enableUncertaintyGap) {
         const showDiff = viewMode === "diff";
@@ -217,58 +246,4 @@ export class InsetChart {
             .attr("stroke-width", 0.7);
         this.overlayGroup.selectAll("line.gap-ruler").remove();
     }
-}
-function extentCrop(layout, left, right) {
-    let minV = Number.POSITIVE_INFINITY;
-    let maxV = Number.NEGATIVE_INFINITY;
-    for (const row of layout.yBottom) {
-        for (let t = left; t <= right; t += 1) {
-            minV = Math.min(minV, row[t]);
-            maxV = Math.max(maxV, row[t]);
-        }
-    }
-    for (const row of layout.yTop) {
-        for (let t = left; t <= right; t += 1) {
-            minV = Math.min(minV, row[t]);
-            maxV = Math.max(maxV, row[t]);
-        }
-    }
-    if (!Number.isFinite(minV) || !Number.isFinite(maxV)) {
-        return [-1, 1];
-    }
-    if (minV === maxV) {
-        return [minV - 1, maxV + 1];
-    }
-    return [minV, maxV];
-}
-function clamp01(v) {
-    return Math.max(0, Math.min(1, v));
-}
-function percentile(values, q) {
-    if (values.length === 0) {
-        return 0;
-    }
-    const sorted = values.slice().sort((a, b) => a - b);
-    const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1))));
-    return sorted[idx];
-}
-function roiBounds(length, roi) {
-    if (length <= 0) {
-        return [0, 0];
-    }
-    if (!roi) {
-        return [0, length - 1];
-    }
-    const left = clamp(Math.round(roi.t0Index), 0, length - 1);
-    const right = clamp(Math.round(roi.t1Index), 0, length - 1);
-    return left <= right ? [left, right] : [right, left];
-}
-function clamp(v, low, high) {
-    return Math.max(low, Math.min(high, v));
-}
-function formatTimeTick(value) {
-    if (!Number.isFinite(value)) {
-        return "";
-    }
-    return d3.utcFormat("%Y-%m-%d")(new Date(value));
 }

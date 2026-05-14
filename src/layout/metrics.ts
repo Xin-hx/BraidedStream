@@ -36,8 +36,25 @@ export interface MultiscaleDiagnosticsSummary {
   verified: boolean;
   fallbackUsed: boolean;
   effectiveScaleCount: number;
+  selectedScaleCount?: number;
   threshold: number;
   scaleBands: Array<{ scale: number; ratio: number }>;
+  scaleCoefficients?: Array<{ scale: number; coefficient: number }>;
+  objectiveBefore?: number;
+  objectiveAfter?: number;
+  meanSlopeBefore?: number;
+  meanSlopeAfter?: number;
+  maxSlopeBefore?: number;
+  maxSlopeAfter?: number;
+  curvatureBefore?: number;
+  curvatureAfter?: number;
+  burstBefore?: number;
+  burstAfter?: number;
+  derivativeConcentrationBefore?: number;
+  derivativeConcentrationAfter?: number;
+  centerlineSlopeCoverageBefore?: number;
+  centerlineSlopeCoverageAfter?: number;
+  globalMeanSlopeGuardrailPassed?: boolean;
 }
 
 export interface MetricsComputeOptions {
@@ -116,9 +133,46 @@ function buildRowsForIndices(
   afterLayers: LayerInput[],
   semantic: MetricsSemanticOptions
 ): MetricRow[] {
+  const centerlineBefore = streamCenterline(beforeLayout);
+  const centerlineAfter = streamCenterline(afterLayout);
   const rows: MetricRow[] = [
     row("meanSlope", "Mean slope", meanSlope(centersBefore, idx), meanSlope(centersAfter, idx), "down"),
     row("maxSlope", "Max slope", maxSlope(centersBefore, idx), maxSlope(centersAfter, idx), "down"),
+    row(
+      "centerlineMaxDerivative",
+      "Centerline max derivative",
+      maxBaselineDerivative(centerlineBefore, idx),
+      maxBaselineDerivative(centerlineAfter, idx),
+      "down"
+    ),
+    row(
+      "centerlineDerivativeConcentration",
+      "Centerline derivative concentration",
+      baselineDerivativeConcentration(centerlineBefore, idx),
+      baselineDerivativeConcentration(centerlineAfter, idx),
+      "down"
+    ),
+    row(
+      "centerlineSlopeCoverage",
+      "Centerline slope coverage",
+      baselineSlopeCoverage(centerlineBefore, idx),
+      baselineSlopeCoverage(centerlineAfter, idx),
+      "up"
+    ),
+    row(
+      "baselineBurst",
+      "Max baseline derivative",
+      maxBaselineDerivative(beforeLayout.baseline, idx),
+      maxBaselineDerivative(afterLayout.baseline, idx),
+      "down"
+    ),
+    row(
+      "baselineDerivativeConcentration",
+      "Baseline derivative concentration",
+      baselineDerivativeConcentration(beforeLayout.baseline, idx),
+      baselineDerivativeConcentration(afterLayout.baseline, idx),
+      "down"
+    ),
     row("wiggle", "Wiggle energy", wiggleEnergy(centersBefore, idx), wiggleEnergy(centersAfter, idx), "down"),
     row("illusion", "Sine-illusion proxy", curvatureEnergy(centersBefore, idx), curvatureEnergy(centersAfter, idx), "down"),
     row("sepMean", "Mean layer separation", meanSeparation(beforeLayout, idx), meanSeparation(afterLayout, idx), "up"),
@@ -181,6 +235,14 @@ function centers(layout: StackLayout): number[][] {
   return layout.yBottom.map((row, k) => row.map((v, t) => 0.5 * (v + layout.yTop[k][t])));
 }
 
+function streamCenterline(layout: StackLayout): number[] {
+  if (layout.yBottom.length === 0 || layout.yTop.length === 0) {
+    return layout.baseline.slice();
+  }
+  const last = layout.yTop.length - 1;
+  return layout.yBottom[0].map((value, t) => 0.5 * (value + layout.yTop[last][t]));
+}
+
 function meanSlope(series: number[][], idx: number[]): number {
   const values: number[] = [];
   for (const row of series) {
@@ -203,6 +265,51 @@ function maxSlope(series: number[][], idx: number[]): number {
     }
   }
   return m;
+}
+
+function maxBaselineDerivative(values: number[], idx: number[]): number {
+  let m = 0;
+  for (let i = 1; i < idx.length; i += 1) {
+    const t0 = idx[i - 1];
+    const t1 = idx[i];
+    m = Math.max(m, Math.abs(values[t1] - values[t0]));
+  }
+  return m;
+}
+
+function baselineDerivativeConcentration(values: number[], idx: number[]): number {
+  if (idx.length <= 1) {
+    return 0;
+  }
+  const derivatives: number[] = [];
+  for (let i = 1; i < idx.length; i += 1) {
+    const t0 = idx[i - 1];
+    const t1 = idx[i];
+    derivatives.push(Math.abs(values[t1] - values[t0]));
+  }
+  const meanValue = mean(derivatives);
+  if (meanValue <= 1e-12) {
+    return 0;
+  }
+  return Math.max(...derivatives) / meanValue;
+}
+
+function baselineSlopeCoverage(values: number[], idx: number[]): number {
+  if (idx.length <= 1) {
+    return 0;
+  }
+  const derivatives: number[] = [];
+  for (let i = 1; i < idx.length; i += 1) {
+    const t0 = idx[i - 1];
+    const t1 = idx[i];
+    derivatives.push(Math.abs(values[t1] - values[t0]));
+  }
+  const peak = Math.max(...derivatives);
+  if (peak <= 1e-12) {
+    return 0;
+  }
+  const threshold = 0.05 * peak;
+  return mean(derivatives.map((value) => Math.min(1, value / Math.max(1e-12, threshold))));
 }
 
 function wiggleEnergy(series: number[][], idx: number[]): number {

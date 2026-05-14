@@ -2,9 +2,10 @@
 /**
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
+import { buildCenterOutOrder } from "../core/layerOrdering";
 import { normalizeOrderForComparison } from "../core/orderCompare";
-import { optimizeLayerOrder } from "../core/optimizeOrder";
-import { buildPidCenterOutOrder, computePidOrdering } from "../core/pid";
+import { optimizeLayerOrder } from "../core/sineStreamOrder";
+import { computePidOrdering } from "../core/pid";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
   LayerInput,
@@ -224,7 +225,7 @@ function buildExperimentOrder(dataset: PreparedDataset, layerIds: string[]): str
     minComparators: 2
   });
   const depthOrder = normalizeOrderForComparison(pid.order, layerIds, dataset.order);
-  const centerOut = buildPidCenterOutOrder(depthOrder);
+  const centerOut = buildCenterOutOrder(depthOrder);
   return normalizeOrderForComparison(centerOut, layerIds, dataset.order);
 }
 

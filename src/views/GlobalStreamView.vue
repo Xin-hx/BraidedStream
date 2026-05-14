@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import * as d3 from "d3";
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import type { SceneBuildResult } from "../app/sceneBuilder";
 import type { ROI } from "../core/types";
 import { createHoverInfoResolver, tooltipText, type HoverInfoResolver } from "../interactions/hover";
@@ -8,6 +8,7 @@ import { layerIdAtY, pointerToPlot, timeIndexAtPlotX } from "../interactions/hit
 import type { PlotArea } from "../render/chartUtils";
 import { MainChart } from "../render/mainChart";
 import { OverviewChart } from "../render/overviewChart";
+import { stateLegendEntriesForLayers } from "../styles/palette";
 
 const props = defineProps<{
   scene: SceneBuildResult | null;
@@ -30,6 +31,10 @@ let lastMainXScale: d3.ScaleLinear<number, number> | null = null;
 let lastMainYScale: d3.ScaleLinear<number, number> | null = null;
 let lastMainPlotArea: PlotArea | null = null;
 let hoverInfo: HoverInfoResolver | null = null;
+
+const legendEntries = computed(() => {
+  return props.scene ? stateLegendEntriesForLayers(props.scene.orderedLayers) : [];
+});
 
 onMounted(() => {
   if (overviewSvg.value) {
@@ -132,6 +137,12 @@ defineExpose({
   <section class="panel panel--main-stream">
     <div class="main-stream-header">
       <h2>Main Stream</h2>
+    </div>
+    <div v-if="legendEntries.length > 0" class="main-stream-legend" aria-label="State color legend">
+      <span v-for="entry in legendEntries" :key="entry.key" class="main-stream-legend__item">
+        <span class="main-stream-legend__swatch" :style="{ backgroundColor: entry.color }" />
+        <span class="main-stream-legend__label">{{ entry.label }}</span>
+      </span>
     </div>
     <div class="main-stream-canvas">
       <svg id="main-chart" ref="mainSvg" width="1140" height="360" @mousemove="onMainMove" @mouseleave="onLeave" />

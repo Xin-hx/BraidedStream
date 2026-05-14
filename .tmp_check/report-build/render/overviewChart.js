@@ -1,14 +1,20 @@
+/**
+ * Compact overview renderer and primary ROI brush.
+ */
 import * as d3 from "d3";
+import { angleAxisLabels, formatTimeTick, plotAreaFromSize, readChartSize } from "./chartUtils.js";
 import { createRoiBrush } from "../ui/brush.js";
 export class OverviewChart {
     constructor(svg) {
         this.svg = svg;
         this.margin = { top: 10, right: 12, bottom: 34, left: 52 };
         this.lastOnRoiChange = null;
-        this.width = Number(svg.getAttribute("width") ?? "1180");
-        this.height = Number(svg.getAttribute("height") ?? "118");
-        this.innerWidth = this.width - this.margin.left - this.margin.right;
-        this.innerHeight = this.height - this.margin.top - this.margin.bottom;
+        const size = readChartSize(svg, 1180, 118, this.margin);
+        this.width = size.width;
+        this.height = size.height;
+        this.innerWidth = size.innerWidth;
+        this.innerHeight = size.innerHeight;
+        this.plotArea = plotAreaFromSize(size);
         const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
         this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
         this.trendGroup = this.root.append("g").attr("class", "overview-trend");
@@ -51,21 +57,10 @@ export class OverviewChart {
             .axisBottom(xScale)
             .ticks(Math.max(4, Math.floor(this.innerWidth / 140)))
             .tickFormat((value) => formatTimeTick(Number(value))));
-        this.axisX
-            .selectAll("text")
-            .attr("text-anchor", "end")
-            .attr("dx", "-0.45em")
-            .attr("dy", "0.35em")
-            .attr("transform", "rotate(-35)");
+        angleAxisLabels(this.axisX);
         this.lastOnRoiChange = onRoiChange;
         this.roiBrush.updateContext(dataset.times, xScale);
         this.roiBrush.sync(roi);
-        return xScale;
+        return { xScale, plotArea: this.plotArea };
     }
-}
-function formatTimeTick(value) {
-    if (!Number.isFinite(value)) {
-        return "";
-    }
-    return d3.utcFormat("%Y-%m-%d")(new Date(value));
 }

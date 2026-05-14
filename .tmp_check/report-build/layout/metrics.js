@@ -1,16 +1,20 @@
-import * as d3 from "d3";
-import { computePidOrdering } from "../core/pidOrdering.js";
+/**
+ * Layout quality metrics used by UI panels and search routines.
+ */
+import { computePidOrdering } from "../core/pid.js";
+import { meanFinite, range } from "../core/utils.js";
 export function computeMetrics(dataset, beforeLayout, afterLayout, roi, invariant, orderedLayersForAfter, options = {}) {
     const idx = computeIndices(dataset.times.length, roi);
-    const idxGlobal = d3.range(0, dataset.times.length);
+    const idxGlobal = range(0, dataset.times.length);
     const centersBefore = centers(beforeLayout);
     const centersAfter = centers(afterLayout);
-    const referenceLayers = orderedLayersForAfter ?? dataset.layers;
+    const afterLayers = options.orderedLayersAfter ?? orderedLayersForAfter ?? dataset.layers;
+    const beforeLayers = options.orderedLayersBefore ?? afterLayers;
     const semantic = options.semantic ?? {};
-    const rows = buildRowsForIndices(idx, beforeLayout, afterLayout, centersBefore, centersAfter, referenceLayers, semantic);
+    const rows = buildRowsForIndices(idx, beforeLayout, afterLayout, centersBefore, centersAfter, beforeLayers, afterLayers, semantic);
     const includeGlobalRows = options.includeGlobalRows === true;
     const globalRows = includeGlobalRows
-        ? buildRowsForIndices(idxGlobal, beforeLayout, afterLayout, centersBefore, centersAfter, referenceLayers, semantic)
+        ? buildRowsForIndices(idxGlobal, beforeLayout, afterLayout, centersBefore, centersAfter, beforeLayers, afterLayers, semantic)
         : null;
     return {
         rows,
@@ -21,10 +25,17 @@ export function computeMetrics(dataset, beforeLayout, afterLayout, roi, invarian
         multiscale: options.multiscale ?? null
     };
 }
-function buildRowsForIndices(idx, beforeLayout, afterLayout, centersBefore, centersAfter, referenceLayers, semantic) {
+function buildRowsForIndices(idx, beforeLayout, afterLayout, centersBefore, centersAfter, beforeLayers, afterLayers, semantic) {
+    const centerlineBefore = streamCenterline(beforeLayout);
+    const centerlineAfter = streamCenterline(afterLayout);
     const rows = [
         row("meanSlope", "Mean slope", meanSlope(centersBefore, idx), meanSlope(centersAfter, idx), "down"),
         row("maxSlope", "Max slope", maxSlope(centersBefore, idx), maxSlope(centersAfter, idx), "down"),
+        row("centerlineMaxDerivative", "Centerline max derivative", maxBaselineDerivative(centerlineBefore, idx), maxBaselineDerivative(centerlineAfter, idx), "down"),
+        row("centerlineDerivativeConcentration", "Centerline derivative concentration", baselineDerivativeConcentration(centerlineBefore, idx), baselineDerivativeConcentration(centerlineAfter, idx), "down"),
+        row("centerlineSlopeCoverage", "Centerline slope coverage", baselineSlopeCoverage(centerlineBefore, idx), baselineSlopeCoverage(centerlineAfter, idx), "up"),
+        row("baselineBurst", "Max baseline derivative", maxBaselineDerivative(beforeLayout.baseline, idx), maxBaselineDerivative(afterLayout.baseline, idx), "down"),
+        row("baselineDerivativeConcentration", "Baseline derivative concentration", baselineDerivativeConcentration(beforeLayout.baseline, idx), baselineDerivativeConcentration(afterLayout.baseline, idx), "down"),
         row("wiggle", "Wiggle energy", wiggleEnergy(centersBefore, idx), wiggleEnergy(centersAfter, idx), "down"),
         row("illusion", "Sine-illusion proxy", curvatureEnergy(centersBefore, idx), curvatureEnergy(centersAfter, idx), "down"),
         row("sepMean", "Mean layer separation", meanSeparation(beforeLayout, idx), meanSeparation(afterLayout, idx), "up"),
@@ -32,11 +43,11 @@ function buildRowsForIndices(idx, beforeLayout, afterLayout, centersBefore, cent
         row("extraSpace", "Extra space used", 0, mean(afterLayout.sumGapPx, idx), "down"),
         row("compact", "Compactness loss", compactness(beforeLayout, idx), compactness(afterLayout, idx), "down"),
         row("boundary", "Boundary distortion", 0, roiBoundaryDistortion(beforeLayout, afterLayout, idx), "down"),
-        row("thickness", "Thickness invariance error", 0, thicknessError(referenceLayers, afterLayout, idx), "down"),
+        row("thickness", "Thickness invariance error", 0, thicknessError(afterLayers, afterLayout, idx), "down"),
         row("order", "Order stability", 1, orderStability(afterLayout, idx), "up")
     ];
     if (semantic.enableTpidCenterAlignment === true) {
-        rows.push(row("tpidCenterAlignment", "TPID Center Alignment", tpidCenterAlignment(referenceLayers, beforeLayout, idx), tpidCenterAlignment(referenceLayers, afterLayout, idx), "up"));
+        rows.push(row("tpidCenterAlignment", "TPID Center Alignment", tpidCenterAlignment(beforeLayers, beforeLayout, idx, semantic), tpidCenterAlignment(afterLayers, afterLayout, idx, semantic), "up"));
     }
     if (semantic.baselineShiftBeforeAbs &&
         semantic.baselineShiftAfterAbs &&
@@ -53,14 +64,21 @@ function row(key, label, before, after, better) {
 }
 function computeIndices(length, roi) {
     if (!roi) {
-        return d3.range(0, length);
+        return range(0, length);
     }
     const left = Math.max(0, roi.t0Index);
     const right = Math.min(length - 1, roi.t1Index);
-    return d3.range(left, right + 1);
+    return range(left, right + 1);
 }
 function centers(layout) {
     return layout.yBottom.map((row, k) => row.map((v, t) => 0.5 * (v + layout.yTop[k][t])));
+}
+function streamCenterline(layout) {
+    if (layout.yBottom.length === 0 || layout.yTop.length === 0) {
+        return layout.baseline.slice();
+    }
+    const last = layout.yTop.length - 1;
+    return layout.yBottom[0].map((value, t) => 0.5 * (value + layout.yTop[last][t]));
 }
 function meanSlope(series, idx) {
     const values = [];
@@ -83,6 +101,48 @@ function maxSlope(series, idx) {
         }
     }
     return m;
+}
+function maxBaselineDerivative(values, idx) {
+    let m = 0;
+    for (let i = 1; i < idx.length; i += 1) {
+        const t0 = idx[i - 1];
+        const t1 = idx[i];
+        m = Math.max(m, Math.abs(values[t1] - values[t0]));
+    }
+    return m;
+}
+function baselineDerivativeConcentration(values, idx) {
+    if (idx.length <= 1) {
+        return 0;
+    }
+    const derivatives = [];
+    for (let i = 1; i < idx.length; i += 1) {
+        const t0 = idx[i - 1];
+        const t1 = idx[i];
+        derivatives.push(Math.abs(values[t1] - values[t0]));
+    }
+    const meanValue = mean(derivatives);
+    if (meanValue <= 1e-12) {
+        return 0;
+    }
+    return Math.max(...derivatives) / meanValue;
+}
+function baselineSlopeCoverage(values, idx) {
+    if (idx.length <= 1) {
+        return 0;
+    }
+    const derivatives = [];
+    for (let i = 1; i < idx.length; i += 1) {
+        const t0 = idx[i - 1];
+        const t1 = idx[i];
+        derivatives.push(Math.abs(values[t1] - values[t0]));
+    }
+    const peak = Math.max(...derivatives);
+    if (peak <= 1e-12) {
+        return 0;
+    }
+    const threshold = 0.05 * peak;
+    return mean(derivatives.map((value) => Math.min(1, value / Math.max(1e-12, threshold))));
 }
 function wiggleEnergy(series, idx) {
     let acc = 0;
@@ -177,14 +237,15 @@ function orderStability(layout, idx) {
     }
     return 1 - overlaps / Math.max(1, total);
 }
-function tpidCenterAlignment(layers, layout, idx) {
+function tpidCenterAlignment(layers, layout, idx, semantic) {
     if (layers.length <= 1 || layout.yBottom.length !== layers.length) {
         return 1;
     }
     const pid = computePidOrdering(layers, {
         excludeSelf: true,
         widthPenaltyPower: 1,
-        minComparators: 2
+        minComparators: 2,
+        uncertaintySource: semantic.pidUncertaintySource ?? "value"
     });
     const depthByLayer = pid.depthByLayerId;
     const depth = [];
@@ -271,8 +332,7 @@ function pearson(x, y) {
 function mean(values, idx) {
     if (idx) {
         const picked = idx.map((i) => values[i]).filter((v) => Number.isFinite(v));
-        return picked.length === 0 ? 0 : d3.mean(picked) ?? 0;
+        return meanFinite(picked);
     }
-    const finite = values.filter((v) => Number.isFinite(v));
-    return finite.length === 0 ? 0 : d3.mean(finite) ?? 0;
+    return meanFinite(values);
 }

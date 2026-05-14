@@ -1,4 +1,5 @@
 import * as d3 from "d3";
+import { FIXED_STATE_COLORS, FIXED_STATE_LABELS } from "./stateColorMap.js";
 
 const CATEGORICAL = [
   "#0f766e",
@@ -15,70 +16,14 @@ const CATEGORICAL = [
   "#c2410c"
 ];
 
-const US_STATE_KEYS = [
-  "AL",
-  "AK",
-  "AZ",
-  "AR",
-  "CA",
-  "CO",
-  "CT",
-  "DE",
-  "FL",
-  "GA",
-  "HI",
-  "ID",
-  "IL",
-  "IN",
-  "IA",
-  "KS",
-  "KY",
-  "LA",
-  "ME",
-  "MD",
-  "MA",
-  "MI",
-  "MN",
-  "MS",
-  "MO",
-  "MT",
-  "NE",
-  "NV",
-  "NH",
-  "NJ",
-  "NM",
-  "NY",
-  "NC",
-  "ND",
-  "OH",
-  "OK",
-  "OR",
-  "PA",
-  "RI",
-  "SC",
-  "SD",
-  "TN",
-  "TX",
-  "UT",
-  "VT",
-  "VA",
-  "WA",
-  "WV",
-  "WI",
-  "WY",
-  "DC",
-  // US territories commonly appearing in CDC ensemble datasets.
-  "AS",
-  "GU",
-  "MP",
-  "PR",
-  "VI"
-];
-
-const FIXED_STATE_COLOR = buildFixedStateColorMap();
+export interface StateLegendEntry {
+  key: string;
+  label: string;
+  color: string;
+}
 
 export function layerColor(index: number, layerId?: string): string {
-  const stateKey = extractStateKey(layerId);
+  const stateKey = stateKeyFromLayerId(layerId);
   if (stateKey) {
     return stateColor(stateKey);
   }
@@ -86,6 +31,24 @@ export function layerColor(index: number, layerId?: string): string {
     return stateColor(layerId.trim());
   }
   return CATEGORICAL[index % CATEGORICAL.length];
+}
+
+export function stateLegendEntriesForLayers(layers: Array<{ id: string }>): StateLegendEntry[] {
+  const seen = new Set<string>();
+  const entries: StateLegendEntry[] = [];
+  for (const layer of layers) {
+    const key = stateKeyFromLayerId(layer.id);
+    if (!key || seen.has(key) || !FIXED_STATE_COLORS[key]) {
+      continue;
+    }
+    seen.add(key);
+    entries.push({
+      key,
+      label: FIXED_STATE_LABELS[key] ?? key,
+      color: FIXED_STATE_COLORS[key]
+    });
+  }
+  return entries;
 }
 
 export function uncertaintyColor(value01: number): string {
@@ -100,7 +63,7 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
-function extractStateKey(layerId?: string): string | null {
+function stateKeyFromLayerId(layerId?: string): string | null {
   if (!layerId) {
     return null;
   }
@@ -112,23 +75,12 @@ function extractStateKey(layerId?: string): string | null {
 }
 
 function stateColor(stateKey: string): string {
-  const fixed = FIXED_STATE_COLOR.get(stateKey);
+  const fixed = FIXED_STATE_COLORS[stateKey];
   if (fixed) {
     return fixed;
   }
   const hue = stableHue(stateKey);
   return `hsl(${hue}, 62%, 46%)`;
-}
-
-function buildFixedStateColorMap(): Map<string, string> {
-  const out = new Map<string, string>();
-  for (let i = 0; i < US_STATE_KEYS.length; i += 1) {
-    const hue = Math.round((i * 137.508 + 18) % 360);
-    const saturation = i % 2 === 0 ? 64 : 60;
-    const lightness = i % 3 === 0 ? 43 : i % 3 === 1 ? 47 : 40;
-    out.set(US_STATE_KEYS[i], `hsl(${hue}, ${saturation}%, ${lightness}%)`);
-  }
-  return out;
 }
 
 function stableHue(seed: string): number {

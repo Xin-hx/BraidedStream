@@ -1,4 +1,5 @@
-const EPS = 1e-12;
+import { EPSILON } from "./utils.js";
+/** Assert that all per-time layer series match the dataset timeline length. */
 export function validateTimeLengths(times, layers) {
     if (times.length === 0) {
         throw new Error("times must not be empty");
@@ -13,6 +14,15 @@ export function validateTimeLengths(times, layers) {
         if (layer.poportionUnc && layer.poportionUnc.length !== times.length) {
             throw new Error(`Layer ${layer.id} poportionUnc length mismatch: expected ${times.length}`);
         }
+        if (layer.poportionMean && layer.poportionMean.length !== times.length) {
+            throw new Error(`Layer ${layer.id} poportionMean length mismatch: expected ${times.length}`);
+        }
+        if (layer.poportionLower && layer.poportionLower.length !== times.length) {
+            throw new Error(`Layer ${layer.id} poportionLower length mismatch: expected ${times.length}`);
+        }
+        if (layer.poportionUpper && layer.poportionUpper.length !== times.length) {
+            throw new Error(`Layer ${layer.id} poportionUpper length mismatch: expected ${times.length}`);
+        }
         if (layer.lower && layer.lower.length !== times.length) {
             throw new Error(`Layer ${layer.id} lower length mismatch: expected ${times.length}`);
         }
@@ -26,8 +36,16 @@ export function validateTimeLengths(times, layers) {
                 }
             }
         }
+        if (layer.poportionQuantiles) {
+            for (const [quantileKey, series] of Object.entries(layer.poportionQuantiles)) {
+                if (series.length !== times.length) {
+                    throw new Error(`Layer ${layer.id} poportionQuantile length mismatch (${quantileKey}): expected ${times.length}, got ${series.length}`);
+                }
+            }
+        }
     }
 }
+/** Reorder layers by id, rejecting missing or duplicate ids. */
 export function orderLayers(layers, order) {
     const byId = new Map(layers.map((layer) => [layer.id, layer]));
     const seen = new Set();
@@ -48,6 +66,7 @@ export function orderLayers(layers, order) {
     }
     return ordered;
 }
+/** Estimate a layer's uncertainty spread at one time sample. */
 export function layerUncertaintyAt(layer, t) {
     if (layer.quantiles) {
         const values = Object.values(layer.quantiles)
@@ -67,9 +86,11 @@ export function layerUncertaintyAt(layer, t) {
     }
     return 0;
 }
+/** Boundary uncertainty is the combined spread of adjacent layers. */
 export function boundaryUncertaintyAt(a, b, t) {
     return layerUncertaintyAt(a, t) + layerUncertaintyAt(b, t);
 }
-export function almostEqual(a, b, eps = EPS) {
+/** Numeric equality check used by invariant and geometry code. */
+export function almostEqual(a, b, eps = EPSILON) {
     return Math.abs(a - b) <= eps;
 }

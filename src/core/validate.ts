@@ -19,6 +19,15 @@ export function validateTimeLengths(times: number[], layers: LayerInput[]): void
     if (layer.poportionUnc && layer.poportionUnc.length !== times.length) {
       throw new Error(`Layer ${layer.id} poportionUnc length mismatch: expected ${times.length}`);
     }
+    if (layer.poportionMean && layer.poportionMean.length !== times.length) {
+      throw new Error(`Layer ${layer.id} poportionMean length mismatch: expected ${times.length}`);
+    }
+    if (layer.poportionLower && layer.poportionLower.length !== times.length) {
+      throw new Error(`Layer ${layer.id} poportionLower length mismatch: expected ${times.length}`);
+    }
+    if (layer.poportionUpper && layer.poportionUpper.length !== times.length) {
+      throw new Error(`Layer ${layer.id} poportionUpper length mismatch: expected ${times.length}`);
+    }
     if (layer.lower && layer.lower.length !== times.length) {
       throw new Error(`Layer ${layer.id} lower length mismatch: expected ${times.length}`);
     }
@@ -30,6 +39,15 @@ export function validateTimeLengths(times: number[], layers: LayerInput[]): void
         if (series.length !== times.length) {
           throw new Error(
             `Layer ${layer.id} quantile length mismatch (${quantileKey}): expected ${times.length}, got ${series.length}`
+          );
+        }
+      }
+    }
+    if (layer.poportionQuantiles) {
+      for (const [quantileKey, series] of Object.entries(layer.poportionQuantiles)) {
+        if (series.length !== times.length) {
+          throw new Error(
+            `Layer ${layer.id} poportionQuantile length mismatch (${quantileKey}): expected ${times.length}, got ${series.length}`
           );
         }
       }

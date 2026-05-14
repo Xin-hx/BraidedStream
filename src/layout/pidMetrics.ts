@@ -3,8 +3,9 @@
  */
 import type { SineStreamHooks } from "../core/baseline";
 import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
+import { buildCenterOutOrder } from "../core/layerOrdering";
 import { normalizeOrderForComparison, rankMap } from "../core/orderCompare";
-import { buildPidCenterOutOrder, computePidOrdering } from "../core/pid";
+import { computePidOrdering } from "../core/pid";
 import { computeStackedBoundaries } from "../core/stack";
 import type { InvariantSummary, PidUncertaintySource, PreparedDataset, ROI } from "../core/types";
 import { orderLayers } from "../core/validate";
@@ -50,7 +51,7 @@ export function computePidOrderingMetrics(input: PidOrderingMetricsInput): PidOr
   const pidDepthOrder = normalizeOrderForComparison(pid.order, layerIds, input.dataset.order);
 
   // Use the same center-out placement rule for both layouts to isolate ordering effects.
-  const pidDisplayOrder = buildPidCenterOutOrder(pidDepthOrder);
+  const pidDisplayOrder = buildCenterOutOrder(pidDepthOrder);
 
   const pidDisplayLayers = orderLayers(input.dataset.layers, pidDisplayOrder);
   const hooks = input.baselineHooks ?? {};

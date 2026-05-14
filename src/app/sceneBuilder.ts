@@ -1,7 +1,7 @@
 import { computeBaseline } from "../core/baseline";
 import { computeBraidLayout } from "../core/braid";
 import type { DatasetBundle } from "../core/datasets";
-import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/optimizeOrder";
+import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/sineStreamOrder";
 import {
   computeOptimizingBaseline,
   computeOptimizingOrder,
@@ -20,6 +20,7 @@ import type {
   HorizonFilterMode,
   InvariantSummary,
   LayerInput,
+  PidUncertaintySource,
   PreparedDataset,
   ROI,
   StackLayout
@@ -39,6 +40,8 @@ export interface SceneBuildResult {
   metrics: MetricResult;
   notes: string[];
   diagnosticsNotes: string[];
+  usesPid: boolean;
+  pidUncertaintySource: PidUncertaintySource | null;
 }
 
 export type { OptimizingVariantConfig } from "../core/optimizingUtils";
@@ -97,7 +100,9 @@ export function buildScene(bundle: DatasetBundle, state: AppState): SceneBuildRe
     insetRoi: context.insetRoi,
     metrics,
     notes: context.preprocessedNotes,
-    diagnosticsNotes
+    diagnosticsNotes,
+    usesPid: false,
+    pidUncertaintySource: null
   };
 }
 
@@ -115,13 +120,44 @@ export function buildOptimizingVariantScene(
     orderedLayers,
     resolvedConfig.baselineMode,
     resolvedConfig.baselineHooks,
-    resolvedConfig.baselineUncertaintyWeight
+    resolvedConfig.baselineUncertaintyWeight,
+    resolvedConfig.multiscaleEnergyThreshold
   );
   const layoutStack = computeStackedBoundaries(baselineResult.baseline, orderedLayers);
   const layout = stackToBraidLayout(layoutStack);
   const invariant = emptyInvariantSummary();
   const metrics = computeMetrics(context.dataset, layoutStack, layout, context.insetRoi, invariant, orderedLayers, {
-    includeGlobalRows: true
+    includeGlobalRows: true,
+    multiscale: baselineResult.multiscaleDiagnostics
+      ? {
+          method: baselineResult.multiscaleDiagnostics.method,
+          verified: baselineResult.multiscaleDiagnostics.verifiedMultiscale,
+          fallbackUsed: baselineResult.multiscaleDiagnostics.fallbackUsed,
+          effectiveScaleCount: baselineResult.multiscaleDiagnostics.effectiveScaleCount,
+          selectedScaleCount: baselineResult.multiscaleDiagnostics.selectedScaleCount,
+          threshold: baselineResult.multiscaleDiagnostics.energyThreshold,
+          scaleBands: baselineResult.multiscaleDiagnostics.scaleBands.map((band) => ({
+            scale: band.scale,
+            ratio: band.ratio
+          })),
+          scaleCoefficients: baselineResult.multiscaleDiagnostics.scaleCoefficients,
+          objectiveBefore: baselineResult.multiscaleDiagnostics.objectiveBefore,
+          objectiveAfter: baselineResult.multiscaleDiagnostics.objectiveAfter,
+          meanSlopeBefore: baselineResult.multiscaleDiagnostics.meanSlopeBefore,
+          meanSlopeAfter: baselineResult.multiscaleDiagnostics.meanSlopeAfter,
+          maxSlopeBefore: baselineResult.multiscaleDiagnostics.maxSlopeBefore,
+          maxSlopeAfter: baselineResult.multiscaleDiagnostics.maxSlopeAfter,
+          curvatureBefore: baselineResult.multiscaleDiagnostics.curvatureBefore,
+          curvatureAfter: baselineResult.multiscaleDiagnostics.curvatureAfter,
+          burstBefore: baselineResult.multiscaleDiagnostics.burstBefore,
+          burstAfter: baselineResult.multiscaleDiagnostics.burstAfter,
+          derivativeConcentrationBefore: baselineResult.multiscaleDiagnostics.derivativeConcentrationBefore,
+          derivativeConcentrationAfter: baselineResult.multiscaleDiagnostics.derivativeConcentrationAfter,
+          centerlineSlopeCoverageBefore: baselineResult.multiscaleDiagnostics.centerlineSlopeCoverageBefore,
+          centerlineSlopeCoverageAfter: baselineResult.multiscaleDiagnostics.centerlineSlopeCoverageAfter,
+          globalMeanSlopeGuardrailPassed: baselineResult.multiscaleDiagnostics.globalMeanSlopeGuardrailPassed
+        }
+      : null
   });
   const diagnosticsNotes = [
     `stage: ${optimizingStageLabel(config.optimizingStage)}`,
@@ -130,9 +166,10 @@ export function buildOptimizingVariantScene(
     ...orderResult.notes
   ];
   if (baselineResult.multiscaleDiagnostics !== null) {
-    diagnosticsNotes.push(`baseline uncertainty weight: ${Math.max(0, resolvedConfig.baselineUncertaintyWeight).toFixed(3)}`);
+    diagnosticsNotes.push(`multiscale wave strength: ${Math.max(0, resolvedConfig.baselineUncertaintyWeight).toFixed(3)}`);
     diagnosticsNotes.push(...multiscaleDiagnosticsNotes(baselineResult.multiscaleDiagnostics));
   }
+  const usesPid = isPidOrderingMode(resolvedConfig.orderingScoringMode);
 
   return {
     dataset: context.dataset,
@@ -143,7 +180,9 @@ export function buildOptimizingVariantScene(
     insetRoi: context.insetRoi,
     metrics,
     notes: context.preprocessedNotes,
-    diagnosticsNotes
+    diagnosticsNotes,
+    usesPid,
+    pidUncertaintySource: usesPid ? resolvedConfig.pidUncertaintySource : null
   };
 }
 
@@ -200,7 +239,9 @@ export function buildBraidedEnhanceScene(
     insetRoi: context.insetRoi,
     metrics,
     notes: context.preprocessedNotes,
-    diagnosticsNotes: [...orderDiagnosticsNotes(context.optimized), ...gapDiagnosticsNotes(braidedLayout)]
+    diagnosticsNotes: [...orderDiagnosticsNotes(context.optimized), ...gapDiagnosticsNotes(braidedLayout)],
+    usesPid: false,
+    pidUncertaintySource: null
   };
 }
 
@@ -347,9 +388,27 @@ function multiscaleDiagnosticsNotes(diagnostics: {
   fallbackReason: string | null;
   verifiedMultiscale: boolean;
   effectiveScaleCount: number;
+  selectedScaleCount?: number;
+  selectedScales?: number[];
   energyThreshold: number;
   localShiftBudget: number;
   distributedShiftBudget: number;
+  objectiveBefore?: number;
+  objectiveAfter?: number;
+  meanSlopeBefore?: number;
+  meanSlopeAfter?: number;
+  maxSlopeBefore?: number;
+  maxSlopeAfter?: number;
+  curvatureBefore?: number;
+  curvatureAfter?: number;
+  burstBefore?: number;
+  burstAfter?: number;
+  derivativeConcentrationBefore?: number;
+  derivativeConcentrationAfter?: number;
+  centerlineSlopeCoverageBefore?: number;
+  centerlineSlopeCoverageAfter?: number;
+  globalMeanSlopeGuardrailPassed?: boolean;
+  scaleCoefficients?: Array<{ scale: number; coefficient: number }>;
   scaleBands: Array<{ scale: number; ratio: number }>;
 }): string[] {
   const topBands = diagnostics.scaleBands
@@ -358,13 +417,33 @@ function multiscaleDiagnosticsNotes(diagnostics: {
     .slice(0, 3)
     .map((band) => `${band.scale}:${(band.ratio * 100).toFixed(1)}%`)
     .join(", ");
+  const coefficients = (diagnostics.scaleCoefficients ?? [])
+    .filter((item) => Math.abs(item.coefficient) > 1e-6)
+    .map((item) => `${item.scale}:${item.coefficient.toFixed(2)}`)
+    .join(", ");
+  const objective =
+    Number.isFinite(diagnostics.objectiveBefore) && Number.isFinite(diagnostics.objectiveAfter)
+      ? `multiscale objective: ${diagnostics.objectiveBefore?.toFixed(3)} -> ${diagnostics.objectiveAfter?.toFixed(3)}, slope-cap=${diagnostics.globalMeanSlopeGuardrailPassed ? "pass" : "soft breach"}`
+      : "";
+  const coverage =
+    Number.isFinite(diagnostics.centerlineSlopeCoverageBefore) &&
+    Number.isFinite(diagnostics.centerlineSlopeCoverageAfter)
+      ? `centerline slope coverage: ${diagnostics.centerlineSlopeCoverageBefore?.toFixed(3)} -> ${diagnostics.centerlineSlopeCoverageAfter?.toFixed(3)}`
+      : "";
   return [
     `multiscale baseline: verified=${diagnostics.verifiedMultiscale ? "yes" : "no"}, fallback=${diagnostics.fallbackUsed ? "yes" : "no"}`,
-    `multiscale effective scales: ${diagnostics.effectiveScaleCount} (threshold=${diagnostics.energyThreshold.toFixed(2)})`,
+    `multiscale selected/effective scales: ${diagnostics.selectedScaleCount ?? diagnostics.effectiveScaleCount}/${diagnostics.effectiveScaleCount} (threshold=${diagnostics.energyThreshold.toFixed(2)})`,
     `multiscale shift budget: local=${diagnostics.localShiftBudget.toFixed(3)}, distributed=${diagnostics.distributedShiftBudget.toFixed(3)}`,
+    objective,
+    coverage,
     diagnostics.fallbackUsed && diagnostics.fallbackReason ? `multiscale fallback reason: ${diagnostics.fallbackReason}` : "",
-    topBands ? `multiscale top scale ratios: ${topBands}` : ""
+    topBands ? `multiscale top scale ratios: ${topBands}` : "",
+    coefficients ? `multiscale active coefficients: ${coefficients}` : "multiscale active coefficients: none"
   ].filter((text) => text.length > 0);
+}
+
+function isPidOrderingMode(mode: string): boolean {
+  return mode === "intervalInclusion" || mode === "pidMean" || mode === "pidTimeWeighted";
 }
 
 interface AssertionOptions {

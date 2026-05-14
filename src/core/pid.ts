@@ -1,15 +1,18 @@
-/**
+﻿/**
  * Unified PID module for the project.
  *
  * This file groups the three PID-oriented implementations under one core:
  * - interval-based PID ordering for streamgraph layers
  * - contour-mask PID / PID-Mean for fuzzy layer masks
  */
-import type { LayerInput, PidTimeOrderMode, PidUncertaintySource } from "./types";
+import { buildCenterOutOrder } from "./layerOrdering";
+import type { LayerInput, PidUncertaintySource } from "./types";
 import { EPSILON, clamp, finiteOr, firstFinite, median, sortPair, sum } from "./utils";
+export { computePidOrderingScores, computeTemporalSelfInclusion } from "./layerScoring";
+export type { ComputePidOrderingScoresInput, PidOrderingCompositeScore } from "./layerScoring";
+export const buildPidCenterOutOrder = buildCenterOutOrder;
 
 // ---------------------------------------------------------------------------
-// PID ordering over time-series uncertainty bands
 // ---------------------------------------------------------------------------
 
 export interface PidOrderingScore {
@@ -24,21 +27,6 @@ export interface PidOrderingResult {
   scores: PidOrderingScore[];
   depthByLayerId: Map<string, number>;
   depthSeriesByLayerId: Map<string, number[]>;
-}
-
-export interface PidOrderingCompositeScore {
-  layerId: string;
-  C: number;
-  R: number;
-  score: number;
-}
-
-export interface ComputePidOrderingScoresInput {
-  layerIds: string[];
-  D_cross: ReadonlyMap<string, number[]>;
-  temporalSelfInclusion?: ReadonlyMap<string, number[]>;
-  mode: PidTimeOrderMode;
-  alpha?: number;
 }
 
 interface LayerBand {
@@ -65,10 +53,30 @@ const QUANTILE_BAND_PAIRS: Array<readonly [string, string]> = [
   ["p25", "p75"]
 ];
 
-/**
- * Interval-inclusion PID ordering for streamgraph layers.
- * A layer is deeper when its central trajectory is often covered by peer bands.
- */
+type QuantileMaskKey = "p025" | "p10" | "p25" | "p50" | "p75" | "p90" | "p975";
+
+interface QuantileMaskMembershipSpec {
+  key: QuantileMaskKey;
+  membership: number;
+}
+
+const QUANTILE_MASK_KEY_ORDER: QuantileMaskKey[] = ["p025", "p10", "p25", "p50", "p75", "p90", "p975"];
+
+// share one membership value, so only the lower side plus p50 is maintained.
+const CONTOUR_MASK_SYMMETRIC_MEMBERSHIP: Array<{
+  lowerKey: QuantileMaskKey;
+  upperKey: QuantileMaskKey;
+  membership: number;
+}> = [
+  { lowerKey: "p025", upperKey: "p975", membership: 0 },
+  { lowerKey: "p10", upperKey: "p90", membership: 0.25 },
+  { lowerKey: "p25", upperKey: "p75", membership: 0.5 },
+  { lowerKey: "p50", upperKey: "p50", membership: 1 }
+];
+
+const CONTOUR_MASK_MEMBERSHIP = buildContourMaskMembershipSpec();
+
+
 export function computePidOrdering(layers: LayerInput[], options: PidOrderingOptions = {}): PidOrderingResult {
   if (layers.length === 0) {
     return {
@@ -176,119 +184,15 @@ export function computePidOrdering(layers: LayerInput[], options: PidOrderingOpt
   };
 }
 
-/**
- * Reorder a depth-sorted list so that the deepest layer sits near the center
- * and the rest alternate outward in a center-out stack.
- */
-export function buildPidCenterOutOrder(depthSortedOrder: string[]): string[] {
-  const n = depthSortedOrder.length;
-  if (n <= 2) {
-    return depthSortedOrder.slice();
-  }
-
-  const out = new Array<string>(n);
-  const centerLeft = Math.floor((n - 1) / 2);
-  let left = centerLeft;
-  let right = centerLeft + 1;
-
-  for (let i = 0; i < n; i += 1) {
-    const id = depthSortedOrder[i];
-    if (i === 0) {
-      out[centerLeft] = id;
-      left -= 1;
-      continue;
-    }
-
-    const placeUpper = i % 2 === 1;
-    if (placeUpper) {
-      if (right < n) {
-        out[right] = id;
-        right += 1;
-      } else if (left >= 0) {
-        out[left] = id;
-        left -= 1;
-      }
-    } else {
-      if (left >= 0) {
-        out[left] = id;
-        left -= 1;
-      } else if (right < n) {
-        out[right] = id;
-        right += 1;
-      }
-    }
-  }
-
-  return out.filter((id): id is string => typeof id === "string" && id.length > 0);
-}
-
-/**
- * Compute adjacent-time temporal self-inclusion (TSI) for each layer.
- */
-export function computeTemporalSelfInclusion(
-  depthSeriesByLayerId: ReadonlyMap<string, number[]>
-): Map<string, number[]> {
-  const out = new Map<string, number[]>();
-  for (const [layerId, series] of depthSeriesByLayerId.entries()) {
-    const tsi: number[] = [];
-    for (let t = 1; t < series.length; t += 1) {
-      const prev = series[t - 1];
-      const next = series[t];
-      if (!Number.isFinite(prev) || !Number.isFinite(next)) {
-        tsi.push(Number.NaN);
-        continue;
-      }
-      tsi.push(clamp(1 - Math.abs(next - prev), 0, 1));
-    }
-    out.set(layerId, tsi);
-  }
-  return out;
-}
-
-/**
- * Build layer-wise ordering scores for PID time ordering modes.
- */
-export function computePidOrderingScores(input: ComputePidOrderingScoresInput): PidOrderingCompositeScore[] {
-  const alpha = clamp(input.alpha ?? 0.8, 0, 1);
-  const out: PidOrderingCompositeScore[] = [];
-
-  for (const layerId of input.layerIds) {
-    const dSeries = input.D_cross.get(layerId) ?? [];
-    const cValues = dSeries.filter((value) => Number.isFinite(value));
-    const C = cValues.length > 0 ? sum(cValues) / cValues.length : 0;
-
-    const tsiSeries = input.temporalSelfInclusion?.get(layerId) ?? [];
-    const rValues = tsiSeries.filter((value) => Number.isFinite(value));
-    const R = rValues.length > 0 ? sum(rValues) / rValues.length : 0;
-
-    const score = input.mode === "layer_pid_time_weighted" ? alpha * C + (1 - alpha) * R : C;
-    out.push({ layerId, C, R, score });
-  }
-
-  out.sort((a, b) => {
-    if (b.score !== a.score) {
-      return b.score - a.score;
-    }
-    if (b.C !== a.C) {
-      return b.C - a.C;
-    }
-    if (b.R !== a.R) {
-      return b.R - a.R;
-    }
-    return a.layerId.localeCompare(b.layerId);
-  });
-
-  return out;
-}
-
 function buildLayerBand(layer: LayerInput, tLength: number, uncertaintySource: PidUncertaintySource): LayerBand {
   const low = new Array<number>(tLength).fill(0);
   const high = new Array<number>(tLength).fill(0);
   const center = new Array<number>(tLength).fill(0);
 
   for (let t = 0; t < tLength; t += 1) {
-    const meanValue = finiteOr(layer.mean[t], 0);
-    const q50 = finiteOr(layer.quantiles?.p50?.[t], meanValue);
+    const meanValue = layerCenterValue(layer, t, uncertaintySource);
+    const quantiles = quantilesForSource(layer, uncertaintySource);
+    const q50 = finiteOr(quantiles?.p50?.[t], meanValue);
     const [lo, hi] = resolveBand(layer, t, meanValue, uncertaintySource);
     low[t] = lo;
     high[t] = hi;
@@ -305,29 +209,32 @@ function resolveBand(
   meanValue: number,
   uncertaintySource: PidUncertaintySource
 ): [number, number] {
-  if (uncertaintySource === "poportion") {
-    const poportionSpread = finiteOr(layer.poportionUnc?.[timeIndex], Number.NaN);
-    if (Number.isFinite(poportionSpread)) {
-      const halfWidth = Math.max(0, poportionSpread) * 0.5;
-      return sortPair(meanValue - halfWidth, meanValue + halfWidth);
-    }
-  }
+  const quantiles = quantilesForSource(layer, uncertaintySource);
 
   for (const [lowKey, highKey] of QUANTILE_BAND_PAIRS) {
-    const qLow = finiteOr(layer.quantiles?.[lowKey]?.[timeIndex], Number.NaN);
-    const qHigh = finiteOr(layer.quantiles?.[highKey]?.[timeIndex], Number.NaN);
+    const qLow = finiteOr(quantiles?.[lowKey]?.[timeIndex], Number.NaN);
+    const qHigh = finiteOr(quantiles?.[highKey]?.[timeIndex], Number.NaN);
     if (Number.isFinite(qLow) && Number.isFinite(qHigh)) {
       return sortPair(qLow, qHigh);
     }
   }
 
-  const lower = finiteOr(layer.lower?.[timeIndex], Number.NaN);
-  const upper = finiteOr(layer.upper?.[timeIndex], Number.NaN);
+  const lower = finiteOr(
+    uncertaintySource === "poportion" ? layer.poportionLower?.[timeIndex] : layer.lower?.[timeIndex],
+    Number.NaN
+  );
+  const upper = finiteOr(
+    uncertaintySource === "poportion" ? layer.poportionUpper?.[timeIndex] : layer.upper?.[timeIndex],
+    Number.NaN
+  );
   if (Number.isFinite(lower) && Number.isFinite(upper)) {
     return sortPair(lower, upper);
   }
 
-  const unc = finiteOr(layer.unc?.[timeIndex], Number.NaN);
+  const unc = finiteOr(
+    uncertaintySource === "poportion" ? layer.poportionUnc?.[timeIndex] : layer.unc?.[timeIndex],
+    Number.NaN
+  );
   if (Number.isFinite(unc)) {
     const halfWidth = Math.max(0, unc) * 0.5;
     return sortPair(meanValue - halfWidth, meanValue + halfWidth);
@@ -337,7 +244,6 @@ function resolveBand(
 }
 
 // ---------------------------------------------------------------------------
-// Contour-mask PID-Mean for fuzzy layer masks
 // ---------------------------------------------------------------------------
 
 export interface ContourPidOptions {
@@ -380,12 +286,14 @@ export interface ContourPidResult {
   grid: ContourPidGrid;
 }
 
+interface QuantileMaskPointSeries {
+  key: QuantileMaskKey;
+  membership: number;
+  values: number[];
+}
+
 interface LayerBandSeries {
-  lowOuter: number[];
-  lowInner: number[];
-  center: number[];
-  highInner: number[];
-  highOuter: number[];
+  controlPoints: QuantileMaskPointSeries[];
 }
 
 interface ContourBoxplotMasks {
@@ -416,7 +324,7 @@ export function computeContourPid(layers: LayerInput[], options: ContourPidOptio
   const scores = sortContourScores(scoreMasks(layers, masks, meanMask));
 
   const depthOrder = scores.map((score) => score.id);
-  const displayOrder = buildPidCenterOutOrder(depthOrder);
+  const displayOrder = buildCenterOutOrder(depthOrder);
   const depthByLayerId = new Map(scores.map((score) => [score.id, score.depth]));
   const scoreByLayerId = new Map(scores.map((score) => [score.id, score]));
   const boxplotMasks = buildContourBoxplotMasks(layers, masks, scores, centralFraction, gridSize);
@@ -472,11 +380,13 @@ function buildContourGrid(
 ): ContourPidGrid {
   const [zMinRaw, zMaxRaw] = transformedExtent(bands, uncertaintySource === "poportion" ? "linear" : "log1p");
   const zPad = Math.max(1e-6, (zMaxRaw - zMinRaw) * 0.04);
+  const zMin = uncertaintySource === "poportion" ? Math.max(0, zMinRaw - zPad) : zMinRaw - zPad;
+  const zMax = zMaxRaw + zPad;
   return {
     xBins,
     yBins,
-    zMin: zMinRaw - zPad,
-    zMax: zMaxRaw + zPad,
+    zMin,
+    zMax: zMax > zMin ? zMax : zMin + 1e-6,
     contourThreshold,
     valueTransform: uncertaintySource === "poportion" ? "linear" : "log1p"
   };
@@ -571,101 +481,157 @@ function buildLayerBandSeries(
   tLength: number,
   uncertaintySource: PidUncertaintySource
 ): LayerBandSeries {
-  const lowOuter = new Array<number>(tLength).fill(0);
-  const lowInner = new Array<number>(tLength).fill(0);
-  const center = new Array<number>(tLength).fill(0);
-  const highInner = new Array<number>(tLength).fill(0);
-  const highOuter = new Array<number>(tLength).fill(0);
+  const controlPoints = CONTOUR_MASK_MEMBERSHIP.map((item) => ({
+    key: item.key,
+    membership: item.membership,
+    values: new Array<number>(tLength).fill(0)
+  }));
 
   for (let t = 0; t < tLength; t += 1) {
-    const mean = finiteOr(layer.mean[t], 0);
-    const p50 = finiteOr(layer.quantiles?.p50?.[t], mean);
-    const [outerLow, outerHigh] = resolveOuterBand(layer, t, mean, uncertaintySource);
-    const innerLow = firstFinite(layer.quantiles?.p25?.[t], Math.min(p50, mean), outerLow);
-    const innerHigh = firstFinite(layer.quantiles?.p75?.[t], Math.max(p50, mean), outerHigh);
-    const sorted = [outerLow, innerLow, p50, innerHigh, outerHigh].map((value) => Math.max(0, value));
-    sorted.sort((a, b) => a - b);
-    lowOuter[t] = sorted[0];
-    lowInner[t] = sorted[1];
-    center[t] = sorted[2];
-    highInner[t] = sorted[3];
-    highOuter[t] = sorted[4];
+    const mean = layerCenterValue(layer, t, uncertaintySource);
+    const values = resolveQuantileMaskValues(layer, t, mean, uncertaintySource);
+    for (const point of controlPoints) {
+      point.values[t] = values[point.key];
+    }
   }
 
-  return { lowOuter, lowInner, center, highInner, highOuter };
+  return { controlPoints };
 }
 
-function resolveOuterBand(
+function buildContourMaskMembershipSpec(): QuantileMaskMembershipSpec[] {
+  const byKey = new Map<QuantileMaskKey, number>();
+  for (const item of CONTOUR_MASK_SYMMETRIC_MEMBERSHIP) {
+    const membership = clamp(item.membership, 0, 1);
+    byKey.set(item.lowerKey, membership);
+    byKey.set(item.upperKey, membership);
+  }
+  return QUANTILE_MASK_KEY_ORDER.map((key) => ({ key, membership: byKey.get(key) ?? 0 }));
+}
+
+function resolveQuantileMaskValues(
   layer: LayerInput,
   timeIndex: number,
   meanValue: number,
   uncertaintySource: PidUncertaintySource
-): [number, number] {
-  if (uncertaintySource === "poportion") {
-    const poportionSpread = finiteOr(layer.poportionUnc?.[timeIndex], Number.NaN);
-    if (Number.isFinite(poportionSpread)) {
-      const halfWidth = Math.max(0, poportionSpread) * 0.5;
-      return sortPair(meanValue - halfWidth, meanValue + halfWidth);
-    }
-  }
+): Record<QuantileMaskKey, number> {
+  const quantiles = quantilesForSource(layer, uncertaintySource);
+  const uncertainty = Math.max(
+    0,
+    finiteOr(uncertaintySource === "poportion" ? layer.poportionUnc?.[timeIndex] : layer.unc?.[timeIndex], 0)
+  );
 
-  const outerLow = firstFinite(
-    layer.quantiles?.p025?.[timeIndex],
-    layer.quantiles?.p05?.[timeIndex],
-    layer.quantiles?.p10?.[timeIndex],
-    layer.lower?.[timeIndex],
-    meanValue - 0.5 * Math.max(0, finiteOr(layer.unc?.[timeIndex], 0)),
+  const p025 = firstFinite(
+    quantiles?.p025?.[timeIndex],
+    quantiles?.p05?.[timeIndex],
+    quantiles?.p10?.[timeIndex],
+    uncertaintySource === "poportion" ? layer.poportionLower?.[timeIndex] : layer.lower?.[timeIndex],
+    meanValue - 0.5 * uncertainty,
     meanValue
   );
-  const outerHigh = firstFinite(
-    layer.quantiles?.p975?.[timeIndex],
-    layer.quantiles?.p95?.[timeIndex],
-    layer.quantiles?.p90?.[timeIndex],
-    layer.upper?.[timeIndex],
-    meanValue + 0.5 * Math.max(0, finiteOr(layer.unc?.[timeIndex], 0)),
+  const p975 = firstFinite(
+    quantiles?.p975?.[timeIndex],
+    quantiles?.p95?.[timeIndex],
+    quantiles?.p90?.[timeIndex],
+    uncertaintySource === "poportion" ? layer.poportionUpper?.[timeIndex] : layer.upper?.[timeIndex],
+    meanValue + 0.5 * uncertainty,
     meanValue
   );
-  return sortPair(outerLow, outerHigh);
+  const p50 = finiteOr(quantiles?.p50?.[timeIndex], meanValue);
+  const p10 = firstFinite(quantiles?.p10?.[timeIndex], quantiles?.p05?.[timeIndex], p025);
+  const p90 = firstFinite(quantiles?.p90?.[timeIndex], quantiles?.p95?.[timeIndex], p975);
+  const p25 = firstFinite(quantiles?.p25?.[timeIndex], Math.min(p50, meanValue), p10);
+  const p75 = firstFinite(quantiles?.p75?.[timeIndex], Math.max(p50, meanValue), p90);
+
+  const sorted = [p025, p10, p25, p50, p75, p90, p975].map((value) => Math.max(0, value));
+  sorted.sort((a, b) => a - b);
+  return {
+    p025: sorted[0],
+    p10: sorted[1],
+    p25: sorted[2],
+    p50: sorted[3],
+    p75: sorted[4],
+    p90: sorted[5],
+    p975: sorted[6]
+  };
 }
+
+function layerCenterValue(layer: LayerInput, timeIndex: number, uncertaintySource: PidUncertaintySource): number {
+  if (uncertaintySource === "poportion") {
+    return finiteOr(layer.poportionMean?.[timeIndex], finiteOr(layer.poportionQuantiles?.p50?.[timeIndex], 0));
+  }
+  return finiteOr(layer.mean[timeIndex], 0);
+}
+
+function quantilesForSource(layer: LayerInput, uncertaintySource: PidUncertaintySource) {
+  return uncertaintySource === "poportion" ? layer.poportionQuantiles ?? layer.quantiles : layer.quantiles;
+}
+
 
 function rasterizeBand(band: LayerBandSeries, grid: ContourPidGrid): Float32Array {
   const mask = new Float32Array(grid.xBins * grid.yBins);
   const dz = grid.yBins <= 1 ? 1 : (grid.zMax - grid.zMin) / (grid.yBins - 1);
   for (let t = 0; t < grid.xBins; t += 1) {
-    const lo = transformValue(band.lowOuter[t], grid.valueTransform);
-    const li = transformValue(band.lowInner[t], grid.valueTransform);
-    const hi = transformValue(band.highInner[t], grid.valueTransform);
-    const ho = transformValue(band.highOuter[t], grid.valueTransform);
-    const c = transformValue(band.center[t], grid.valueTransform);
+    const controlPoints = prepareMembershipPoints(
+      band.controlPoints.map((point) => [transformValue(point.values[t], grid.valueTransform), point.membership])
+    );
     for (let y = 0; y < grid.yBins; y += 1) {
       const z = grid.zMin + y * dz;
-      mask[y * grid.xBins + t] = membership(z, lo, li, c, hi, ho);
+      mask[y * grid.xBins + t] = membership(z, controlPoints);
     }
   }
   return mask;
 }
 
-function membership(z: number, lo: number, li: number, c: number, hi: number, ho: number): number {
-  const lowInner = Math.max(lo, Math.min(li, c));
-  const highInner = Math.min(ho, Math.max(hi, c));
-  if (z < lo || z > ho) {
+function prepareMembershipPoints(points: Array<[number, number]>): Array<[number, number]> {
+  const sorted = points
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+    .map(([x, y]) => [x, clamp(y, 0, 1)] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+  const collapsed: Array<[number, number]> = [];
+  for (const [x, y] of sorted) {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous && Math.abs(x - previous[0]) <= EPSILON) {
+      previous[1] = Math.max(previous[1], y);
+    } else {
+      collapsed.push([x, y]);
+    }
+  }
+  return collapsed;
+}
+
+function membership(z: number, points: Array<[number, number]>): number {
+  if (!Number.isFinite(z) || points.length === 0) {
     return 0;
   }
-  if (z >= lowInner && z <= highInner) {
-    return 1;
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (z < first[0] || z > last[0]) {
+    return 0;
   }
-  if (z < lowInner) {
-    return (z - lo) / Math.max(EPSILON, lowInner - lo);
+
+  if (points.length === 1) {
+    return Math.abs(z - first[0]) <= EPSILON ? first[1] : 0;
   }
-  return (ho - z) / Math.max(EPSILON, ho - highInner);
+
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const [x0, y0] = points[i];
+    const [x1, y1] = points[i + 1];
+    if (z <= x1 || i === points.length - 2) {
+      const ratio = clamp((z - x0) / Math.max(EPSILON, x1 - x0), 0, 1);
+      return y0 + ratio * (y1 - y0);
+    }
+  }
+
+  return 0;
 }
 
 function transformedExtent(bands: LayerBandSeries[], valueTransform: "log1p" | "linear"): [number, number] {
   let minValue = Number.POSITIVE_INFINITY;
   let maxValue = Number.NEGATIVE_INFINITY;
   for (const band of bands) {
-    for (const series of [band.lowOuter, band.highOuter, band.center]) {
-      for (const value of series) {
+    for (const point of band.controlPoints) {
+      for (const value of point.values) {
         const z = transformValue(value, valueTransform);
         minValue = Math.min(minValue, z);
         maxValue = Math.max(maxValue, z);

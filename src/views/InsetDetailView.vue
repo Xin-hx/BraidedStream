@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import * as d3 from "d3";
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import type { SceneBuildResult } from "../app/sceneBuilder";
 import type { InsetViewMode, StackLayout } from "../core/types";
 import type { AppState } from "../state/appState";
 import { createHoverInfoResolver, tooltipText, type HoverInfoResolver } from "../interactions/hover";
 import { layerIdAtY, pointerToPlot, timeIndexAtPlotX } from "../interactions/hitTest";
 import type { PlotArea } from "../render/chartUtils";
+import { ContourBoxplotChart } from "../render/contourBoxplotChart";
 import { InsetChart } from "../render/insetChart";
 
 const props = defineProps<{
@@ -22,7 +23,9 @@ const emit = defineEmits<{
 }>();
 
 const insetSvg = ref<SVGSVGElement | null>(null);
+const contourBoxplotSvg = ref<SVGSVGElement | null>(null);
 let insetChart: InsetChart | null = null;
+let contourBoxplotChart: ContourBoxplotChart | null = null;
 let lastInsetXScale: d3.ScaleLinear<number, number> | null = null;
 let lastInsetYScale: d3.ScaleLinear<number, number> | null = null;
 let lastInsetTimes: number[] = [];
@@ -30,9 +33,14 @@ let lastInsetStartIndex = 0;
 let lastInsetPlotArea: PlotArea | null = null;
 let hoverInfo: HoverInfoResolver | null = null;
 
+const showContourBoxplot = computed(() => props.scene?.usesPid === true && props.state.showContourBoxplot === true);
+
 onMounted(() => {
   if (insetSvg.value) {
     insetChart = new InsetChart(insetSvg.value);
+  }
+  if (contourBoxplotSvg.value) {
+    contourBoxplotChart = new ContourBoxplotChart(contourBoxplotSvg.value);
   }
   renderChart();
 });
@@ -45,6 +53,11 @@ watch(
     props.state.enableJaggedEdge,
     props.state.insetJaggedAmplitude,
     props.state.insetJaggedFrequency,
+    props.state.showContourBoxplot,
+    props.state.contourBoxplotYBins,
+    props.state.contourBoxplotThreshold,
+    props.state.contourBoxplotCentralFraction,
+    props.state.contourBoxplotOpacity,
     props.forcedViewMode,
     props.forcedUncertaintyGap,
     props.enableLayerHoverHighlight
@@ -58,6 +71,7 @@ watch(
 function renderChart(): void {
   if (!props.scene || !insetChart) {
     hoverInfo = null;
+    contourBoxplotChart?.clear();
     return;
   }
   hoverInfo = createHoverInfoResolver(props.scene.dataset.layers);
@@ -83,6 +97,27 @@ function renderChart(): void {
   if (!props.enableLayerHoverHighlight) {
     insetChart.setLayerHover(null);
   }
+  renderContourBoxplot();
+}
+
+function renderContourBoxplot(): void {
+  if (!contourBoxplotChart) {
+    return;
+  }
+  if (!props.scene || !showContourBoxplot.value) {
+    contourBoxplotChart.clear();
+    return;
+  }
+  contourBoxplotChart.render({
+    dataset: props.scene.dataset,
+    orderedLayers: props.scene.orderedLayers,
+    roi: props.scene.insetRoi,
+    uncertaintySource: props.scene.pidUncertaintySource ?? props.state.pidUncertaintySource,
+    yBins: props.state.contourBoxplotYBins,
+    contourThreshold: props.state.contourBoxplotThreshold,
+    centralFraction: props.state.contourBoxplotCentralFraction,
+    opacity: props.state.contourBoxplotOpacity
+  });
 }
 
 function onInsetMove(event: MouseEvent): void {
@@ -142,5 +177,12 @@ function currentHoverLayout(): StackLayout {
 <template>
   <section>
     <svg id="inset-chart" ref="insetSvg" width="1140" height="300" @mousemove="onInsetMove" @mouseleave="onLeave" />
+    <svg
+      v-show="showContourBoxplot"
+      id="contour-boxplot-chart"
+      ref="contourBoxplotSvg"
+      width="1140"
+      height="190"
+    />
   </section>
 </template>

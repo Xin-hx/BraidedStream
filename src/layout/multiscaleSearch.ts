@@ -2,7 +2,7 @@
 /**
  * Grid search for multiscale baseline parameters under a fixed layer order.
  */
-import { optimizeLayerOrder } from "../core/optimizeOrder";
+import { optimizeLayerOrder } from "../core/sineStreamOrder";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
   LayerInput,

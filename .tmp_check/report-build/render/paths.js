@@ -1,5 +1,13 @@
+/**
+ * SVG path generation for streamgraph bands.
+ *
+ * The public factory chooses between raw, shape-preserving smoothed, and
+ * uncertainty-jagged paths; helper functions keep geometry and noise separate.
+ */
 import * as d3 from "d3";
 import { withFixedSeed } from "../core/seed.js";
+import { clamp, clamp01, nearlyEqual, percentile } from "../core/utils.js";
+/** Create one closed area path for a layer band. */
 export function createAreaPath(times, yBottom, yTop, xScale, yScale, options) {
     if (options?.jagged) {
         return createJaggedAreaPath(times, yBottom, yTop, xScale, yScale, options);
@@ -64,7 +72,7 @@ function evaluateShapePreservingSpline(x, y, interpolationSubsteps) {
         m[idx] = 0;
     }
     for (let i = 0; i < n - 1; i += 1) {
-        if (nearlyEqual(ys[i], ys[i + 1])) {
+        if (nearlyEqual(ys[i], ys[i + 1], 1e-9)) {
             m[i] = 0;
             m[i + 1] = 0;
         }
@@ -85,7 +93,7 @@ function evaluateShapePreservingSpline(x, y, interpolationSubsteps) {
             const u = s / substeps;
             const xx = x0 + (x1 - x0) * u;
             let yy;
-            if (nearlyEqual(y0, y1)) {
+            if (nearlyEqual(y0, y1, 1e-9)) {
                 yy = y0;
             }
             else {
@@ -135,7 +143,7 @@ function endpointSlope(h0, h1, d0, d1) {
 function enforceMonotonicIntervalConstraints(m, d) {
     for (let i = 0; i < d.length; i += 1) {
         const di = d[i];
-        if (nearlyEqual(di, 0)) {
+        if (nearlyEqual(di, 0, 1e-9)) {
             m[i] = 0;
             m[i + 1] = 0;
             continue;
@@ -218,12 +226,7 @@ function triangleWave(v) {
     return t < 0.5 ? 4 * t - 1 : 3 - 4 * t;
 }
 function robustScale(values) {
-    if (values.length === 0) {
-        return 0;
-    }
-    const sorted = values.slice().sort((a, b) => a - b);
-    const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.9 * (sorted.length - 1))));
-    return Math.max(0, sorted[idx]);
+    return Math.max(0, percentile(values, 0.9));
 }
 function hash32(text) {
     let h = 2166136261;
@@ -239,13 +242,4 @@ function pseudo(seed, i) {
     x ^= x >>> 17;
     x ^= x << 5;
     return (x >>> 0) / 4294967295;
-}
-function clamp(v, low, high) {
-    return Math.max(low, Math.min(high, v));
-}
-function nearlyEqual(a, b, eps = 1e-9) {
-    return Math.abs(a - b) <= eps;
-}
-function clamp01(v) {
-    return Math.max(0, Math.min(1, v));
 }
