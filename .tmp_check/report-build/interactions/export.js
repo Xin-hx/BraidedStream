@@ -1,4 +1,3 @@
-import { saveTextFile } from "./files.js";
 export async function exportSnapshotSvg(args) {
     const text = composeSvgPanel(args.overviewSvg, args.mainSvg, args.insetSvg);
     saveTextFile("braided-snapshot.svg", text, "image/svg+xml");
@@ -45,4 +44,13 @@ function composeSvgPanel(overviewSvg, mainSvg, insetSvg) {
     <g transform="translate(40,190)">${main}</g>
     <g transform="translate(40,580)">${inset}</g>
   </svg>`;
+}
+function saveTextFile(filename, text, mime) {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
 }

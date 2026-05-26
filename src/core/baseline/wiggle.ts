@@ -1,6 +1,6 @@
 import type { LayerInput } from "../types";
-import { median } from "../utils";
-import type { SineStreamHooks } from "./index";
+import { median } from "../math";
+import type { SineStreamHooks } from "./types";
 import { buildCenterLineDerivativeOffsets, centeredBaselineFromLayers } from "./shared";
 
 export function computeWiggleBaseline(
@@ -71,4 +71,3 @@ export function computeWiggleBaseline(
   }
   return baseline.map((v, i) => (wiggle * v + anchor * centers[i]) / denom);
 }
-

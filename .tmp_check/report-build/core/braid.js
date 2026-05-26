@@ -1,5 +1,5 @@
 import { normalizeROI } from "./roi.js";
-import { clamp, clamp01 } from "./utils.js";
+import { clamp, clamp01, percentile } from "./math.js";
 import { boundaryUncertaintyAt } from "./validate.js";
 /** Add ROI-local spacing between layers and return braid geometry plus diagnostics. */
 export function computeBraidLayout(args) {
@@ -26,11 +26,6 @@ export function computeBraidLayout(args) {
         sumGapPx: gapResult.sumGapPx,
         roiSupport,
         diagnostics: {
-            orderObjectiveBefore: 0,
-            orderObjectiveAfter: 0,
-            clusterCount: 1,
-            trunkCluster: 0,
-            crossClusterBoundaries: 0,
             spacingObjective: (gapResult.terms.uncertainty + gapResult.terms.slope) / Math.max(1, gapResult.spacingSamples) +
                 spacing.temporalWeight * gapResult.terms.temporal / Math.max(1, gapResult.temporalSamples),
             spacingUncertaintyTerm: gapResult.terms.uncertainty / Math.max(1, gapResult.spacingSamples),
@@ -304,9 +299,7 @@ function robustTermScale(orderedLayers, tLength, roiSupport, term) {
     if (values.length === 0) {
         return 1;
     }
-    const sorted = values.slice().sort((a, b) => a - b);
-    const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.9 * (sorted.length - 1))));
-    return Math.max(1e-6, sorted[idx]);
+    return Math.max(1e-6, percentile(values, 0.9));
 }
 function robustBoundaryThicknessScale(orderedLayers, tLength, roiSupport) {
     const values = [];
@@ -323,7 +316,5 @@ function robustBoundaryThicknessScale(orderedLayers, tLength, roiSupport) {
     if (values.length === 0) {
         return 1;
     }
-    const sorted = values.slice().sort((a, b) => a - b);
-    const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.5 * (sorted.length - 1))));
-    return Math.max(1e-6, sorted[idx]);
+    return Math.max(1e-6, percentile(values, 0.5));
 }

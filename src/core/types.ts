@@ -62,12 +62,7 @@ export interface LayoutOptimizationConfig {
   shuffleSeed?: number;
 }
 
-export interface BraidOptimizationDiagnostics {
-  orderObjectiveBefore: number;
-  orderObjectiveAfter: number;
-  clusterCount: number;
-  trunkCluster: number;
-  crossClusterBoundaries: number;
+export interface BraidSpacingDiagnostics {
   spacingObjective: number;
   spacingUncertaintyTerm: number;
   spacingSlopeTerm: number;
@@ -75,6 +70,16 @@ export interface BraidOptimizationDiagnostics {
   spacingIterations: number;
   spacingObjectiveHistory: number[];
 }
+
+export interface BraidOrderDiagnostics {
+  orderObjectiveBefore: number;
+  orderObjectiveAfter: number;
+  clusterCount: number;
+  trunkCluster: number;
+  crossClusterBoundaries: number;
+}
+
+export type BraidOptimizationDiagnostics = BraidSpacingDiagnostics & Partial<BraidOrderDiagnostics>;
 
 export interface LayerInput {
   id: string;

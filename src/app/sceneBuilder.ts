@@ -1,7 +1,7 @@
 import { computeBaseline } from "../core/baseline";
 import { computeBraidLayout } from "../core/braid";
 import type { DatasetBundle } from "../core/datasets";
-import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/sineStreamOrder";
+import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/ranking";
 import {
   computeOptimizingBaseline,
   computeOptimizingOrder,
@@ -10,7 +10,7 @@ import {
   orderingScoringLabel,
   resolveOptimizingVariantConfig,
   type OptimizingVariantConfig
-} from "../core/optimizingUtils";
+} from "../core/optimizationPipeline";
 import { clampRoiToParent, normalizeROI } from "../core/roi";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
@@ -44,7 +44,7 @@ export interface SceneBuildResult {
   pidUncertaintySource: PidUncertaintySource | null;
 }
 
-export type { OptimizingVariantConfig } from "../core/optimizingUtils";
+export type { OptimizingVariantConfig } from "../core/optimizationPipeline";
 
 export function buildScene(bundle: DatasetBundle, state: AppState): SceneBuildResult {
   const context = prepareDatasetWindowContext(bundle, state);
@@ -73,14 +73,6 @@ export function buildScene(bundle: DatasetBundle, state: AppState): SceneBuildRe
     smoothKernel: state.smoothKernel,
     yScale: (v) => v
   });
-
-  if (braidedLayout.diagnostics) {
-    braidedLayout.diagnostics.orderObjectiveBefore = 0;
-    braidedLayout.diagnostics.orderObjectiveAfter = 0;
-    braidedLayout.diagnostics.clusterCount = 1;
-    braidedLayout.diagnostics.trunkCluster = 0;
-    braidedLayout.diagnostics.crossClusterBoundaries = 0;
-  }
 
   const invariant = runInvariantChecks(orderedLayers, baseLayout, braidedLayout, context.insetRoi, {
     enabled: state.assertEnabled,
@@ -633,11 +625,6 @@ function stackToBraidLayout(layout: StackLayout): BraidLayout {
     sumGapPx: new Array<number>(tLength).fill(0),
     roiSupport: null,
     diagnostics: {
-      orderObjectiveBefore: 0,
-      orderObjectiveAfter: 0,
-      clusterCount: 1,
-      trunkCluster: 0,
-      crossClusterBoundaries: 0,
       spacingObjective: 0,
       spacingUncertaintyTerm: 0,
       spacingSlopeTerm: 0,

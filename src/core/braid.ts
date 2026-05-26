@@ -6,7 +6,7 @@
  */
 import type { BaselineMode, BraidLayout, GapMode, LayerInput, ROI, RoiSupportWindow, SmoothKernel, StackLayout } from "./types";
 import { normalizeROI } from "./roi";
-import { clamp, clamp01 } from "./utils";
+import { clamp, clamp01, percentile } from "./math";
 import { boundaryUncertaintyAt } from "./validate";
 
 export interface BraidArgs {
@@ -89,11 +89,6 @@ export function computeBraidLayout(args: BraidArgs): BraidLayout {
     sumGapPx: gapResult.sumGapPx,
     roiSupport,
     diagnostics: {
-      orderObjectiveBefore: 0,
-      orderObjectiveAfter: 0,
-      clusterCount: 1,
-      trunkCluster: 0,
-      crossClusterBoundaries: 0,
       spacingObjective:
         (gapResult.terms.uncertainty + gapResult.terms.slope) / Math.max(1, gapResult.spacingSamples) +
         spacing.temporalWeight * gapResult.terms.temporal / Math.max(1, gapResult.temporalSamples),
@@ -466,9 +461,7 @@ function robustTermScale(
   if (values.length === 0) {
     return 1;
   }
-  const sorted = values.slice().sort((a, b) => a - b);
-  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.9 * (sorted.length - 1))));
-  return Math.max(1e-6, sorted[idx]);
+  return Math.max(1e-6, percentile(values, 0.9));
 }
 
 function robustBoundaryThicknessScale(
@@ -490,7 +483,5 @@ function robustBoundaryThicknessScale(
   if (values.length === 0) {
     return 1;
   }
-  const sorted = values.slice().sort((a, b) => a - b);
-  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor(0.5 * (sorted.length - 1))));
-  return Math.max(1e-6, sorted[idx]);
+  return Math.max(1e-6, percentile(values, 0.5));
 }

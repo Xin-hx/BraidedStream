@@ -1,5 +1,3 @@
-import { saveTextFile } from "./files";
-
 export interface SnapshotArgs {
   mainSvg: SVGSVGElement;
   overviewSvg: SVGSVGElement;
@@ -60,4 +58,14 @@ function composeSvgPanel(overviewSvg: SVGSVGElement, mainSvg: SVGSVGElement, ins
     <g transform="translate(40,190)">${main}</g>
     <g transform="translate(40,580)">${inset}</g>
   </svg>`;
+}
+
+function saveTextFile(filename: string, text: string, mime: string): void {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }

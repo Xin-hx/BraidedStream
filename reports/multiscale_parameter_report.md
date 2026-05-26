@@ -1,6 +1,6 @@
 # Multiscale Parameter Search Report
 
-Generated at: 2026-05-11T19:07:01.055Z
+Generated at: 2026-05-24T16:12:07.425Z
 
 Search policy:
 - ROI-first ranking with global guardrail

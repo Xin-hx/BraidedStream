@@ -1,6 +1,6 @@
 import type { LayerInput } from "../types";
-import { median } from "../utils";
-import type { SineStreamHooks } from "./index";
+import { median } from "../math";
+import type { SineStreamHooks } from "./types";
 
 /**
  * SineStream baseline computation using Gaussian-weighted adjustments.
@@ -123,4 +123,3 @@ function computeGaussianWeightedAdjustment(layers: LayerInput[], i: number, c: n
 
   return -(numerator / denominator);
 }
-

@@ -1,7 +1,7 @@
-import { computeBaseline } from "../core/baseline.js";
+import { computeBaseline } from "../core/baseline/index.js";
 import { computeBraidLayout } from "../core/braid.js";
-import { optimizeLayerOrder } from "../core/optimizeOrder.js";
-import { computeOptimizingBaseline, computeOptimizingOrder, optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../core/optimizingUtils.js";
+import { optimizeLayerOrder } from "../core/ranking/index.js";
+import { computeOptimizingBaseline, computeOptimizingOrder, optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../core/optimizationPipeline.js";
 import { clampRoiToParent, normalizeROI } from "../core/roi.js";
 import { computeStackedBoundaries } from "../core/stack.js";
 import { orderLayers } from "../core/validate.js";
@@ -33,13 +33,6 @@ export function buildScene(bundle, state) {
         smoothKernel: state.smoothKernel,
         yScale: (v) => v
     });
-    if (braidedLayout.diagnostics) {
-        braidedLayout.diagnostics.orderObjectiveBefore = 0;
-        braidedLayout.diagnostics.orderObjectiveAfter = 0;
-        braidedLayout.diagnostics.clusterCount = 1;
-        braidedLayout.diagnostics.trunkCluster = 0;
-        braidedLayout.diagnostics.crossClusterBoundaries = 0;
-    }
     const invariant = runInvariantChecks(orderedLayers, baseLayout, braidedLayout, context.insetRoi, {
         enabled: state.assertEnabled,
         throwOnError: false
@@ -464,11 +457,6 @@ function stackToBraidLayout(layout) {
         sumGapPx: new Array(tLength).fill(0),
         roiSupport: null,
         diagnostics: {
-            orderObjectiveBefore: 0,
-            orderObjectiveAfter: 0,
-            clusterCount: 1,
-            trunkCluster: 0,
-            crossClusterBoundaries: 0,
             spacingObjective: 0,
             spacingUncertaintyTerm: 0,
             spacingSlopeTerm: 0,

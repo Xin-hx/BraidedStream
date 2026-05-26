@@ -1,4 +1,4 @@
-/** Generate smooth layered time series with uncertainty bands. */
+// 生成平滑的分层时间序列数据集，包含不确定性带。
 export function generateSyntheticDataset(tLength = 180, kLength = 8) {
     const startUtc = Date.UTC(2020, 0, 1);
     const stepMs = 24 * 60 * 60 * 1000;

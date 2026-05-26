@@ -1,7 +1,7 @@
 /**
  * Layout quality metrics used by UI panels and search routines.
  */
-import { computePidOrdering } from "../core/pid";
+import { computePidOrdering } from "../core/ranking";
 import type {
   BraidLayout,
   InvariantSummary,

@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "report:multiscale": "node --experimental-specifier-resolution=node scripts/generate-multiscale-report.mjs",
     "check:multiscale": "node --experimental-specifier-resolution=node scripts/check-multiscale-readability.mjs",
-    "report:pid-vs-sine": "node --experimental-specifier-resolution=node scripts/generate-pid-vs-sine-report.mjs"
+    "report:pid-vs-sine": "node --experimental-specifier-resolution=node scripts/generate-pid-vs-sine-report.mjs",
+    "check:core-refactor": "node scripts/check-core-refactor-smoke.mjs"
   },
   "dependencies": {
     "d3": "^7.9.0",

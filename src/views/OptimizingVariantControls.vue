@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { optimizingBaselineModeLabel, orderingScoringLabel } from "../core/optimizingUtils";
+import { optimizingBaselineModeLabel, orderingScoringLabel } from "../core/optimizationPipeline";
 import type { AppState } from "../state/appState";
 import type {
   BaselineCenterType,

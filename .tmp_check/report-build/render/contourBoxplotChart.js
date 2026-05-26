@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import { computeContourPid } from "../core/pid.js";
+import { computeContourPid } from "../core/ranking/index.js";
 import { roiBounds } from "../core/roi.js";
 import { clamp } from "../core/utils.js";
 import { createAreaPath } from "./paths.js";

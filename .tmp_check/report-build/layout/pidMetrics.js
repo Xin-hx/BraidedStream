@@ -1,6 +1,6 @@
-import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline.js";
-import { normalizeOrderForComparison, rankMap } from "../core/orderCompare.js";
-import { buildPidCenterOutOrder, computePidOrdering } from "../core/pid.js";
+import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline/index.js";
+import { buildCenterOutOrder, normalizeOrderForComparison, rankMap } from "../core/displayOrder.js";
+import { computePidOrdering } from "../core/ranking/index.js";
 import { computeStackedBoundaries } from "../core/stack.js";
 import { orderLayers } from "../core/validate.js";
 import { computeMetrics } from "./metrics.js";
@@ -16,7 +16,7 @@ export function computePidOrderingMetrics(input) {
     });
     const pidDepthOrder = normalizeOrderForComparison(pid.order, layerIds, input.dataset.order);
     // Use the same center-out placement rule for both layouts to isolate ordering effects.
-    const pidDisplayOrder = buildPidCenterOutOrder(pidDepthOrder);
+    const pidDisplayOrder = buildCenterOutOrder(pidDepthOrder);
     const pidDisplayLayers = orderLayers(input.dataset.layers, pidDisplayOrder);
     const hooks = input.baselineHooks ?? {};
     const beforeBaseline = computeBaseline(input.dataset.times, pidDisplayLayers, "sineStream", hooks);

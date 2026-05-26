@@ -1,10 +1,9 @@
-import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline.js";
+import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline/index.js";
 /**
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
-import { normalizeOrderForComparison } from "../core/orderCompare.js";
-import { optimizeLayerOrder } from "../core/optimizeOrder.js";
-import { buildPidCenterOutOrder, computePidOrdering } from "../core/pid.js";
+import { buildCenterOutOrder, normalizeOrderForComparison } from "../core/displayOrder.js";
+import { computePidOrdering, optimizeLayerOrder } from "../core/ranking/index.js";
 import { computeStackedBoundaries } from "../core/stack.js";
 import { orderLayers } from "../core/validate.js";
 import { computeMetrics } from "./metrics.js";
@@ -102,7 +101,7 @@ function buildExperimentOrder(dataset, layerIds) {
         minComparators: 2
     });
     const depthOrder = normalizeOrderForComparison(pid.order, layerIds, dataset.order);
-    const centerOut = buildPidCenterOutOrder(depthOrder);
+    const centerOut = buildCenterOutOrder(depthOrder);
     return normalizeOrderForComparison(centerOut, layerIds, dataset.order);
 }
 function sanitizeSearchSpace(space) {

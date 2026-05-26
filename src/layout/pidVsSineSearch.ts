@@ -2,10 +2,8 @@
 /**
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
-import { buildCenterOutOrder } from "../core/layerOrdering";
-import { normalizeOrderForComparison } from "../core/orderCompare";
-import { optimizeLayerOrder } from "../core/sineStreamOrder";
-import { computePidOrdering } from "../core/pid";
+import { buildCenterOutOrder, normalizeOrderForComparison } from "../core/displayOrder";
+import { computePidOrdering, optimizeLayerOrder } from "../core/ranking";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
   LayerInput,
