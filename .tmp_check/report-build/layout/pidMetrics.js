@@ -1,5 +1,5 @@
 import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline/index.js";
-import { buildCenterOutOrder, normalizeOrderForComparison, rankMap } from "../core/displayOrder.js";
+import { buildCenterOutOrder, normalizeOrderForComparison, rankMap } from "../core/ordering/index.js";
 import { computePidOrdering } from "../core/ranking/index.js";
 import { computeStackedBoundaries } from "../core/stack.js";
 import { orderLayers } from "../core/validate.js";

@@ -1,7 +1,7 @@
 import { computeBaseline } from "../core/baseline/index.js";
 import { computeBraidLayout } from "../core/braid.js";
-import { optimizeLayerOrder } from "../core/ranking/index.js";
-import { computeOptimizingBaseline, computeOptimizingOrder, optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../core/optimizationPipeline.js";
+import { optimizeLayerOrder } from "../core/ordering/index.js";
+import { computeOptimizingBaseline, computeOptimizingOrder, optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../core/optimizing/index.js";
 import { clampRoiToParent, normalizeROI } from "../core/roi.js";
 import { computeStackedBoundaries } from "../core/stack.js";
 import { orderLayers } from "../core/validate.js";

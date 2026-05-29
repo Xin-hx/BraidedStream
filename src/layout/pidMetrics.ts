@@ -3,7 +3,7 @@
  */
 import type { SineStreamHooks } from "../core/baseline";
 import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
-import { buildCenterOutOrder, normalizeOrderForComparison, rankMap } from "../core/displayOrder";
+import { buildCenterOutOrder, normalizeOrderForComparison, rankMap } from "../core/ordering";
 import { computePidOrdering } from "../core/ranking";
 import { computeStackedBoundaries } from "../core/stack";
 import type { InvariantSummary, PidUncertaintySource, PreparedDataset, ROI } from "../core/types";

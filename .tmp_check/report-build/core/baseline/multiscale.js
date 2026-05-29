@@ -257,7 +257,7 @@ function buildSlopeWaveShiftBasis(band, anchorCenterlineDerivative, strength) {
 function optimizeScaleCoefficients(layers, anchorBaseline, bases, localShiftBudget) {
     const metricsBefore = baselineOptimizationMetrics(layers, anchorBaseline);
     const objectiveBefore = baselineObjective(metricsBefore, metricsBefore, 0, localShiftBudget);
-    const coefficients = new Array(bases.length).fill(0);
+    let coefficients = new Array(bases.length).fill(0);
     const emptyShift = new Array(anchorBaseline.length).fill(0);
     let bestShift = emptyShift;
     let bestMetrics = metricsBefore;
@@ -270,6 +270,16 @@ function optimizeScaleCoefficients(layers, anchorBaseline, bases, localShiftBudg
         const objective = baselineObjective(metrics, metricsBefore, sumAbs(shift), localShiftBudget);
         return { shift, metrics, objective };
     };
+    const rank = (candidate) => rankedCoefficientObjective(candidate.objective, candidate.metrics, metricsBefore);
+    let bestRank = rank({ metrics: bestMetrics, objective: bestObjective });
+    const beamBest = runCoefficientBeamSearch(bases.length, coefficientGrid, evaluate, rank);
+    if (beamBest && beamBest.rank < bestRank - 1e-9) {
+        coefficients = beamBest.coefficients.slice();
+        bestShift = beamBest.shift;
+        bestMetrics = beamBest.metrics;
+        bestObjective = beamBest.objective;
+        bestRank = beamBest.rank;
+    }
     for (let pass = 0; pass < 4; pass += 1) {
         let improved = false;
         for (let basisIndex = 0; basisIndex < bases.length; basisIndex += 1) {
@@ -277,6 +287,7 @@ function optimizeScaleCoefficients(layers, anchorBaseline, bases, localShiftBudg
             let localBestShift = bestShift;
             let localBestMetrics = bestMetrics;
             let localBestObjective = bestObjective;
+            let localBestRank = bestRank;
             for (const coefficient of coefficientGrid) {
                 if (Math.abs(coefficient - coefficients[basisIndex]) <= 1e-12) {
                     continue;
@@ -284,18 +295,21 @@ function optimizeScaleCoefficients(layers, anchorBaseline, bases, localShiftBudg
                 const candidateCoefficients = coefficients.slice();
                 candidateCoefficients[basisIndex] = coefficient;
                 const candidate = evaluate(candidateCoefficients);
-                if (candidate && candidate.objective < localBestObjective - 1e-9) {
+                const candidateRank = rank(candidate);
+                if (candidateRank < localBestRank - 1e-9) {
                     localBestCoefficient = coefficient;
                     localBestShift = candidate.shift;
                     localBestMetrics = candidate.metrics;
                     localBestObjective = candidate.objective;
+                    localBestRank = candidateRank;
                 }
             }
-            if (localBestObjective < bestObjective - 1e-9) {
+            if (localBestRank < bestRank - 1e-9) {
                 coefficients[basisIndex] = localBestCoefficient;
                 bestShift = localBestShift;
                 bestMetrics = localBestMetrics;
                 bestObjective = localBestObjective;
+                bestRank = localBestRank;
                 improved = true;
             }
         }
@@ -303,15 +317,83 @@ function optimizeScaleCoefficients(layers, anchorBaseline, bases, localShiftBudg
             break;
         }
     }
+    const guarded = applyLayerGeometryGuardrail(coefficients, evaluate, metricsBefore, {
+        shift: bestShift,
+        metrics: bestMetrics,
+        objective: bestObjective
+    });
+    const guardedCoefficients = guarded.scale === 1 ? coefficients : coefficients.map((value) => value * guarded.scale);
     return {
-        shift: removeMean(bestShift),
-        coefficients,
+        shift: removeMean(guarded.shift),
+        coefficients: guardedCoefficients,
         objectiveBefore,
-        objectiveAfter: bestObjective,
+        objectiveAfter: guarded.objective,
         metricsBefore,
-        metricsAfter: bestMetrics,
-        globalMeanSlopeGuardrailPassed: bestMetrics.meanSlope <= metricsBefore.meanSlope * 1.15 + 1e-9
+        metricsAfter: guarded.metrics,
+        globalMeanSlopeGuardrailPassed: guarded.metrics.meanSlope <= metricsBefore.meanSlope * 1.05 + 1e-9 &&
+            guarded.metrics.curvature <= metricsBefore.curvature * 1.05 + 1e-9
     };
+}
+function runCoefficientBeamSearch(length, coefficientGrid, evaluate, rank) {
+    if (length === 0) {
+        return null;
+    }
+    const beamWidth = Math.max(18, Math.min(72, length * 12));
+    let beam = [];
+    const zero = new Array(length).fill(0);
+    const initial = evaluate(zero);
+    beam.push({ coefficients: zero, ...initial, rank: rank(initial) });
+    for (let basisIndex = 0; basisIndex < length; basisIndex += 1) {
+        const expanded = [];
+        for (const item of beam) {
+            for (const coefficient of coefficientGrid) {
+                const candidateCoefficients = item.coefficients.slice();
+                candidateCoefficients[basisIndex] = coefficient;
+                const candidate = evaluate(candidateCoefficients);
+                expanded.push({
+                    coefficients: candidateCoefficients,
+                    ...candidate,
+                    rank: rank(candidate)
+                });
+            }
+        }
+        expanded.sort((a, b) => a.rank - b.rank);
+        beam = dedupeCoefficientBeam(expanded).slice(0, beamWidth);
+    }
+    return beam[0] ?? null;
+}
+function dedupeCoefficientBeam(items) {
+    const seen = new Set();
+    const out = [];
+    for (const item of items) {
+        const key = item.coefficients.map((value) => value.toFixed(3)).join(",");
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        out.push(item);
+    }
+    return out;
+}
+function applyLayerGeometryGuardrail(coefficients, evaluate, reference, best) {
+    const passesGuardrail = (metrics) => metrics.meanSlope <= reference.meanSlope * 1.05 + 1e-9 &&
+        metrics.curvature <= reference.curvature * 1.05 + 1e-9 &&
+        metrics.localMeanSlope <= reference.localMeanSlope * 1.05 + 1e-9 &&
+        metrics.localCurvature <= reference.localCurvature * 1.05 + 1e-9;
+    if (passesGuardrail(best.metrics)) {
+        return { ...best, scale: 1 };
+    }
+    let guarded = null;
+    for (const scale of [0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0]) {
+        const candidate = evaluate(coefficients.map((value) => value * scale));
+        if (!passesGuardrail(candidate.metrics)) {
+            continue;
+        }
+        if (!guarded || candidate.objective < guarded.objective) {
+            guarded = { ...candidate, scale };
+        }
+    }
+    return guarded ?? { ...best, scale: 1 };
 }
 function combineBasisShift(bases, coefficients) {
     const length = bases[0]?.values.length ?? 0;
@@ -328,17 +410,42 @@ function combineBasisShift(bases, coefficients) {
     }
     return removeMean(out);
 }
+function rankedCoefficientObjective(objective, metrics, reference) {
+    const geometryRatios = [
+        normalizedRatio(metrics.meanSlope, reference.meanSlope),
+        normalizedRatio(metrics.curvature, reference.curvature),
+        normalizedRatio(metrics.localMeanSlope, reference.localMeanSlope),
+        normalizedRatio(metrics.localCurvature, reference.localCurvature)
+    ];
+    let geometryPenalty = 0;
+    for (const ratioValue of geometryRatios) {
+        const excess = Math.max(0, ratioValue - 1.045);
+        geometryPenalty += 70 * excess + 180 * excess * excess;
+    }
+    const centerlineMeanRatio = normalizedRatio(metrics.centerlineMeanSlope, reference.centerlineMeanSlope);
+    const underusePenalty = 1.2 * Math.max(0, 0.34 - centerlineMeanRatio);
+    return objective + geometryPenalty + underusePenalty;
+}
 function baselineObjective(metrics, reference, shiftBudget, localShiftBudget) {
     const budgetRatio = localShiftBudget <= 1e-12 ? 0 : shiftBudget / localShiftBudget;
     const centerlineMeanGrowth = normalizedRatio(metrics.centerlineMeanSlope, reference.centerlineMeanSlope);
     const centerlineMeanPenalty = Math.max(0, centerlineMeanGrowth - 1.8) ** 2;
     const coverageGain = metrics.centerlineSlopeCoverage - reference.centerlineSlopeCoverage;
+    const windowConcentrationRatio = highAlignedWindowRatio(metrics.windowDerivativeConcentrations, reference.windowDerivativeConcentrations);
+    const windowMassRatio = highAlignedWindowRatio(metrics.windowBurstMassShares, reference.windowBurstMassShares);
+    const windowRegressionPenalty = 7 * Math.max(0, windowConcentrationRatio - 1) + 5 * Math.max(0, windowMassRatio - 1);
     return (0.25 * normalizedRatio(metrics.meanSlope, reference.meanSlope) +
         0.6 * normalizedRatio(metrics.maxSlope, reference.maxSlope) +
         0.55 * normalizedRatio(metrics.curvature, reference.curvature) +
         0.45 * normalizedRatio(metrics.centerlineCurvature, reference.centerlineCurvature) +
         1.15 * normalizedRatio(metrics.maxBaselineDerivative, reference.maxBaselineDerivative) +
         0.8 * normalizedRatio(metrics.derivativeConcentration, reference.derivativeConcentration) +
+        1.0 * normalizedRatio(metrics.localDerivativeConcentration, reference.localDerivativeConcentration) +
+        0.55 * normalizedRatio(metrics.burstMassShare, reference.burstMassShare) +
+        0.75 * normalizedRatio(metrics.localBurstMassShare, reference.localBurstMassShare) +
+        1.25 * windowConcentrationRatio +
+        0.85 * windowMassRatio +
+        windowRegressionPenalty +
         0.12 * centerlineMeanPenalty +
         0.05 * budgetRatio -
         0.35 * coverageGain);
@@ -352,17 +459,45 @@ function normalizedRatio(value, reference) {
     }
     return value / Math.max(1e-12, Math.abs(reference));
 }
+function highAlignedWindowRatio(values, reference) {
+    const length = Math.min(values.length, reference.length);
+    if (length === 0) {
+        return 1;
+    }
+    const ratios = [];
+    for (let i = 0; i < length; i += 1) {
+        const value = values[i];
+        const ref = reference[i];
+        if (!Number.isFinite(value) || !Number.isFinite(ref) || Math.abs(ref) <= 1e-12) {
+            continue;
+        }
+        ratios.push(value / Math.max(1e-12, Math.abs(ref)));
+    }
+    if (ratios.length === 0) {
+        return 1;
+    }
+    ratios.sort((a, b) => a - b);
+    return ratios[Math.floor(0.9 * (ratios.length - 1))];
+}
 function baselineOptimizationMetrics(layers, baseline) {
     const total = sumLayerMeans(baseline.length, layers);
     const centerline = streamCenterlineFromBaseline(baseline, total);
     const centers = layerCenterSeries(layers, baseline);
+    const centerlineWindows = derivativeWindowMetrics(centerline, 0.05);
     return {
         meanSlope: centerMeanSlope(centers),
         maxSlope: centerMaxSlope(centers),
         curvature: centerCurvature(centers),
+        localMeanSlope: localCenterMeanSlope(centers),
+        localCurvature: localCenterCurvature(centers),
         centerlineMeanSlope: meanAbsStep(centerline),
         maxBaselineDerivative: maxAbsStep(centerline),
         derivativeConcentration: derivativeConcentration(centerline),
+        localDerivativeConcentration: localDerivativeConcentration(centerline),
+        burstMassShare: burstMassShare(centerline, 0.05),
+        localBurstMassShare: localBurstMassShare(centerline, 0.05),
+        windowDerivativeConcentrations: centerlineWindows.concentrations,
+        windowBurstMassShares: centerlineWindows.massShares,
         centerlineCurvature: meanCurvature(centerline),
         centerlineSlopeCoverage: slopeCoverage(centerline)
     };
@@ -414,6 +549,48 @@ function centerCurvature(series) {
     }
     return count > 0 ? acc / count : 0;
 }
+function localCenterMeanSlope(series) {
+    const length = series[0]?.length ?? 0;
+    const windowSize = localDerivativeWindowSize(Math.max(0, length - 1));
+    if (length <= 1 || windowSize <= 0 || length - 1 <= windowSize) {
+        return centerMeanSlope(series);
+    }
+    let out = 0;
+    for (let left = 1; left <= length - windowSize; left += 1) {
+        let acc = 0;
+        let count = 0;
+        const right = left + windowSize - 1;
+        for (const row of series) {
+            for (let t = left; t <= right; t += 1) {
+                acc += Math.abs(row[t] - row[t - 1]);
+                count += 1;
+            }
+        }
+        out = Math.max(out, count > 0 ? acc / count : 0);
+    }
+    return out;
+}
+function localCenterCurvature(series) {
+    const length = series[0]?.length ?? 0;
+    const windowSize = localDerivativeWindowSize(Math.max(0, length - 2));
+    if (length <= 2 || windowSize <= 0 || length - 2 <= windowSize) {
+        return centerCurvature(series);
+    }
+    let out = 0;
+    for (let left = 2; left <= length - windowSize; left += 1) {
+        let acc = 0;
+        let count = 0;
+        const right = left + windowSize - 1;
+        for (const row of series) {
+            for (let t = left; t <= right; t += 1) {
+                acc += Math.abs(row[t] - 2 * row[t - 1] + row[t - 2]);
+                count += 1;
+            }
+        }
+        out = Math.max(out, count > 0 ? acc / count : 0);
+    }
+    return out;
+}
 function derivativeConcentration(values) {
     if (values.length <= 1) {
         return 0;
@@ -429,6 +606,94 @@ function derivativeConcentration(values) {
     }
     meanValue /= Math.max(1, count);
     return meanValue <= 1e-12 ? 0 : maxValue / meanValue;
+}
+function derivativeMagnitudes(values) {
+    const out = [];
+    for (let t = 1; t < values.length; t += 1) {
+        out.push(Math.abs(values[t] - values[t - 1]));
+    }
+    return out;
+}
+function localDerivativeWindowSize(derivativeCount) {
+    if (derivativeCount <= 0) {
+        return 0;
+    }
+    return Math.max(6, Math.min(48, Math.round(derivativeCount * 0.1)));
+}
+function concentrationFromMagnitudes(values) {
+    if (values.length === 0) {
+        return 0;
+    }
+    let maxValue = 0;
+    let meanValue = 0;
+    for (const value of values) {
+        maxValue = Math.max(maxValue, value);
+        meanValue += value;
+    }
+    meanValue /= Math.max(1, values.length);
+    return meanValue <= 1e-12 ? 0 : maxValue / meanValue;
+}
+function localDerivativeConcentration(values) {
+    const derivatives = derivativeMagnitudes(values);
+    const windowSize = localDerivativeWindowSize(derivatives.length);
+    if (windowSize <= 0 || derivatives.length <= windowSize) {
+        return concentrationFromMagnitudes(derivatives);
+    }
+    let out = 0;
+    for (let left = 0; left <= derivatives.length - windowSize; left += 1) {
+        out = Math.max(out, concentrationFromMagnitudes(derivatives.slice(left, left + windowSize)));
+    }
+    return out;
+}
+function burstMassShare(values, topFraction) {
+    return massShareFromMagnitudes(derivativeMagnitudes(values), topFraction);
+}
+function localBurstMassShare(values, topFraction) {
+    const derivatives = derivativeMagnitudes(values);
+    const windowSize = localDerivativeWindowSize(derivatives.length);
+    if (windowSize <= 0 || derivatives.length <= windowSize) {
+        return massShareFromMagnitudes(derivatives, topFraction);
+    }
+    let out = 0;
+    for (let left = 0; left <= derivatives.length - windowSize; left += 1) {
+        out = Math.max(out, massShareFromMagnitudes(derivatives.slice(left, left + windowSize), topFraction));
+    }
+    return out;
+}
+function derivativeWindowMetrics(values, topFraction) {
+    const derivatives = derivativeMagnitudes(values);
+    const windowSize = localDerivativeWindowSize(derivatives.length);
+    if (windowSize <= 0) {
+        return { concentrations: [], massShares: [] };
+    }
+    if (derivatives.length <= windowSize) {
+        return {
+            concentrations: [concentrationFromMagnitudes(derivatives)],
+            massShares: [massShareFromMagnitudes(derivatives, topFraction)]
+        };
+    }
+    const concentrations = [];
+    const massShares = [];
+    for (let left = 0; left <= derivatives.length - windowSize; left += 1) {
+        const window = derivatives.slice(left, left + windowSize);
+        concentrations.push(concentrationFromMagnitudes(window));
+        massShares.push(massShareFromMagnitudes(window, topFraction));
+    }
+    return { concentrations, massShares };
+}
+function massShareFromMagnitudes(values, topFraction) {
+    const clean = values.filter((value) => Number.isFinite(value) && value > 0);
+    const total = clean.reduce((acc, value) => acc + value, 0);
+    if (clean.length === 0 || total <= 1e-12) {
+        return 0;
+    }
+    const count = Math.max(1, Math.ceil(clean.length * clamp(topFraction, 0, 1)));
+    clean.sort((a, b) => b - a);
+    let top = 0;
+    for (let i = 0; i < count; i += 1) {
+        top += clean[i];
+    }
+    return top / total;
 }
 function slopeCoverage(values) {
     const maxValue = maxAbsStep(values);

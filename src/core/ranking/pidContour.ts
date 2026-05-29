@@ -1,4 +1,3 @@
-import { buildCenterOutOrder } from "../displayOrder";
 import type { LayerInput, PidUncertaintySource } from "../types";
 import { EPSILON, clamp, finiteOr, firstFinite } from "../math";
 
@@ -55,7 +54,6 @@ export interface ContourPidResult {
   depthByLayerId: Map<string, number>;
   scoreByLayerId: Map<string, ContourPidScore>;
   depthOrder: string[];
-  displayOrder: string[];
   deepestLayerId: string | null;
   meanMask: Float32Array;
   allUnionMask: Float32Array;
@@ -103,7 +101,6 @@ export function computeContourPid(layers: LayerInput[], options: ContourPidOptio
   const scores = sortContourScores(scoreMasks(layers, masks, meanMask));
 
   const depthOrder = scores.map((score) => score.id);
-  const displayOrder = buildCenterOutOrder(depthOrder);
   const depthByLayerId = new Map(scores.map((score) => [score.id, score.depth]));
   const scoreByLayerId = new Map(scores.map((score) => [score.id, score]));
   const boxplotMasks = buildContourBoxplotMasks(layers, masks, scores, centralFraction, gridSize);
@@ -113,7 +110,6 @@ export function computeContourPid(layers: LayerInput[], options: ContourPidOptio
     depthByLayerId,
     scoreByLayerId,
     depthOrder,
-    displayOrder,
     deepestLayerId: boxplotMasks.deepestLayerId,
     meanMask,
     allUnionMask: boxplotMasks.allUnionMask,
@@ -139,7 +135,6 @@ function emptyContourPidResult(xBins: number, yBins: number, contourThreshold: n
     depthByLayerId: new Map(),
     scoreByLayerId: new Map(),
     depthOrder: [],
-    displayOrder: [],
     deepestLayerId: null,
     meanMask: emptyMask,
     allUnionMask: emptyMask,
@@ -443,4 +438,3 @@ function dotMask(a: Float32Array, b: Float32Array): number {
   }
   return out;
 }
-

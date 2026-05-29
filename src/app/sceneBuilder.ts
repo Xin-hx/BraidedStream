@@ -1,7 +1,7 @@
 import { computeBaseline } from "../core/baseline";
 import { computeBraidLayout } from "../core/braid";
 import type { DatasetBundle } from "../core/datasets";
-import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/ranking";
+import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/ordering";
 import {
   computeOptimizingBaseline,
   computeOptimizingOrder,
@@ -10,7 +10,7 @@ import {
   orderingScoringLabel,
   resolveOptimizingVariantConfig,
   type OptimizingVariantConfig
-} from "../core/optimizationPipeline";
+} from "../core/optimizing";
 import { clampRoiToParent, normalizeROI } from "../core/roi";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
@@ -44,7 +44,7 @@ export interface SceneBuildResult {
   pidUncertaintySource: PidUncertaintySource | null;
 }
 
-export type { OptimizingVariantConfig } from "../core/optimizationPipeline";
+export type { OptimizingVariantConfig } from "../core/optimizing";
 
 export function buildScene(bundle: DatasetBundle, state: AppState): SceneBuildResult {
   const context = prepareDatasetWindowContext(bundle, state);

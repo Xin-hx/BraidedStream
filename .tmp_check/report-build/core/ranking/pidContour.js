@@ -1,4 +1,3 @@
-import { buildCenterOutOrder } from "../displayOrder.js";
 import { EPSILON, clamp, finiteOr, firstFinite } from "../math.js";
 const QUANTILE_MASK_KEY_ORDER = ["p025", "p10", "p25", "p50", "p75", "p90", "p975"];
 // share one membership value, so only the lower side plus p50 is maintained.
@@ -26,7 +25,6 @@ export function computeContourPid(layers, options = {}) {
     const meanMask = averageMasks(masks, gridSize);
     const scores = sortContourScores(scoreMasks(layers, masks, meanMask));
     const depthOrder = scores.map((score) => score.id);
-    const displayOrder = buildCenterOutOrder(depthOrder);
     const depthByLayerId = new Map(scores.map((score) => [score.id, score.depth]));
     const scoreByLayerId = new Map(scores.map((score) => [score.id, score]));
     const boxplotMasks = buildContourBoxplotMasks(layers, masks, scores, centralFraction, gridSize);
@@ -35,7 +33,6 @@ export function computeContourPid(layers, options = {}) {
         depthByLayerId,
         scoreByLayerId,
         depthOrder,
-        displayOrder,
         deepestLayerId: boxplotMasks.deepestLayerId,
         meanMask,
         allUnionMask: boxplotMasks.allUnionMask,
@@ -60,7 +57,6 @@ function emptyContourPidResult(xBins, yBins, contourThreshold) {
         depthByLayerId: new Map(),
         scoreByLayerId: new Map(),
         depthOrder: [],
-        displayOrder: [],
         deepestLayerId: null,
         meanMask: emptyMask,
         allUnionMask: emptyMask,

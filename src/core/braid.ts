@@ -3,6 +3,7 @@
  *
  * The algorithm computes a soft ROI window, allocates screen-space gaps, and
  * then reconstructs stack boundaries while preserving original layer thickness.
+ * ⚠ currnt version has NO BRADING METHOD
  */
 import type { BaselineMode, BraidLayout, GapMode, LayerInput, ROI, RoiSupportWindow, SmoothKernel, StackLayout } from "./types";
 import { normalizeROI } from "./roi";

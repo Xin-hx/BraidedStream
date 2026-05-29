@@ -2,7 +2,7 @@ import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/b
 /**
  * Grid search for multiscale baseline parameters under a fixed layer order.
  */
-import { optimizeLayerOrder } from "../core/ranking/index.js";
+import { optimizeLayerOrder } from "../core/ordering/index.js";
 import { computeStackedBoundaries } from "../core/stack.js";
 import { computeMetrics } from "./metrics.js";
 import { compareSearchCandidates, discreteValues as discreteSearchValues, emptyInvariantSummary, finiteNumber, passReasons, regressionReasons, sanitizeCenterTypes, sanitizeRange as sanitizeSearchRange, scopeSummaryFromMetricRows, sortKeyFromParams, stackToBraidLayout } from "./searchUtils.js";

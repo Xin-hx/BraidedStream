@@ -2,8 +2,8 @@ import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/b
 /**
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
-import { buildCenterOutOrder, normalizeOrderForComparison } from "../core/displayOrder.js";
-import { computePidOrdering, optimizeLayerOrder } from "../core/ranking/index.js";
+import { buildCenterOutOrder, normalizeOrderForComparison, optimizeLayerOrder } from "../core/ordering/index.js";
+import { computePidOrdering } from "../core/ranking/index.js";
 import { computeStackedBoundaries } from "../core/stack.js";
 import { orderLayers } from "../core/validate.js";
 import { computeMetrics } from "./metrics.js";
