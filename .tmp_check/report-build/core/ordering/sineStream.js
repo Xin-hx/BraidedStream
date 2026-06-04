@@ -5,11 +5,11 @@
  * groups below build the hierarchy, solve optimal leaf ordering, and evaluate
  * pairwise distances.
  */
-import { FIXED_SEED } from "../seed.js";
-import { roiBounds } from "../roi.js";
-import { median } from "../math.js";
-import { seededShuffleIndices } from "../random.js";
-import { layerUncertaintyAt } from "../validate.js";
+import { FIXED_SEED } from "../seed";
+import { roiBounds } from "../roi";
+import { median } from "../math";
+import { seededShuffleIndices } from "../random";
+import { layerUncertaintyAt } from "../validate";
 const ORIENTATION_ENUM = [
     [0, 0, 1, 1],
     [0, 1, 1, 0],

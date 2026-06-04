@@ -229,7 +229,7 @@ function buildSpaghettiLines(layers: LayerInput[]): SpaghettiLineDatum[] {
         key: `${layer.id}:mean`,
         layerId: layer.id,
         quantileValue: 0.5,
-        values: layer.mean,
+        values: layer.height,
         stroke: baseColor,
         strokeOpacity: 0.86,
         strokeWidth: 1.6 * strokeScale,
@@ -243,7 +243,7 @@ function buildSpaghettiLines(layers: LayerInput[]): SpaghettiLineDatum[] {
         key: `${layer.id}:mean`,
         layerId: layer.id,
         quantileValue: 0.5,
-        values: layer.mean,
+        values: layer.height,
         stroke: baseColor,
         strokeOpacity: 0.86,
         strokeWidth: 1.6 * strokeScale,
@@ -476,7 +476,7 @@ function buildSpaghettiTooltip(timeIndex: number, times: number[], focusLayer: L
 
 function quantilesAt(layer: LayerInput, timeIndex: number): Array<{ key: string; value: number }> {
   if (!layer.quantiles) {
-    return [{ key: "p50", value: layer.mean[timeIndex] ?? 0 }];
+    return [{ key: "p50", value: layer.height[timeIndex] ?? 0 }];
   }
   return getSortedQuantileEntries(layer.quantiles)
     .map((entry) => ({ key: entry.key, value: entry.series[timeIndex] ?? 0 }))
@@ -488,7 +488,7 @@ function medianAt(layer: LayerInput, timeIndex: number): number {
   if (Number.isFinite(q50)) {
     return Math.max(0, q50 ?? 0);
   }
-  return Math.max(0, layer.mean[timeIndex] ?? 0);
+  return Math.max(0, layer.height[timeIndex] ?? 0);
 }
 
 function iqrAt(layer: LayerInput, timeIndex: number): number {

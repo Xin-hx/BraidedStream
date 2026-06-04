@@ -6,7 +6,7 @@ export interface HoverInfo {
   timeLabel: string;
   total: number;
   focusLayerId: string | null;
-  layerValues: Array<{ id: string; label: string; mean: number; unc: number }>;
+  layerValues: Array<{ id: string; label: string; value: number; unc: number }>;
 }
 
 interface HoverLayerEntry {
@@ -41,7 +41,7 @@ function buildHoverInfoFromEntries(
   const clamped = Math.max(0, Math.min(times.length - 1, timeIndex));
   let total = 0;
   for (const entry of entries) {
-    total += entry.layer.mean[clamped] ?? 0;
+    total += entry.layer.height[clamped] ?? 0;
   }
   const layerValues = focusLayerId
     ? layerValueAt(byId.get(focusLayerId), clamped)
@@ -100,11 +100,11 @@ function layerValueAt(
   return entry ? [layerValue(entry, timeIndex)] : [];
 }
 
-function layerValue(entry: HoverLayerEntry, timeIndex: number): { id: string; label: string; mean: number; unc: number } {
+function layerValue(entry: HoverLayerEntry, timeIndex: number): { id: string; label: string; value: number; unc: number } {
   return {
     id: entry.layer.id,
     label: entry.label,
-    mean: entry.layer.mean[timeIndex] ?? 0,
+    value: entry.layer.height[timeIndex] ?? 0,
     unc: entry.layer.unc?.[timeIndex] ?? 0
   };
 }

@@ -1,6 +1,6 @@
 import type { BaselineCenterType } from "../types";
 
-export interface BaselineHooks {
+export interface BaselineParameters {
   /** Center type for baseline: "median" | "mean" | "geometric" | "harmonic" */
   centerType?: BaselineCenterType;
   /** L1 wiggle weight (for mode=l1) */
@@ -15,7 +15,7 @@ export interface BaselineHooks {
   irlsEps?: number;
 }
 
-export type SineStreamHooks = BaselineHooks;
+export type SineStreamHooks = BaselineParameters;
 
 export interface MultiscaleEnergyBandDiagnostic {
   scale: number;

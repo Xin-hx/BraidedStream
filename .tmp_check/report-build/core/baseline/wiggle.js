@@ -1,5 +1,5 @@
-import { median } from "../math.js";
-import { buildCenterLineDerivativeOffsets, centeredBaselineFromLayers } from "./shared.js";
+import { median } from "../math";
+import { buildCenterLineDerivativeOffsets, centeredBaselineFromLayers } from "./shared";
 export function computeWiggleBaseline(tLength, layers, mode, hooks) {
     if (layers.length === 0 || tLength === 0) {
         return new Array(tLength).fill(0);

@@ -42,7 +42,7 @@ export function generateSyntheticDataset(tLength = 180, kLength = 8): SyntheticD
       upper[t] = meanValue + uncValue;
     }
 
-    layers.push({ id, mean, unc, lower, upper });
+    layers.push({ id, height: mean, unc, lower, upper });
   }
 
   const order = layers.map((layer) => layer.id);

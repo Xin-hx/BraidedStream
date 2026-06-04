@@ -1,4 +1,4 @@
-import { clamp } from "./utils.js";
+import { clamp } from "./utils";
 /** Normalize ROI endpoints and clamp them to the available time range. */
 export function normalizeROI(roi, tLength) {
     if (!roi || tLength <= 0) {

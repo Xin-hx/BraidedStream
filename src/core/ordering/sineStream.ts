@@ -110,7 +110,7 @@ export function optimizeLayerOrder(
     };
   }
 
-  const [left, right] = roiBounds(layers[0].mean.length, roi);
+  const [left, right] = roiBounds(layers[0].height.length, roi);
   const options: DistanceOptions = {
     weightType: config.weightType ?? "max",
     useThicknessWeight: config.useThicknessWeight !== false,
@@ -224,7 +224,7 @@ function buildLeafNodes(layers: LayerInput[], shuffledIndices: number[]): LayerN
   for (let i = 0; i < shuffledIndices.length; i += 1) {
     const layerIndex = shuffledIndices[i];
     const layer = layers[layerIndex];
-    const size = layer.mean.slice();
+    const size = layer.height.slice();
     const dFi = toDiff(size);
     const uncertainty = size.map((_v, t) => Math.max(0, layerUncertaintyAt(layer, t)));
     nodes.push({

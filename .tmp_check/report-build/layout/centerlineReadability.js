@@ -1,4 +1,4 @@
-import { roiBounds } from "../core/roi.js";
+import { roiBounds } from "../core/roi";
 export const CENTERLINE_READABILITY_DIRECTIONS = {
     sampleCount: "up",
     derivativeCount: "up",

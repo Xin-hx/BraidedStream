@@ -12,12 +12,12 @@ export function computeSineStreamBaseline(tLength: number, layers: LayerInput[],
 
   let totalSize = 0;
   for (const layer of layers) {
-    totalSize += layer.mean[0];
+    totalSize += layer.height[0];
   }
   baseline[0] = -0.5 * totalSize;
 
   for (let i = 1; i < tLength; i += 1) {
-    const thicknessChanges = layers.map((layer) => Math.abs(layer.mean[i] - layer.mean[i - 1]));
+    const thicknessChanges = layers.map((layer) => Math.abs(layer.height[i] - layer.height[i - 1]));
     const c = computeThicknessChangeMetric(thicknessChanges, centerType);
     const deltaG = computeGaussianWeightedAdjustment(layers, i, c);
     baseline[i] = baseline[i - 1] + deltaG;
@@ -87,8 +87,8 @@ function computeGaussianWeightedAdjustment(layers: LayerInput[], i: number, c: n
   const Qi = new Array<number>(n);
 
   for (let j = 0; j < n; j += 1) {
-    const current = layers[j].mean[i];
-    const previous = layers[j].mean[i - 1];
+    const current = layers[j].height[i];
+    const previous = layers[j].height[i - 1];
     Fi[j] = current;
     dFi[j] = current - previous;
   }
@@ -116,7 +116,7 @@ function computeGaussianWeightedAdjustment(layers: LayerInput[], i: number, c: n
   if (Number.isFinite(denominator) === false || Math.abs(denominator) <= 1e-12) {
     let totalSizePrev = 0;
     for (let j = 0; j < n; j += 1) {
-      totalSizePrev += layers[j].mean[i - 1];
+      totalSizePrev += layers[j].height[i - 1];
     }
     return totalSizePrev / 2;
   }

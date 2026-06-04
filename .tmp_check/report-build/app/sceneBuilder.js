@@ -1,12 +1,12 @@
-import { computeBaseline } from "../core/baseline/index.js";
-import { computeBraidLayout } from "../core/braid.js";
-import { optimizeLayerOrder } from "../core/ordering/index.js";
-import { computeOptimizingBaseline, computeOptimizingOrder, optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../core/optimizing/index.js";
-import { clampRoiToParent, normalizeROI } from "../core/roi.js";
-import { computeStackedBoundaries } from "../core/stack.js";
-import { orderLayers } from "../core/validate.js";
-import { preprocessDataset } from "../data/transforms.js";
-import { computeMetrics } from "../layout/metrics.js";
+import { computeBaseline } from "../core/baseline";
+import { computeBraidLayout } from "../core/braid";
+import { optimizeLayerOrder } from "../core/ordering";
+import { computeOptimizingBaseline, computeOptimizingOrder, optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../core/optimizing";
+import { clampRoiToParent, normalizeROI } from "../core/roi";
+import { computeStackedBoundaries } from "../core/stack";
+import { orderLayers } from "../core/validate";
+import { preprocessDataset } from "../data/transforms";
+import { computeMetrics } from "../layout/metrics";
 export function buildScene(bundle, state) {
     const context = prepareDatasetWindowContext(bundle, state);
     const orderedLayers = orderLayers(context.dataset.layers, context.dataset.order);

@@ -1,4 +1,4 @@
-import { EPSILON, clamp, finiteOr, firstFinite } from "../math.js";
+import { EPSILON, clamp, finiteOr, firstFinite } from "../math";
 const QUANTILE_MASK_KEY_ORDER = ["p025", "p10", "p25", "p50", "p75", "p90", "p975"];
 // share one membership value, so only the lower side plus p50 is maintained.
 const CONTOUR_MASK_SYMMETRIC_MEMBERSHIP = [

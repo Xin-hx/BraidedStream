@@ -1,4 +1,4 @@
-import { median } from "../math.js";
+import { median } from "../math";
 /**
  * SineStream baseline computation using Gaussian-weighted adjustments.
  * Following: StreamLayout_2norm_Gauss from the SineStream paper.

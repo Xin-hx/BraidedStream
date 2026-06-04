@@ -1,4 +1,4 @@
-import { clamp, sum } from "../math.js";
+import { clamp, sum } from "../math";
 /** Compute adjacent-time temporal self-inclusion (TSI) for each layer. */
 export function computeTemporalSelfInclusion(depthSeriesByLayerId) {
     const out = new Map();

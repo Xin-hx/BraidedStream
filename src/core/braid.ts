@@ -243,10 +243,10 @@ function rawGapAt(
   const layerA = orderedLayers[boundaryIndex];
   const layerB = orderedLayers[boundaryIndex + 1];
   const uncertainty = boundaryUncertaintyAt(layerA, layerB, timeIndex);
-  const slopeA = timeIndex > 0 ? Math.abs(layerA.mean[timeIndex] - layerA.mean[timeIndex - 1]) : 0;
-  const slopeB = timeIndex > 0 ? Math.abs(layerB.mean[timeIndex] - layerB.mean[timeIndex - 1]) : 0;
+  const slopeA = timeIndex > 0 ? Math.abs(layerA.height[timeIndex] - layerA.height[timeIndex - 1]) : 0;
+  const slopeB = timeIndex > 0 ? Math.abs(layerB.height[timeIndex] - layerB.height[timeIndex - 1]) : 0;
   const slopeTerm = 0.5 * (slopeA + slopeB);
-  const localThickness = 0.5 * (Math.max(1e-9, layerA.mean[timeIndex]) + Math.max(1e-9, layerB.mean[timeIndex]));
+  const localThickness = 0.5 * (Math.max(1e-9, layerA.height[timeIndex]) + Math.max(1e-9, layerB.height[timeIndex]));
   const uNorm = clamp01(uncertainty / scales.uncScale);
   const slopeNorm = clamp01(slopeTerm / scales.slopeScale);
   const thinnessNorm = clamp01(scales.boundaryThicknessScale / Math.max(1e-9, localThickness));
@@ -337,7 +337,7 @@ function applyGapValuesToStack(
     let extra = 0;
     for (let k = 0; k < orderedLayers.length; k += 1) {
       yBottom[k][t] = base.yBottom[k][t] + centerShift + extra;
-      yTop[k][t] = yBottom[k][t] + orderedLayers[k].mean[t];
+      yTop[k][t] = yBottom[k][t] + orderedLayers[k].height[t];
       if (k < gapCount) {
         extra += gapsValue[k][t];
       }
@@ -453,8 +453,8 @@ function robustTermScale(
       if (term === "uncertainty") {
         values.push(boundaryUncertaintyAt(orderedLayers[k], orderedLayers[k + 1], t));
       } else {
-        const slopeA = t > 0 ? Math.abs(orderedLayers[k].mean[t] - orderedLayers[k].mean[t - 1]) : 0;
-        const slopeB = t > 0 ? Math.abs(orderedLayers[k + 1].mean[t] - orderedLayers[k + 1].mean[t - 1]) : 0;
+        const slopeA = t > 0 ? Math.abs(orderedLayers[k].height[t] - orderedLayers[k].height[t - 1]) : 0;
+        const slopeB = t > 0 ? Math.abs(orderedLayers[k + 1].height[t] - orderedLayers[k + 1].height[t - 1]) : 0;
         values.push(0.5 * (slopeA + slopeB));
       }
     }
@@ -476,8 +476,8 @@ function robustBoundaryThicknessScale(
   const tEnd = roiSupport ? roiSupport.supportEnd : Math.max(0, tLength - 1);
   for (let t = tStart; t <= tEnd; t += 1) {
     for (let k = 0; k < gapCount; k += 1) {
-      const meanA = Math.max(0, orderedLayers[k].mean[t]);
-      const meanB = Math.max(0, orderedLayers[k + 1].mean[t]);
+      const meanA = Math.max(0, orderedLayers[k].height[t]);
+      const meanB = Math.max(0, orderedLayers[k + 1].height[t]);
       values.push(0.5 * (meanA + meanB));
     }
   }

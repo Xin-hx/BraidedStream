@@ -1,13 +1,13 @@
-import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline/index.js";
+import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
 /**
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
-import { buildCenterOutOrder, normalizeOrderForComparison, optimizeLayerOrder } from "../core/ordering/index.js";
-import { computePidOrdering } from "../core/ranking/index.js";
-import { computeStackedBoundaries } from "../core/stack.js";
-import { orderLayers } from "../core/validate.js";
-import { computeMetrics } from "./metrics.js";
-import { compareSearchCandidates, discreteValues as discreteSearchValues, emptyInvariantSummary, finiteNumber, passReasons, regressionReasons, sanitizeCenterTypes, sanitizeRange as sanitizeSearchRange, scopeSummaryFromMetricRows, sortKeyFromParams, stackToBraidLayout } from "./searchUtils.js";
+import { buildCenterOutOrder, normalizeOrderForComparison, optimizeLayerOrder } from "../core/ordering";
+import { computePidOrdering } from "../core/ranking";
+import { computeStackedBoundaries } from "../core/stack";
+import { orderLayers } from "../core/validate";
+import { computeMetrics } from "./metrics";
+import { compareSearchCandidates, discreteValues as discreteSearchValues, emptyInvariantSummary, finiteNumber, passReasons, regressionReasons, sanitizeCenterTypes, sanitizeRange as sanitizeSearchRange, scopeSummaryFromMetricRows, sortKeyFromParams, stackToBraidLayout } from "./searchUtils";
 export function runPidVsSineSearch(input) {
     const searchSpace = sanitizeSearchSpace(input.searchSpace);
     const strengths = discreteSearchValues(searchSpace.baselineUncertaintyWeight);

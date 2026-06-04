@@ -1,10 +1,10 @@
-import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline/index.js";
-import { buildCenterOutOrder, normalizeOrderForComparison, rankMap } from "../core/ordering/index.js";
-import { computePidOrdering } from "../core/ranking/index.js";
-import { computeStackedBoundaries } from "../core/stack.js";
-import { orderLayers } from "../core/validate.js";
-import { computeMetrics } from "./metrics.js";
-import { stackToBraidLayout } from "./searchUtils.js";
+import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
+import { buildCenterOutOrder, normalizeOrderForComparison, rankMap } from "../core/ordering";
+import { computePidOrdering } from "../core/ranking";
+import { computeStackedBoundaries } from "../core/stack";
+import { orderLayers } from "../core/validate";
+import { computeMetrics } from "./metrics";
+import { stackToBraidLayout } from "./searchUtils";
 export function computePidOrderingMetrics(input) {
     const layerIds = input.dataset.layers.map((layer) => layer.id);
     const sineBaseOrder = normalizeOrderForComparison(input.sineOrder, layerIds, input.dataset.order);

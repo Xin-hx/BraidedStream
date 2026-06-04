@@ -1,7 +1,7 @@
 import { computeBaseline } from "../core/baseline";
 import { computeBraidLayout } from "../core/braid";
 import type { DatasetBundle } from "../core/datasets";
-import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/ordering";
+import { optimizeLayerOrder, orderLayers, type OrderOptimizationResult } from "../core/ordering";
 import {
   computeOptimizingBaseline,
   computeOptimizingOrder,
@@ -25,7 +25,6 @@ import type {
   ROI,
   StackLayout
 } from "../core/types";
-import { orderLayers } from "../core/validate";
 import { preprocessDataset } from "../data/transforms";
 import { computeMetrics, type MetricResult } from "../layout/metrics";
 import type { AppState } from "../state/appState";
@@ -477,7 +476,7 @@ function runInvariantChecks(
   for (let k = 0; k < kLength; k += 1) {
     for (let t = 0; t < tLength; t += 1) {
       const thickness = braided.yTop[k][t] - braided.yBottom[k][t];
-      const err = Math.abs(thickness - orderedLayers[k].mean[t]);
+      const err = Math.abs(thickness - orderedLayers[k].height[t]);
       maxThicknessError = Math.max(maxThicknessError, err);
       if (err > eps) {
         pushViolation(`A thickness mismatch at k=${k}, t=${t}, err=${err.toExponential(3)}`);

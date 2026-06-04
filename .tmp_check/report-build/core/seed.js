@@ -1,5 +1,5 @@
 /**
- * Shared deterministic seed constants used by layout and rendering code.
+ Global fixed seed = 40
  */
 export const FIXED_SEED = 40;
 /** Prefix a caller-provided seed with the project fixed seed. */

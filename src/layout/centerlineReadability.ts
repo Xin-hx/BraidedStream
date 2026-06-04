@@ -95,7 +95,7 @@ export function streamTotal(layers: LayerInput[], length: number): number[] {
   const total = new Array<number>(length).fill(0);
   for (const layer of layers) {
     for (let t = 0; t < length; t += 1) {
-      total[t] += Math.max(0, layer.mean[t] ?? 0);
+      total[t] += Math.max(0, layer.height[t] ?? 0);
     }
   }
   return total;
@@ -264,7 +264,7 @@ function layerGeometryMetrics(
   for (const layer of layers) {
     const center = new Array<number>(baseline.length).fill(0);
     for (let t = 0; t < baseline.length; t += 1) {
-      center[t] = baseline[t] + prefix[t] + 0.5 * (layer.mean[t] ?? 0);
+      center[t] = baseline[t] + prefix[t] + 0.5 * (layer.height[t] ?? 0);
     }
     for (let t = Math.max(left + 1, 1); t <= right; t += 1) {
       const slope = Math.abs(center[t] - center[t - 1]);
@@ -275,7 +275,7 @@ function layerGeometryMetrics(
       curvatures.push(Math.abs(center[t] - 2 * center[t - 1] + center[t - 2]));
     }
     for (let t = 0; t < baseline.length; t += 1) {
-      prefix[t] += Math.max(0, layer.mean[t] ?? 0);
+      prefix[t] += Math.max(0, layer.height[t] ?? 0);
     }
   }
 

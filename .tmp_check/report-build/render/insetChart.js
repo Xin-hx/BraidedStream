@@ -2,13 +2,13 @@
  * Inset renderer for before/after/diff/split layout comparisons.
  */
 import * as d3 from "d3";
-import { roiBounds } from "../core/roi.js";
-import { clamp01, percentile, range } from "../core/utils.js";
-import { createAreaPath } from "./paths.js";
-import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtentForIndices, plotAreaFromSize, readChartSize } from "./chartUtils.js";
-import { diffColor, layerColor } from "../styles/palette.js";
-import { boundaryUncertaintyAt } from "../core/validate.js";
-import { applyLayerHoverHighlight as applyPathLayerHoverHighlight } from "./layerHoverHighlight.js";
+import { roiBounds } from "../core/roi";
+import { clamp01, percentile, range } from "../core/utils";
+import { createAreaPath } from "./paths";
+import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtentForIndices, plotAreaFromSize, readChartSize } from "./chartUtils";
+import { diffColor, layerColor } from "../styles/palette";
+import { boundaryUncertaintyAt } from "../core/validate";
+import { applyLayerHoverHighlight as applyPathLayerHoverHighlight } from "./layerHoverHighlight";
 export class InsetChart {
     constructor(svg) {
         this.svg = svg;

@@ -2,8 +2,8 @@
  * Compact overview renderer and primary ROI brush.
  */
 import * as d3 from "d3";
-import { angleAxisLabels, formatTimeTick, plotAreaFromSize, readChartSize } from "./chartUtils.js";
-import { createRoiBrush } from "../ui/brush.js";
+import { angleAxisLabels, formatTimeTick, plotAreaFromSize, readChartSize } from "./chartUtils";
+import { createRoiBrush } from "../ui/brush";
 export class OverviewChart {
     constructor(svg) {
         this.svg = svg;

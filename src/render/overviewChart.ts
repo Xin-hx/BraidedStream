@@ -65,7 +65,7 @@ export class OverviewChart {
       .domain([dataset.times[0], dataset.times[dataset.times.length - 1]])
       .range([0, this.innerWidth]);
 
-    const totals = dataset.times.map((_, t) => d3.sum(dataset.layers, (layer) => layer.mean[t]) ?? 0);
+    const totals = dataset.times.map((_, t) => d3.sum(dataset.layers, (layer) => layer.height[t]) ?? 0);
     const yMax = d3.max(totals) ?? 1;
     const yScale = d3.scaleLinear().domain([0, yMax]).range([this.innerHeight, 0]);
 

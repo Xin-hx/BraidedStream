@@ -14,7 +14,7 @@ export function computeStackedBoundaries(baseline: number[], orderedLayers: Laye
     // Build a vertical stack at each time sample: baseline + cumulative layer thickness.
     let cumulative = 0;
     for (let k = 0; k < kLength; k += 1) {
-      const mean = orderedLayers[k].mean[t];
+      const mean = orderedLayers[k].height[t];
       const bottom = baseline[t] + cumulative;
       const top = bottom + mean;
       yBottom[k][t] = bottom;

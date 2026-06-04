@@ -1,8 +1,8 @@
 /**
  * Layout quality metrics used by UI panels and search routines.
  */
-import { computePidOrdering } from "../core/ranking/index.js";
-import { meanFinite, range } from "../core/utils.js";
+import { computePidOrdering } from "../core/ranking";
+import { meanFinite, range } from "../core/utils";
 export function computeMetrics(dataset, beforeLayout, afterLayout, roi, invariant, orderedLayersForAfter, options = {}) {
     const idx = computeIndices(dataset.times.length, roi);
     const idxGlobal = range(0, dataset.times.length);

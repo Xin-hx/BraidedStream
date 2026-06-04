@@ -91,7 +91,7 @@ const availableStateOptions = computed<SpaghettiStateOption[]>(() => {
     .map((layer) => ({
       id: layer.id,
       label: layerStateLabel(layer.id),
-      total: sum(layer.mean)
+      total: sum(layer.height)
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 });
@@ -633,7 +633,7 @@ function pickDefaultSpaghettiState(layers: LayerInput[]): string | null {
     return null;
   }
   return layers
-    .map((layer) => ({ id: layer.id, total: sum(layer.mean) }))
+    .map((layer) => ({ id: layer.id, total: sum(layer.height) }))
     .sort((a, b) => {
       if (b.total !== a.total) {
         return b.total - a.total;

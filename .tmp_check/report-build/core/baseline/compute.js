@@ -1,9 +1,10 @@
-import { validateTimeLengths } from "../validate.js";
-import { centeredBaselineFromLayers } from "./shared.js";
-import { computeSineStreamBaseline } from "./sineStream.js";
-import { computeWiggleBaseline } from "./wiggle.js";
+import { validateTimeLengths } from "../validate";
+import { centeredBaselineFromLayers } from "./shared";
+import { computeSineStreamBaseline } from "./sineStream";
+import { computeWiggleBaseline } from "./wiggle";
 /** Compute a baseline by the selected global baseline mode. */
-export function computeBaseline(times, layers, mode, hooks = {}) {
+// 根据选择的模式，计算基线（y_bottom）
+export function computeBaseline(times, layers, mode, params = {}) {
     validateTimeLengths(times, layers);
     if (mode === "zero") {
         return new Array(times.length).fill(0);
@@ -12,7 +13,7 @@ export function computeBaseline(times, layers, mode, hooks = {}) {
         return centeredBaselineFromLayers(times.length, layers);
     }
     if (mode === "l1" || mode === "l2") {
-        return computeWiggleBaseline(times.length, layers, mode, hooks);
+        return computeWiggleBaseline(times.length, layers, mode, params);
     }
-    return computeSineStreamBaseline(times.length, layers, hooks);
+    return computeSineStreamBaseline(times.length, layers, params);
 }

@@ -83,7 +83,9 @@ export type BraidOptimizationDiagnostics = BraidSpacingDiagnostics & Partial<Bra
 
 export interface LayerInput {
   id: string;
-  mean: number[];
+  /** Optional per-sample time keys aligned with this layer's series values. */
+  timeKeys?: number[];
+  height: number[];
   quantiles?: QuantileBands;
   unc?: number[];
   poportionMean?: number[];

@@ -1,6 +1,6 @@
-import { normalizeROI } from "./roi.js";
-import { clamp, clamp01, percentile } from "./math.js";
-import { boundaryUncertaintyAt } from "./validate.js";
+import { normalizeROI } from "./roi";
+import { clamp, clamp01, percentile } from "./math";
+import { boundaryUncertaintyAt } from "./validate";
 /** Add ROI-local spacing between layers and return braid geometry plus diagnostics. */
 export function computeBraidLayout(args) {
     const { base, orderedLayers, roi, baselineMode, gapMode, gapAlphaPx, maxExtraHeightPx, smoothKernel, yScale } = args;

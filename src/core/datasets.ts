@@ -290,6 +290,9 @@ function buildCovidLayer(
 
   return {
     id: `${abbreviation}|h1`,
+    // Representative per-time value for plotting: use q50 (median) for ensemble.
+    height: counts.q50.slice(),
+    // Keep `mean` for backward compatibility for now (will be removed after migration).
     mean: counts.q50.slice(),
     unc: wideSeries.slice(),
     poportionMean: poportion.q50.slice(),
@@ -337,8 +340,8 @@ function selectAllLayers(layers: LayerInput[]): { layers: LayerInput[] } {
   const sorted = layers
     .slice()
     .sort((a, b) => {
-      const sa = sum(a.mean);
-      const sb = sum(b.mean);
+      const sa = sum(a.height);
+      const sb = sum(b.height);
       if (sb !== sa) {
         return sb - sa;
       }

@@ -83,7 +83,7 @@ interface ContourBoxplotMasks {
 
 /** Compute contour-mask PID-Mean and the associated contour-boxplot masks. */
 export function computeContourPid(layers: LayerInput[], options: ContourPidOptions = {}): ContourPidResult {
-  const xBins = layers[0]?.mean.length ?? 0;
+  const xBins = layers[0]?.height.length ?? 0;
   const yBins = Math.max(16, Math.round(options.yBins ?? 180));
   const contourThreshold = clamp(options.contourThreshold ?? 0.5, 0, 1);
   const centralFraction = clamp(options.centralFraction ?? 0.5, 0, 1);
@@ -333,7 +333,7 @@ function layerCenterValue(layer: LayerInput, timeIndex: number, uncertaintySourc
   if (uncertaintySource === "poportion") {
     return finiteOr(layer.poportionMean?.[timeIndex], finiteOr(layer.poportionQuantiles?.p50?.[timeIndex], 0));
   }
-  return finiteOr(layer.mean[timeIndex], 0);
+  return finiteOr(layer.height[timeIndex], 0);
 }
 
 function quantilesForSource(layer: LayerInput, uncertaintySource: PidUncertaintySource) {

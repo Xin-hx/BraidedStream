@@ -1,5 +1,8 @@
-import { EPSILON } from "./utils.js";
-/** Assert that all per-time layer series match the dataset timeline length. */
+import { EPSILON } from "./math";
+/**
+ * Assert that all per-time layer series match the dataset timeline length.
+ * Series normalization is handled in data ingestion/preprocessing.
+ */
 export function validateTimeLengths(times, layers) {
     if (times.length === 0) {
         throw new Error("times must not be empty");

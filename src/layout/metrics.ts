@@ -390,7 +390,7 @@ function thicknessError(referenceLayers: LayerInput[], after: StackLayout, idx: 
   for (let k = 0; k < layers.length; k += 1) {
     for (const t of idx) {
       const thickness = after.yTop[k][t] - after.yBottom[k][t];
-      maxErr = Math.max(maxErr, Math.abs(thickness - layers[k].mean[t]));
+      maxErr = Math.max(maxErr, Math.abs(thickness - layers[k].height[t]));
     }
   }
   return maxErr;

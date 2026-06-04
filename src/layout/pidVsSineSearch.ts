@@ -2,7 +2,7 @@
 /**
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
-import { buildCenterOutOrder, normalizeOrderForComparison, optimizeLayerOrder } from "../core/ordering";
+import { buildCenterOutOrder, normalizeOrderForComparison, optimizeLayerOrder, orderLayers } from "../core/ordering";
 import { computePidOrdering } from "../core/ranking";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
@@ -11,7 +11,6 @@ import type {
   PreparedDataset,
   ROI
 } from "../core/types";
-import { orderLayers } from "../core/validate";
 import { computeMetrics } from "./metrics";
 import {
   compareSearchCandidates,

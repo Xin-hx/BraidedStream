@@ -6,7 +6,7 @@
  * layout modules.
  */
 import * as d3 from "d3";
-import { clamp } from "../core/utils.js";
+import { clamp } from "../core/utils";
 /** Read SVG dimensions and derive the inner plotting rectangle. */
 export function readChartSize(svg, fallbackWidth, fallbackHeight, margin) {
     const width = Number(svg.getAttribute("width") ?? String(fallbackWidth));

@@ -2,11 +2,11 @@
  * Main streamgraph renderer with inset-ROI brushing.
  */
 import * as d3 from "d3";
-import { roiBounds } from "../core/roi.js";
-import { createAreaPath } from "./paths.js";
-import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtent, plotAreaFromSize, readChartSize, roiXRange } from "./chartUtils.js";
-import { layerColor } from "../styles/palette.js";
-import { createRoiBrush } from "../ui/brush.js";
+import { roiBounds } from "../core/roi";
+import { createAreaPath } from "./paths";
+import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtent, plotAreaFromSize, readChartSize, roiXRange } from "./chartUtils";
+import { layerColor } from "../styles/palette";
+import { createRoiBrush } from "../ui/brush";
 export class MainChart {
     constructor(svg) {
         this.svg = svg;

@@ -53,7 +53,7 @@ export function computePidOrdering(layers: LayerInput[], options: PidOrderingOpt
   const widthPenaltyPower = Math.max(0, options.widthPenaltyPower ?? 1);
   const minComparators = Math.max(1, Math.floor(options.minComparators ?? 2));
   const uncertaintySource = options.uncertaintySource ?? "value";
-  const tLength = layers[0].mean.length;
+  const tLength = layers[0].height.length;
   const bands = layers.map((layer) => buildLayerBand(layer, tLength, uncertaintySource));
   const scores: PidOrderingScore[] = [];
   const depthByLayerId = new Map<string, number>();
@@ -118,7 +118,7 @@ export function computePidOrdering(layers: LayerInput[], options: PidOrderingOpt
     }
 
     const depth = validTimeCount > 0 ? depthSum / validTimeCount : 0;
-    const totalMean = sum(layers[i].mean);
+    const totalMean = sum(layers[i].height);
     const score: PidOrderingScore = { id: layers[i].id, depth, totalMean, validTimeCount };
     scores.push(score);
     depthByLayerId.set(layers[i].id, depth);
@@ -209,7 +209,7 @@ function layerCenterValue(layer: LayerInput, timeIndex: number, uncertaintySourc
   if (uncertaintySource === "poportion") {
     return finiteOr(layer.poportionMean?.[timeIndex], finiteOr(layer.poportionQuantiles?.p50?.[timeIndex], 0));
   }
-  return finiteOr(layer.mean[timeIndex], 0);
+  return finiteOr(layer.height[timeIndex], 0);
 }
 
 function quantilesForSource(layer: LayerInput, uncertaintySource: PidUncertaintySource) {

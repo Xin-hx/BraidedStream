@@ -3,9 +3,9 @@ import { clamp, normalize01, sumAbs } from "../math";
 import { diffSeries, maxAbsStep, meanAbsStep, meanCurvature, movingAverage, removeMean } from "../series";
 import { validateTimeLengths } from "../validate";
 import { computeSineStreamBaseline } from "./sineStream";
-import { sumLayerMeans } from "./shared";
+import { sumLayerHeights } from "./shared";
 import type {
-  BaselineHooks,
+  BaselineParameters,
   MultiscaleBaselineDiagnostics,
   MultiscaleBaselineResult,
   MultiscaleEnergyBandDiagnostic
@@ -16,13 +16,13 @@ export function computeMultiscaleDistributedBaseline(
   times: number[],
   layers: LayerInput[],
   strength = 0.45,
-  hooks: BaselineHooks = {},
+  hooks: BaselineParameters = {},
   energyThreshold = 0.08
 ): MultiscaleBaselineResult {
   validateTimeLengths(times, layers);
   const tLength = times.length;
   const kLength = layers.length;
-  const total = sumLayerMeans(tLength, layers);
+  const total = sumLayerHeights(tLength, layers);
   const clippedThreshold = clamp(energyThreshold, 0, 1);
   const clippedStrength = clamp(strength, 0, 1.5);
   const emptyDiagnostics = (): MultiscaleBaselineDiagnostics => ({
@@ -223,8 +223,8 @@ function aggregateMultiscaleLayerSlopeSignal(layers: LayerInput[], tLength: numb
     let acc = 0;
     let mass = 0;
     for (const layer of layers) {
-      const previous = Math.max(0, layer.mean[t - 1] ?? 0);
-      const current = Math.max(0, layer.mean[t] ?? 0);
+      const previous = Math.max(0, layer.height[t - 1] ?? 0);
+      const current = Math.max(0, layer.height[t] ?? 0);
       acc += Math.abs(current - previous);
       mass += 0.5 * (previous + current);
     }
@@ -665,11 +665,11 @@ function layerCenterSeries(layers: LayerInput[], baseline: number[]): number[][]
   for (const layer of layers) {
     const center = new Array<number>(tLength).fill(0);
     for (let t = 0; t < tLength; t += 1) {
-      center[t] = baseline[t] + prefix[t] + 0.5 * layer.mean[t];
+      center[t] = baseline[t] + prefix[t] + 0.5 * layer.height[t];
     }
     centers.push(center);
     for (let t = 0; t < tLength; t += 1) {
-      prefix[t] += layer.mean[t];
+      prefix[t] += layer.height[t];
     }
   }
   return centers;

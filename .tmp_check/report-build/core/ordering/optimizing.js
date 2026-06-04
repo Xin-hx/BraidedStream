@@ -1,7 +1,7 @@
-import { computeContourPid, computePidOrdering, computePidOrderingScores, computeTemporalSelfInclusion } from "../ranking/index.js";
-import { resolveOptimizingVariantConfig } from "../optimizing/config.js";
-import { buildCenterOutOrder, buildInsideOutOrder, normalizedInputOrder } from "./display.js";
-import { optimizeLayerOrder } from "./sineStream.js";
+import { computeContourPid, computePidOrdering, computePidOrderingScores, computeTemporalSelfInclusion } from "../ranking";
+import { resolveOptimizingVariantConfig } from "../optimizing/config";
+import { buildCenterOutOrder, buildInsideOutOrder, normalizedInputOrder } from "./display";
+import { optimizeLayerOrder } from "./sineStream";
 export function computeOptimizingOrder(dataset, config) {
     const resolved = resolveOptimizingVariantConfig(config);
     if (resolved.orderingScoringMode === "input") {
