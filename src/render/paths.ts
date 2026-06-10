@@ -5,8 +5,7 @@
  * uncertainty-jagged paths; helper functions keep geometry and noise separate.
  */
 import * as d3 from "d3";
-import { withFixedSeed } from "../core/seed";
-import { clamp, clamp01, nearlyEqual, percentile } from "../core/utils";
+import { clamp, clamp01, nearlyEqual, percentile, withFixedSeed } from "../core/utils";
 
 export interface AreaPathOptions {
   jagged?: boolean;

@@ -2,7 +2,7 @@
  * Inset renderer for before/after/diff/split layout comparisons.
  */
 import * as d3 from "d3";
-import { roiBounds } from "../core/roi";
+import { roiBounds } from "../interactions/roi";
 import type { BraidLayout, InsetViewMode, LayerInput, PreparedDataset, ROI, StackLayout } from "../core/types";
 import { clamp01, percentile, range } from "../core/utils";
 import { createAreaPath } from "./paths";

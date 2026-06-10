@@ -1,6 +1,6 @@
 import type { LayerInput } from "../types";
 import { clamp, normalize01, sumAbs } from "../utils";
-import { diffSeries, maxAbsStep, meanAbsStep, meanCurvature, movingAverage, removeMean } from "../series";
+import { diffSeries, maxAbsStep, meanAbsStep, meanCurvature, movingAverage, removeMean } from "../../data/series";
 import { validateTimeLengths } from "../validate";
 import { computeSineStreamBaseline } from "./sineStream";
 import { sumLayerHeights } from "./compute";

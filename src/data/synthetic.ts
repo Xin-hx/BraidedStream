@@ -1,7 +1,7 @@
 /**
  * Deterministic synthetic streamgraph dataset generator.
  */
-import type { LayerInput } from "./types";
+import type { LayerInput } from "../core/types";
 
 export interface SyntheticDataset {
   times: number[];

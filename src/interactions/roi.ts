@@ -1,8 +1,8 @@
 /**
  * ROI helpers for keeping user-selected time windows inside valid bounds.
  */
-import type { ROI } from "./types";
-import { clamp } from "./utils";
+import type { ROI } from "../core/types";
+import { clamp } from "../core/utils";
 
 /** Normalize ROI endpoints and clamp them to the available time range. */
 export function normalizeROI(roi: ROI | null, tLength: number): ROI | null {

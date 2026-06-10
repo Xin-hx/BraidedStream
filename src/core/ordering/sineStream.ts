@@ -5,11 +5,9 @@
  * groups below build the hierarchy, solve optimal leaf ordering, and evaluate
  * pairwise distances.
  */
-import { FIXED_SEED } from "../seed";
-import { roiBounds } from "../roi";
+import { roiBounds } from "../../interactions/roi";
 import type { LayerInput, ROI } from "../types";
-import { median } from "../utils";
-import { seededShuffleIndices } from "../random";
+import { FIXED_SEED, median, seededShuffleIndices } from "../utils";
 import { layerUncertaintyAt } from "../validate";
 
 export interface OrderOptimizationConfig {

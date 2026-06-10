@@ -1,6 +1,6 @@
 import { computeBaseline } from "../core/baseline";
-import { computeBraidLayout } from "../core/braid";
-import type { DatasetBundle } from "../core/datasets";
+import { computeBraidLayout } from "../core/NOT_IN_USE/braid";
+import type { DatasetBundle } from "../data/datasets";
 import { optimizeLayerOrder, orderLayers, type OrderOptimizationResult } from "../core/ordering";
 import {
   computeOptimizingBaseline,
@@ -11,7 +11,7 @@ import {
   resolveOptimizingVariantConfig,
   type OptimizingVariantConfig
 } from "../core/optimizing";
-import { clampRoiToParent, normalizeROI } from "../core/roi";
+import { clampRoiToParent, normalizeROI } from "../interactions/roi";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
   BaselineMode,

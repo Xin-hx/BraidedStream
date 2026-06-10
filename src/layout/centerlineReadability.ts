@@ -6,7 +6,7 @@
  * across the timeline.
  */
 import type { LayerInput, ROI } from "../core/types";
-import { roiBounds } from "../core/roi";
+import { roiBounds } from "../interactions/roi";
 
 export interface CenterlineReadabilityWeights {
   layerMeanSlope: number;

@@ -16,7 +16,7 @@ import type {
   SmoothKernel,
   UncertaintyBandMode
 } from "../core/types";
-import { FIXED_SEED } from "../core/seed";
+import { FIXED_SEED } from "../core/utils";
 
 export interface OptimizingCompareState {
   optimizingStage: OptimizingStage;

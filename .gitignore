@@ -1,5 +1,6 @@
-data/
+/data/
 dist/
 dist/*
 node_modules/
 node_modules/*
+.tmp_check/

@@ -6,8 +6,8 @@
  */
 import * as d3 from "d3";
 import { generateSyntheticDataset } from "./synthetic";
-import type { DatasetKind, LayerInput, PreparedDataset, QuantileBands, UncertaintyBandMode } from "./types";
-import { hasFinite, nearlyEqual, sum, toFiniteNumber } from "./utils";
+import type { DatasetKind, LayerInput, PreparedDataset, QuantileBands, UncertaintyBandMode } from "../core/types";
+import { hasFinite, nearlyEqual, sum, toFiniteNumber } from "../core/utils";
 
 export interface DatasetBundle {
   kind: DatasetKind;

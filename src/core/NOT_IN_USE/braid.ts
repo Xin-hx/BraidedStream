@@ -5,10 +5,10 @@
  * then reconstructs stack boundaries while preserving original layer thickness.
  * ⚠ currnt version has NO BRADING METHOD
  */
-import type { BaselineMode, BraidLayout, GapMode, LayerInput, ROI, RoiSupportWindow, SmoothKernel, StackLayout } from "./types";
-import { normalizeROI } from "./roi";
-import { clamp, clamp01, percentile } from "./utils";
-import { boundaryUncertaintyAt } from "./validate";
+import type { BaselineMode, BraidLayout, GapMode, LayerInput, ROI, RoiSupportWindow, SmoothKernel, StackLayout } from "../types";
+import { normalizeROI } from "../../interactions/roi";
+import { clamp, clamp01, percentile } from "../utils";
+import { boundaryUncertaintyAt } from "../validate";
 
 export interface BraidArgs {
   base: StackLayout;

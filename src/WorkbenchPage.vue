@@ -9,11 +9,11 @@ import {
   type SceneBuildResult
 } from "./app/sceneBuilder";
 import type { SineStreamParams } from "./core/baseline";
-import type { DatasetBundle } from "./core/datasets";
-import { applyCovidUncertaintyBand, createSyntheticBundle, loadCovidBundle } from "./core/datasets";
-import { clampRoiToParent, roiFromIsoDateRange } from "./core/roi";
-import { FIXED_SEED } from "./core/seed";
+import type { DatasetBundle } from "./data/datasets";
+import { applyCovidUncertaintyBand, createSyntheticBundle, loadCovidBundle } from "./data/datasets";
+import { clampRoiToParent, roiFromIsoDateRange } from "./interactions/roi";
 import type { BaselineMode, DatasetKind, LayerInput, ROI } from "./core/types";
+import { FIXED_SEED } from "./core/utils";
 import { exportConfigJson, exportSnapshotPng, exportSnapshotSvg } from "./interactions/export";
 import { computeMetrics, type MetricResult } from "./layout/metrics";
 import { createInitialState } from "./state/appState";

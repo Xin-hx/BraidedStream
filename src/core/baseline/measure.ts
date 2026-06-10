@@ -6,7 +6,7 @@
 import type { LayerInput, StackLayout } from "../types";
 import { median } from "../utils";
 import type { SineStreamParams } from "./types";
-import { computeLayerCenterFirstDifference, computeCenterLine, computeCenteredBaseline } from "./compute";
+import { computeLayerCenterFirstDifference, computeCenteredBaseline } from "./compute";
 
 
 // Silhouette的计算：仅看整体上界和下界； silhouette(0) = (g_0)^2 + （g_n)^2

@@ -3,6 +3,33 @@
  */
 
 export const EPSILON = 1e-12;
+export const FIXED_SEED = 40;  // 随机数
+
+
+
+/** Prefix a caller-provided seed with the project fixed seed. */
+export function withFixedSeed(seedLike: string, fixedSeed = FIXED_SEED): string {
+  return `${fixedSeed}:${seedLike}`;
+}
+
+/** Return deterministically shuffled indices [0, length) for a numeric seed. */
+export function seededShuffleIndices(length: number, seed: number): number[] {
+  const indices = range(0, length);
+  let state = seed >>> 0;
+  for (let i = indices.length - 1; i > 0; i -= 1) {
+    state = nextRandomState(state);
+    const j = state % (i + 1);
+    const tmp = indices[i];
+    indices[i] = indices[j];
+    indices[j] = tmp;
+  }
+  return indices;
+}
+
+function nextRandomState(state: number): number {
+  return (Math.imul(1664525, state) + 1013904223) >>> 0;
+}
+
 
 /** Clamp a value into the inclusive [low, high] interval. */
 export function clamp(value: number, low: number, high: number): number {
@@ -142,4 +169,3 @@ export function nearlyEqual(a: number, b: number, eps = 1e-6): boolean {
 export function hasFinite(values: number[]): boolean {
   return values.some((value) => Number.isFinite(value));
 }
-

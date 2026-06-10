@@ -20,9 +20,6 @@ export function computeCenteredBaseline(tLength: number, layers: LayerInput[]): 
   return totals.map((value) => -0.5 * value);
 }
 
-export function computeCenterLine(tLength: number, layers: LayerInput[]): number[] {
-  return computeCenteredBaseline(tLength, layers);
-}
 
 // 计算层高度的一阶差分。
 export function computeLayerHeightFirstDifference(tLength: number, layers: LayerInput[]): number[][] {

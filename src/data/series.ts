@@ -79,4 +79,3 @@ export function meanCurvature(values: number[]): number {
   }
   return acc / Math.max(1, values.length - 2);
 }
-

@@ -2,7 +2,7 @@
  * Main streamgraph renderer with inset-ROI brushing.
  */
 import * as d3 from "d3";
-import { roiBounds } from "../core/roi";
+import { roiBounds } from "../interactions/roi";
 import type { LayerInput, PreparedDataset, ROI, StackLayout } from "../core/types";
 import { createAreaPath } from "./paths";
 import {
