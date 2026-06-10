@@ -1,13 +1,13 @@
 import type { LayerInput } from "../types";
 import { median } from "../utils";
 import { computeCenteredBaseline, computeLayerCenterFirstDifference, computeLayerHeightFirstDifference } from "./compute";
-import type { SineStreamParams } from "./types";
+import type { BaselineParameters } from "./types";
 
 /**
  * SineStream baseline computation using Gaussian-weighted adjustments.
  * Following: StreamLayout_2norm_Gauss from the SineStream paper.
  */
-export function computeSineStreamBaseline(tLength: number, layers: LayerInput[], params: SineStreamParams): number[] {
+export function computeSineStreamBaseline(tLength: number, layers: LayerInput[], params: BaselineParameters): number[] {
   const centerType = params.centerType ?? "median";
   const baseline = new Array<number>(tLength).fill(0);
   const centeredBaseline = computeCenteredBaseline(tLength, layers);

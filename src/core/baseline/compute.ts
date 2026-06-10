@@ -1,8 +1,10 @@
 import type { BaselineMode, LayerInput } from "../types";
+import type { StackLayout } from "../types";
 import { validateTimeLengths } from "../validate";
 import { computeSineStreamBaseline } from "./sineStream";
 import type { BaselineParameters } from "./types";
-import { computeWiggleBaseline } from "./measure";
+import { median } from "../utils";
+import { computeMultiscaleDistributedBaseline } from "./multiscale";
 
 export function sumLayerHeights(tLength: number, layers: LayerInput[]): number[] {
   const totals = new Array<number>(tLength).fill(0);
@@ -80,4 +82,148 @@ export function computeBaseline(
     return computeWiggleBaseline(times.length, layers, mode, params);
   }
   return computeSineStreamBaseline(times.length, layers, params);
+}
+
+export interface OptimizingBaselineResult {
+  baseline: number[];
+  multiscaleDiagnostics: ReturnType<typeof computeMultiscaleDistributedBaseline>["diagnostics"] | null;
+}
+
+export function computeOptimizingBaseline(
+  times: number[],
+  orderedLayers: LayerInput[],
+  mode: BaselineMode | "multiscale",
+  hooks: BaselineParameters,
+  waveStrength: number,
+  energyThreshold = 0.08
+): OptimizingBaselineResult {
+  if (mode !== "multiscale") {
+    return {
+      baseline: computeBaseline(times, orderedLayers, mode, hooks),
+      multiscaleDiagnostics: null
+    };
+  }
+
+  const result = computeMultiscaleDistributedBaseline(
+    times,
+    orderedLayers,
+    Math.max(0, waveStrength),
+    hooks,
+    energyThreshold
+  );
+  return {
+    baseline: result.baseline,
+    multiscaleDiagnostics: result.diagnostics
+  };
+}
+
+/** Compute the silhouette energy from a stacked layout. */
+export function computeSilhouette(layout: StackLayout): number {
+  const layerCount = layout.yBottom.length;
+  if (layerCount === 0) {
+    return 0;
+  }
+
+  const tLength = layout.baseline.length;
+  const bottom = layout.yBottom[0];
+  const top = layout.yTop[layerCount - 1];
+  let silhouette = 0;
+  for (let t = 0; t < tLength; t += 1) {
+    const g0 = bottom[t] ?? 0;
+    const gn = top[t] ?? 0;
+    silhouette += g0 * g0 + gn * gn;
+  }
+  return silhouette;
+}
+
+/** Compute a baseline by the selected wiggle mode. */
+export function computeWiggleBaseline(
+  tLength: number,
+  layers: LayerInput[],
+  mode: "l1" | "l2",
+  params: BaselineParameters
+): number[] {
+  if (mode === "l1") {
+    return computeWiggleBaselineL1(tLength, layers, params);
+  }
+  return computeWiggleBaselineL2(tLength, layers, params);
+}
+
+export function computeWiggleBaselineL2(tLength: number, layers: LayerInput[], params: BaselineParameters): number[] {
+  const centers = computeCenteredBaseline(tLength, layers);
+  const offsets = computeLayerCenterFirstDifference(tLength, layers);
+  const deltas = new Array<number>(tLength).fill(0);
+  for (let t = 1; t < tLength; t += 1) {
+    const arr = offsets[t];
+    if (arr.length === 0) {
+      deltas[t] = 0;
+      continue;
+    }
+    let sum = 0;
+    for (const v of arr) {
+      sum += v;
+    }
+    deltas[t] = -(sum / arr.length);
+  }
+
+  const baseline = integrateBaselineFromDeltas(tLength, centers, deltas);
+  return blendWithCenteredBaseline(baseline, centers, Math.max(0, params.wiggleWeightL2 ?? 1), params);
+}
+
+export function computeWiggleBaselineL1(tLength: number, layers: LayerInput[], hooks: BaselineParameters): number[] {
+  const centers = computeCenteredBaseline(tLength, layers);
+  const offsets = computeLayerCenterFirstDifference(tLength, layers);
+  const deltas = new Array<number>(tLength).fill(0);
+
+  const iterations = Math.max(1, Math.round(hooks.irlsIterations ?? 12));
+  const eps = Math.max(1e-9, hooks.irlsEps ?? 1e-3);
+  for (let t = 1; t < tLength; t += 1) {
+    const arr = offsets[t];
+    deltas[t] = arr.length === 0 ? 0 : -median(arr);
+  }
+  for (let it = 0; it < iterations; it += 1) {
+    for (let t = 1; t < tLength; t += 1) {
+      const arr = offsets[t];
+      if (arr.length === 0) {
+        deltas[t] = 0;
+        continue;
+      }
+      let wSum = 0;
+      let wdSum = 0;
+      for (const d of arr) {
+        const w = 1 / Math.max(eps, Math.abs(deltas[t] + d));
+        wSum += w;
+        wdSum += w * d;
+      }
+      if (wSum > 0) {
+        deltas[t] = -(wdSum / wSum);
+      }
+    }
+  }
+
+  const baseline = integrateBaselineFromDeltas(tLength, centers, deltas);
+  return blendWithCenteredBaseline(baseline, centers, Math.max(0, hooks.wiggleWeightL1 ?? 1), hooks);
+}
+
+function integrateBaselineFromDeltas(tLength: number, centers: number[], deltas: number[]): number[] {
+  const baseline = new Array<number>(tLength).fill(0);
+  baseline[0] = centers[0];
+  for (let t = 1; t < tLength; t += 1) {
+    baseline[t] = baseline[t - 1] + deltas[t];
+  }
+  return baseline;
+}
+
+function blendWithCenteredBaseline(
+  baseline: number[],
+  centers: number[],
+  wiggleWeight: number,
+  hooks: BaselineParameters
+): number[] {
+  const anchor = Math.max(0, hooks.centerAnchorWeight ?? 0.35);
+  const denom = wiggleWeight + anchor;
+  if (denom <= 0) {
+    return baseline;
+  }
+  return baseline.map((v, i) => (wiggleWeight * v + anchor * centers[i]) / denom);
 }

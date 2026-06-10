@@ -1,4 +1,4 @@
-import { computeBaseline } from "../core/baseline";
+import { computeBaseline } from "../core/baseline/compute";
 import { computeBraidLayout } from "../core/NOT_IN_USE/braid";
 import type { DatasetBundle } from "../data/datasets";
 import { optimizeLayerOrder, orderLayers, type OrderOptimizationResult } from "../core/ordering";

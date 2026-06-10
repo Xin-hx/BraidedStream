@@ -1,4 +1,6 @@
-﻿import { computeBaseline, computeMultiscaleDistributedBaseline, type SineStreamParams } from "../core/baseline";
+﻿import { computeBaseline } from "../core/baseline/compute";
+import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale";
+import type { BaselineParameters } from "../core/baseline/types";
 /**
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
@@ -88,8 +90,8 @@ export interface PidVsSineSearchInput {
   searchSpace: PidVsSineSearchSpace;
   optimizationConfig: LayoutOptimizationConfig;
   shuffleSeed?: number;
-  controlBaselineHooks?: Omit<SineStreamParams, "centerType">;
-  experimentBaselineHooks?: Omit<SineStreamParams, "centerType">;
+  controlBaselineHooks?: Omit<BaselineParameters, "centerType">;
+  experimentBaselineHooks?: Omit<BaselineParameters, "centerType">;
   controlCenterType?: CenterType;
 }
 
@@ -104,7 +106,7 @@ export function runPidVsSineSearch(input: PidVsSineSearchInput): PidVsSineSearch
   const controlLayers = orderLayers(input.dataset.layers, controlOrder);
   const experimentLayers = orderLayers(input.dataset.layers, experimentOrder);
 
-  const controlHooks: SineStreamParams = {
+  const controlHooks: BaselineParameters = {
     ...(input.controlBaselineHooks ?? {}),
     centerType: input.controlCenterType ?? "median"
   };
@@ -116,7 +118,7 @@ export function runPidVsSineSearch(input: PidVsSineSearchInput): PidVsSineSearch
   const candidates: PidVsSineCandidateResult[] = [];
 
   for (const centerType of searchSpace.centerTypes) {
-    const experimentHooks: SineStreamParams = {
+    const experimentHooks: BaselineParameters = {
       ...(input.experimentBaselineHooks ?? {}),
       centerType
     };
