@@ -1,4 +1,5 @@
-/data/
+Data/*
+Data
 dist/
 dist/*
 node_modules/

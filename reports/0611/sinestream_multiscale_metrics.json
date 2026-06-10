@@ -1,0 +1,1061 @@
+{
+  "generatedAt": "2026-06-10T17:33:51.102Z",
+  "paperContext": {
+    "path": "E:\\Project\\2026Journal\\Bu 等 - 2021 - SineStream Improving the Readability of Streamgraphs by Minimizing Sine Illusion Effects.pdf",
+    "exists": true,
+    "pdftotextOk": true,
+    "mentionedDatasets": [
+      "COVID",
+      "Bank Interest",
+      "Call",
+      "Assistance",
+      "Agriculture",
+      "Population",
+      "Disease"
+    ],
+    "notes": []
+  },
+  "datasetDiscovery": {
+    "sourceDataRoot": "E:\\Project\\2026Journal\\Demo\\SineStream\\data",
+    "sourceExists": true,
+    "fallbackUsed": false,
+    "notes": [
+      "Using source data first; project fallback also exists at Data\\sine_demo.json."
+    ]
+  },
+  "assumptions": [
+    "Mean-only SineStream examples are not converted into artificial TPID uncertainty bands.",
+    "All baselines use the same fixed source layer order inside each case.",
+    "A deterministic grid is used only to select multi_scale strength and energy threshold."
+  ],
+  "cases": [
+    {
+      "name": "COVID countries demo",
+      "sourcePath": "E:\\Project\\2026Journal\\Demo\\SineStream\\data\\demo.json",
+      "timeCount": 44,
+      "layerCount": 10,
+      "orderPolicy": "fixed source layer order for all baselines",
+      "order": [
+        "Germany",
+        "Spain",
+        "Turkey",
+        "Italy",
+        "Netherlands",
+        "Iran",
+        "US",
+        "Belgium",
+        "United Kingdom",
+        "France"
+      ],
+      "scopes": [
+        {
+          "key": "global",
+          "label": "Global",
+          "roi": null,
+          "figure": "assets/covid-countries-demo-global.svg",
+          "comparisons": [
+            {
+              "controlKey": "sineStream",
+              "controlLabel": "SineStream",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 3513063480.8736787,
+                  "after": 3627153396.1949415,
+                  "delta": 114089915.32126284,
+                  "improvementPct": -3.2475904845559276,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.815298119699234,
+                  "after": 4.675144286472631,
+                  "delta": -0.14015383322660302,
+                  "improvementPct": 2.910595143699163,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 11655.40149739476,
+                  "after": 10765.455822905114,
+                  "delta": -889.9456744896452,
+                  "improvementPct": 7.635478491998477,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 7.327219432094151,
+                  "after": 7.29511685931187,
+                  "delta": -0.032102572782281236,
+                  "improvementPct": 0.4381276291749623,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.40701118030298045,
+                  "after": 0.4116707202166623,
+                  "delta": 0.004659539913681843,
+                  "improvementPct": -1.1448186534368088,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 1003.354358076328,
+                  "after": 1013.9651216923781,
+                  "delta": 10.610763616050122,
+                  "improvementPct": -1.0575290305604006,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 14552.901497394756,
+                  "after": 13662.955822905114,
+                  "delta": -889.9456744896415,
+                  "improvementPct": 6.115245641214287,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 1596.394880078768,
+                  "after": 1613.1611849673197,
+                  "delta": 16.76630488855176,
+                  "improvementPct": -1.0502605024468938,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 374319550.16557556,
+                  "after": 340557089.14414304,
+                  "delta": -33762461.02143252,
+                  "improvementPct": 9.019689462251735,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            },
+            {
+              "controlKey": "wiggleL1",
+              "controlLabel": "Wiggle L1",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 5560921805.4581175,
+                  "after": 3627153396.1949415,
+                  "delta": -1933768409.263176,
+                  "improvementPct": 34.77424205758759,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.800641879870485,
+                  "after": 5.250244164488913,
+                  "delta": 0.449602284618428,
+                  "improvementPct": -9.365461866748488,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 8666.85185185185,
+                  "after": 10765.455822905114,
+                  "delta": 2098.603971053264,
+                  "improvementPct": -24.214143808225526,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 7.265399472905156,
+                  "after": 7.29511685931187,
+                  "delta": 0.02971738640671351,
+                  "improvementPct": -0.4090261866197243,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.3982490342611645,
+                  "after": 0.4116707202166623,
+                  "delta": 0.013421685955497809,
+                  "improvementPct": -3.3701741374961154,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 1074.1664513350565,
+                  "after": 1013.9651216923781,
+                  "delta": -60.20132964267839,
+                  "improvementPct": 5.6044693602053535,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 11564.351851851854,
+                  "after": 13662.955822905114,
+                  "delta": 2098.6039710532605,
+                  "improvementPct": -18.147181942732065,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 1711.6518518518512,
+                  "after": 1613.1611849673197,
+                  "delta": -98.49066688453149,
+                  "improvementPct": 5.754129660069223,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 324570494.00665295,
+                  "after": 340557089.14414304,
+                  "delta": 15986595.137490094,
+                  "improvementPct": -4.925461627809706,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            },
+            {
+              "controlKey": "wiggleL2",
+              "controlLabel": "Wiggle L2",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 8006704152.513872,
+                  "after": 3627153396.1949415,
+                  "delta": -4379550756.318931,
+                  "improvementPct": 54.69854602962793,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.800000000000001,
+                  "after": 5.823580733996479,
+                  "delta": 1.0235807339964786,
+                  "improvementPct": -21.324598624926637,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 7259.444444444442,
+                  "after": 10765.455822905114,
+                  "delta": 3506.011378460673,
+                  "improvementPct": -48.295863482277596,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 8.177453391742228,
+                  "after": 7.29511685931187,
+                  "delta": -0.882336532430358,
+                  "improvementPct": 10.789869292576597,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.4359563970834365,
+                  "after": 0.4116707202166623,
+                  "delta": -0.024285676866774186,
+                  "improvementPct": 5.570666477025274,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 1180.4792850990532,
+                  "after": 1013.9651216923781,
+                  "delta": -166.51416340667504,
+                  "improvementPct": 14.105640438468429,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 9839.203703703697,
+                  "after": 13662.955822905114,
+                  "delta": 3823.7521192014174,
+                  "improvementPct": -38.86241442244022,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 1885.0634038800722,
+                  "after": 1613.1611849673197,
+                  "delta": -271.90221891275246,
+                  "improvementPct": 14.424035730208834,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 339509331.0162552,
+                  "after": 340557089.14414304,
+                  "delta": 1047758.127887845,
+                  "improvementPct": -0.3086095232645255,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            }
+          ]
+        },
+        {
+          "key": "peak-1",
+          "label": "Peak-change window 1",
+          "roi": {
+            "t0Index": 30,
+            "t1Index": 40,
+            "peakIndex": 35,
+            "peakDelta": 28516
+          },
+          "figure": "assets/covid-countries-demo-peak-1.svg",
+          "comparisons": [
+            {
+              "controlKey": "sineStream",
+              "controlLabel": "SineStream",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 4406771747.3041525,
+                  "after": 4807865986.164288,
+                  "delta": 401094238.8601351,
+                  "improvementPct": -9.101770226822048,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.800000000000001,
+                  "after": 4.643895451091567,
+                  "delta": -0.1561045489084334,
+                  "improvementPct": 3.252178102259028,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 11655.40149739476,
+                  "after": 10765.455822905114,
+                  "delta": -889.9456744896452,
+                  "improvementPct": 7.635478491998477,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 3.000410654724918,
+                  "after": 2.9379462829697247,
+                  "delta": -0.06246437175519315,
+                  "improvementPct": 2.0818607498552555,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.3000410654724918,
+                  "after": 0.2937946282969725,
+                  "delta": -0.006246437175519315,
+                  "improvementPct": 2.081860749855255,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 1284.7867660472568,
+                  "after": 1305.7762590518441,
+                  "delta": 20.989493004587302,
+                  "improvementPct": -1.6336946767565994,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 14552.901497394756,
+                  "after": 13662.955822905114,
+                  "delta": -889.9456744896415,
+                  "improvementPct": 6.115245641214287,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 2131.0204031900857,
+                  "after": 2159.0169056604504,
+                  "delta": 27.996502470364703,
+                  "improvementPct": -1.3137604139526127,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 140822091.04853535,
+                  "after": 127492574.15460579,
+                  "delta": -13329516.893929556,
+                  "improvementPct": 9.465501324884775,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            },
+            {
+              "controlKey": "wiggleL1",
+              "controlLabel": "Wiggle L1",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 11273325066.66756,
+                  "after": 4807865986.164288,
+                  "delta": -6465459080.503273,
+                  "improvementPct": 57.35183756583086,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.800000000000001,
+                  "after": 5.148063036270116,
+                  "delta": 0.3480630362701156,
+                  "improvementPct": -7.251313255627408,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 8666.85185185185,
+                  "after": 10765.455822905114,
+                  "delta": 2098.603971053264,
+                  "improvementPct": -24.214143808225526,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 2.9539185922480207,
+                  "after": 2.9379462829697247,
+                  "delta": -0.01597230927829596,
+                  "improvementPct": 0.5407159601558469,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.2953918592248021,
+                  "after": 0.2937946282969725,
+                  "delta": -0.001597230927829596,
+                  "improvementPct": 0.5407159601558468,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 1584.9342592592584,
+                  "after": 1305.7762590518441,
+                  "delta": -279.15800020741426,
+                  "improvementPct": 17.613222666906243,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 11564.351851851854,
+                  "after": 13662.955822905114,
+                  "delta": 2098.6039710532605,
+                  "improvementPct": -18.147181942732065,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 2644.8454732510295,
+                  "after": 2159.0169056604504,
+                  "delta": -485.82856759057904,
+                  "improvementPct": 18.368882889532344,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 133809374.26155694,
+                  "after": 127492574.15460579,
+                  "delta": -6316800.106951147,
+                  "improvementPct": 4.7207455694424745,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            },
+            {
+              "controlKey": "wiggleL2",
+              "controlLabel": "Wiggle L2",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 17943598993.665474,
+                  "after": 4807865986.164288,
+                  "delta": -13135733007.501186,
+                  "improvementPct": 73.20567636480519,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.800000000000001,
+                  "after": 5.726800904984622,
+                  "delta": 0.9268009049846215,
+                  "improvementPct": -19.30835218717961,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 7259.444444444442,
+                  "after": 10765.455822905114,
+                  "delta": 3506.011378460673,
+                  "improvementPct": -48.295863482277596,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 2.8877475701550073,
+                  "after": 2.9379462829697247,
+                  "delta": 0.05019871281471744,
+                  "improvementPct": -1.738334518346522,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.2887747570155007,
+                  "after": 0.2937946282969725,
+                  "delta": 0.005019871281471799,
+                  "improvementPct": -1.7383345183465415,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 1820.254629629632,
+                  "after": 1305.7762590518441,
+                  "delta": -514.4783705777879,
+                  "improvementPct": 28.264088012920972,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 9839.203703703697,
+                  "after": 13662.955822905114,
+                  "delta": 3823.7521192014174,
+                  "improvementPct": -38.86241442244022,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 3012.8397119341585,
+                  "after": 2159.0169056604504,
+                  "delta": -853.822806273708,
+                  "improvementPct": 28.339469998740086,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 157291443.03563124,
+                  "after": 127492574.15460579,
+                  "delta": -29798868.88102545,
+                  "improvementPct": 18.94500317749333,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            }
+          ]
+        },
+        {
+          "key": "peak-2",
+          "label": "Peak-change window 2",
+          "roi": {
+            "t0Index": 7,
+            "t1Index": 17,
+            "peakIndex": 12,
+            "peakDelta": 12211
+          },
+          "figure": "assets/covid-countries-demo-peak-2.svg",
+          "comparisons": [
+            {
+              "controlKey": "sineStream",
+              "controlLabel": "SineStream",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 54073848.564200535,
+                  "after": 139765369.1641223,
+                  "delta": 85691520.59992178,
+                  "improvementPct": -158.47128117426738,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.915538696950349,
+                  "after": 4.188408157654512,
+                  "delta": -0.7271305392958372,
+                  "improvementPct": 14.79248937144888,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 3986.2456937135876,
+                  "after": 2727.664072640665,
+                  "delta": -1258.5816210729226,
+                  "improvementPct": 31.573107073097333,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 3.663070674943003,
+                  "after": 3.2023505736566293,
+                  "delta": -0.46072010128637375,
+                  "improvementPct": 12.577428670374822,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.3663070674943003,
+                  "after": 0.32023505736566293,
+                  "delta": -0.046072010128637375,
+                  "improvementPct": 12.577428670374822,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 692.0022285499476,
+                  "after": 720.4015214009326,
+                  "delta": 28.39929285098492,
+                  "improvementPct": -4.103930837115087,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 9378.245693713587,
+                  "after": 8119.664072640665,
+                  "delta": -1258.5816210729217,
+                  "improvementPct": 13.42022444471222,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 1370.3017753981005,
+                  "after": 1441.7351998582071,
+                  "delta": 71.43342446010661,
+                  "improvementPct": -5.21297029184347,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 78250244.21860394,
+                  "after": 60222379.809994996,
+                  "delta": -18027864.408608943,
+                  "improvementPct": 23.038732452061577,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            },
+            {
+              "controlKey": "wiggleL1",
+              "controlLabel": "Wiggle L1",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 152560706.1517577,
+                  "after": 139765369.1641223,
+                  "delta": -12795336.987635374,
+                  "improvementPct": 8.387046252202966,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.900501918905621,
+                  "after": 4.709800570086652,
+                  "delta": -0.19070134881896905,
+                  "improvementPct": 3.891465649329986,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 2784.629629629628,
+                  "after": 2727.664072640665,
+                  "delta": -56.96555698896327,
+                  "improvementPct": 2.0457139571749807,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 3.5049648035056653,
+                  "after": 3.2023505736566293,
+                  "delta": -0.30261422984903597,
+                  "improvementPct": 8.63387357117998,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.3504964803505665,
+                  "after": 0.32023505736566293,
+                  "delta": -0.030261422984903585,
+                  "improvementPct": 8.633873571179977,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 731.751111111111,
+                  "after": 720.4015214009326,
+                  "delta": -11.349589710178407,
+                  "improvementPct": 1.5510177624390453,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 8176.629629629629,
+                  "after": 8119.664072640665,
+                  "delta": -56.965556988963726,
+                  "improvementPct": 0.6966875053571927,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 1478.394444444446,
+                  "after": 1441.7351998582071,
+                  "delta": -36.659244586238856,
+                  "improvementPct": 2.4796660136270154,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 61374067.11409463,
+                  "after": 60222379.809994996,
+                  "delta": -1151687.3040996343,
+                  "improvementPct": 1.8765047816672196,
+                  "direction": "down"
+                }
+              },
+              "pass": true
+            },
+            {
+              "controlKey": "wiggleL2",
+              "controlLabel": "Wiggle L2",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 490372825.55842173,
+                  "after": 139765369.1641223,
+                  "delta": -350607456.3942994,
+                  "improvementPct": 71.49814143861627,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.8093352599959855,
+                  "after": 7.185528174978437,
+                  "delta": 2.376192914982451,
+                  "improvementPct": -49.407928258768024,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 1211.5185185185173,
+                  "after": 2727.664072640665,
+                  "delta": 1516.1455541221476,
+                  "improvementPct": -125.14423270856294,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 2.629966714370707,
+                  "after": 3.2023505736566293,
+                  "delta": 0.5723838592859223,
+                  "improvementPct": -21.763920286834544,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.2629966714370707,
+                  "after": 0.32023505736566293,
+                  "delta": 0.05723838592859226,
+                  "improvementPct": -21.763920286834562,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 810.786666666667,
+                  "after": 720.4015214009326,
+                  "delta": -90.38514526573442,
+                  "improvementPct": 11.14783320714052,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 6603.518518518517,
+                  "after": 8119.664072640665,
+                  "delta": 1516.1455541221476,
+                  "improvementPct": -22.95966233562242,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 1642.8973251028794,
+                  "after": 1441.7351998582071,
+                  "delta": -201.16212524467232,
+                  "improvementPct": 12.244351620213113,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 56472237.16704385,
+                  "after": 60222379.809994996,
+                  "delta": 3750142.642951146,
+                  "improvementPct": -6.640683690037447,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            }
+          ]
+        },
+        {
+          "key": "peak-3",
+          "label": "Peak-change window 3",
+          "roi": {
+            "t0Index": 19,
+            "t1Index": 29,
+            "peakIndex": 24,
+            "peakDelta": 8757
+          },
+          "figure": "assets/covid-countries-demo-peak-3.svg",
+          "comparisons": [
+            {
+              "controlKey": "sineStream",
+              "controlLabel": "SineStream",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 6454601496.567789,
+                  "after": 6455685030.226178,
+                  "delta": 1083533.6583890915,
+                  "improvementPct": -0.016786995432099976,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.800000000000001,
+                  "after": 4.788288861252432,
+                  "delta": -0.011711138747569017,
+                  "improvementPct": 0.24398205724102112,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 1575.4846632649096,
+                  "after": 1554.9727565405337,
+                  "delta": -20.511906724375876,
+                  "improvementPct": 1.3019426467705897,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 2.394671807403673,
+                  "after": 2.41088972878719,
+                  "delta": 0.016217921383517186,
+                  "improvementPct": -0.6772502742703944,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.23946718074036732,
+                  "after": 0.24108897287871903,
+                  "delta": 0.001621792138351702,
+                  "improvementPct": -0.6772502742703874,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 1124.2857725028657,
+                  "after": 1126.559839542499,
+                  "delta": 2.274067039633337,
+                  "improvementPct": -0.20226770588503026,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 6075.478789194225,
+                  "after": 6044.311471966084,
+                  "delta": -31.167317228140746,
+                  "improvementPct": 0.5130018276678797,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 1727.889644691052,
+                  "after": 1733.745001932819,
+                  "delta": 5.855357241767024,
+                  "improvementPct": -0.3388733337084132,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 44016921.79582051,
+                  "after": 43985565.626347534,
+                  "delta": -31356.16947297752,
+                  "improvementPct": 0.07123662490173233,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            },
+            {
+              "controlKey": "wiggleL1",
+              "controlLabel": "Wiggle L1",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 7085624667.884609,
+                  "after": 6455685030.226178,
+                  "delta": -629939637.658431,
+                  "improvementPct": 8.890389587154036,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.800000000000001,
+                  "after": 3.7770561123682946,
+                  "delta": -1.022943887631706,
+                  "improvementPct": 21.311330992327207,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 2139.814814814814,
+                  "after": 1554.9727565405337,
+                  "delta": -584.8420582742801,
+                  "improvementPct": 27.33143327287853,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 3.5479611888970757,
+                  "after": 2.41088972878719,
+                  "delta": -1.1370714601098855,
+                  "improvementPct": 32.0485878951612,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.3547961188897075,
+                  "after": 0.24108897287871903,
+                  "delta": -0.1137071460109885,
+                  "improvementPct": 32.048587895161184,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 1097.921111111111,
+                  "after": 1126.559839542499,
+                  "delta": 28.638728431388017,
+                  "improvementPct": -2.6084504744066024,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 7263.814814814814,
+                  "after": 6044.311471966084,
+                  "delta": -1219.5033428487295,
+                  "improvementPct": 16.788744949300032,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 1729.5405349794232,
+                  "after": 1733.745001932819,
+                  "delta": 4.204466953395695,
+                  "improvementPct": -0.2430973352957996,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 45757462.3116941,
+                  "after": 43985565.626347534,
+                  "delta": -1771896.6853465661,
+                  "improvementPct": 3.8723665951503774,
+                  "direction": "down"
+                }
+              },
+              "pass": true
+            },
+            {
+              "controlKey": "wiggleL2",
+              "controlLabel": "Wiggle L2",
+              "metrics": {
+                "paperIllusion": {
+                  "before": 6945669456.641414,
+                  "after": 6455685030.226178,
+                  "delta": -489984426.4152355,
+                  "improvementPct": 7.0545313086662205,
+                  "direction": "down"
+                },
+                "readabilityScore": {
+                  "before": 4.800000000000001,
+                  "after": 5.613074656494574,
+                  "delta": 0.8130746564945737,
+                  "improvementPct": -16.939055343636948,
+                  "direction": "down"
+                },
+                "maxAbsSlope": {
+                  "before": 988.1111111111077,
+                  "after": 1554.9727565405337,
+                  "delta": 566.8616454294261,
+                  "improvementPct": -57.368208803158126,
+                  "direction": "down"
+                },
+                "derivativeConcentration": {
+                  "before": 2.577930234805285,
+                  "after": 2.41088972878719,
+                  "delta": -0.16704050601809461,
+                  "improvementPct": 6.479636406091938,
+                  "direction": "down"
+                },
+                "burstMassShare": {
+                  "before": 0.25779302348052846,
+                  "after": 0.24108897287871903,
+                  "delta": -0.016704050601809434,
+                  "improvementPct": 6.479636406091928,
+                  "direction": "down"
+                },
+                "layerMeanSlope": {
+                  "before": 1142.72037037037,
+                  "after": 1126.559839542499,
+                  "delta": -16.160530827870843,
+                  "improvementPct": 1.4142156950114588,
+                  "direction": "down"
+                },
+                "layerMaxSlope": {
+                  "before": 5779.814814814814,
+                  "after": 6044.311471966084,
+                  "delta": 264.4966571512705,
+                  "improvementPct": -4.576213349834548,
+                  "direction": "down"
+                },
+                "layerCurvature": {
+                  "before": 1753.1923868312756,
+                  "after": 1733.745001932819,
+                  "delta": -19.447384898456676,
+                  "improvementPct": 1.109255609625703,
+                  "direction": "down"
+                },
+                "wiggleEnergy": {
+                  "before": 43498298.71334018,
+                  "after": 43985565.626347534,
+                  "delta": 487266.9130073562,
+                  "improvementPct": -1.1201976339776245,
+                  "direction": "down"
+                }
+              },
+              "pass": false
+            }
+          ]
+        }
+      ],
+      "selectedParams": {
+        "centerType": "median",
+        "baselineUncertaintyWeight": 0.2,
+        "energyThreshold": 0.2
+      },
+      "diagnostics": {
+        "method": "haar-dyadic",
+        "verifiedMultiscale": true,
+        "fallbackUsed": false,
+        "fallbackReason": null,
+        "effectiveScaleCount": 2,
+        "selectedScaleCount": 2,
+        "energyThreshold": 0.2,
+        "objectiveBefore": 8.2,
+        "objectiveAfter": 8.150737029168539,
+        "scaleCoefficients": [
+          {
+            "scale": 4,
+            "coefficient": 0.75
+          },
+          {
+            "scale": 2,
+            "coefficient": 1
+          }
+        ],
+        "scaleBands": [
+          {
+            "scale": 2,
+            "energy": 0.28721693698663153,
+            "ratio": 0.24162359170429804,
+            "meanSaliency": 0.19456759207023924,
+            "maxSaliency": 0.8634883755254132
+          },
+          {
+            "scale": 4,
+            "energy": 0.29208134577940426,
+            "ratio": 0.24571581529096773,
+            "meanSaliency": 0.20942184219333324,
+            "maxSaliency": 0.9202290763356981
+          },
+          {
+            "scale": 8,
+            "energy": 0.01292649948368713,
+            "ratio": 0.010874523160720198,
+            "meanSaliency": 0.3367178993219358,
+            "maxSaliency": 0.9202290763356981
+          },
+          {
+            "scale": 16,
+            "energy": 0.23239653664983273,
+            "ratio": 0.1955054826296185,
+            "meanSaliency": 0.31929713019984063,
+            "maxSaliency": 0.9202290763356981
+          },
+          {
+            "scale": 32,
+            "energy": 0.19961298057906346,
+            "ratio": 0.16792604859705235,
+            "meanSaliency": 0.4561873796493232,
+            "maxSaliency": 0.9202290763356981
+          },
+          {
+            "scale": 64,
+            "energy": 0.16446145229271947,
+            "ratio": 0.1383545386173432,
+            "meanSaliency": 0.0925510160129594,
+            "maxSaliency": 0.42022907633569806
+          }
+        ]
+      },
+      "searchSummary": {
+        "totalCandidates": 198,
+        "passCount": 0,
+        "failCount": 198,
+        "selectedPass": false,
+        "selectedFailures": [
+          "Global vs SineStream: Paper Eq.(5) illusion did not improve (-3.25%)",
+          "Global vs SineStream: Top derivative mass share did not improve (-1.14%)",
+          "Global vs Wiggle L1: Readability score did not improve (-9.37%)",
+          "Global vs Wiggle L1: Centerline max derivative did not improve (-24.21%)",
+          "Global vs Wiggle L1: Derivative concentration did not improve (-0.41%)",
+          "Global vs Wiggle L1: Top derivative mass share did not improve (-3.37%)",
+          "Global vs Wiggle L1: Layer max slope regressed -18.15%",
+          "Global vs Wiggle L1: Wiggle energy regressed -4.93%",
+          "Global vs Wiggle L2: Readability score did not improve (-21.32%)",
+          "Global vs Wiggle L2: Centerline max derivative did not improve (-48.30%)",
+          "Global vs Wiggle L2: Layer max slope regressed -38.86%",
+          "Peak-change window 1 vs SineStream: Paper Eq.(5) illusion did not improve (-9.10%)",
+          "Peak-change window 1 vs Wiggle L1: Readability score did not improve (-7.25%)",
+          "Peak-change window 1 vs Wiggle L1: Centerline max derivative did not improve (-24.21%)",
+          "Peak-change window 1 vs Wiggle L1: Layer max slope regressed -18.15%",
+          "Peak-change window 1 vs Wiggle L2: Readability score did not improve (-19.31%)",
+          "Peak-change window 1 vs Wiggle L2: Centerline max derivative did not improve (-48.30%)",
+          "Peak-change window 1 vs Wiggle L2: Derivative concentration did not improve (-1.74%)",
+          "Peak-change window 1 vs Wiggle L2: Top derivative mass share did not improve (-1.74%)",
+          "Peak-change window 1 vs Wiggle L2: Layer max slope regressed -38.86%",
+          "Peak-change window 2 vs SineStream: Paper Eq.(5) illusion did not improve (-158.47%)",
+          "Peak-change window 2 vs SineStream: Layer mean slope regressed -4.10%",
+          "Peak-change window 2 vs SineStream: Layer curvature regressed -5.21%",
+          "Peak-change window 2 vs Wiggle L2: Readability score did not improve (-49.41%)",
+          "Peak-change window 2 vs Wiggle L2: Centerline max derivative did not improve (-125.14%)",
+          "Peak-change window 2 vs Wiggle L2: Derivative concentration did not improve (-21.76%)",
+          "Peak-change window 2 vs Wiggle L2: Top derivative mass share did not improve (-21.76%)",
+          "Peak-change window 2 vs Wiggle L2: Layer max slope regressed -22.96%",
+          "Peak-change window 2 vs Wiggle L2: Wiggle energy regressed -6.64%",
+          "Peak-change window 3 vs SineStream: Paper Eq.(5) illusion did not improve (-0.02%)",
+          "Peak-change window 3 vs SineStream: Derivative concentration did not improve (-0.68%)",
+          "Peak-change window 3 vs SineStream: Top derivative mass share did not improve (-0.68%)",
+          "Peak-change window 3 vs Wiggle L2: Readability score did not improve (-16.94%)",
+          "Peak-change window 3 vs Wiggle L2: Centerline max derivative did not improve (-57.37%)",
+          "Peak-change window 3 vs Wiggle L2: Layer max slope regressed -4.58%"
+        ],
+        "selectedScore": {
+          "minCoreImprovementPct": -158.47128117426738,
+          "avgCoreImprovementPct": -1.565685798133631,
+          "minGuardrailImprovementPct": -38.86241442244022,
+          "verified": true,
+          "fallbackUsed": false
+        }
+      }
+    }
+  ]
+}
