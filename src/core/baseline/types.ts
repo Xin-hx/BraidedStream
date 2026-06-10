@@ -15,7 +15,7 @@ export interface BaselineParameters {
   irlsEps?: number;
 }
 
-export type SineStreamHooks = BaselineParameters;
+export type SineStreamParams = BaselineParameters;
 
 export interface MultiscaleEnergyBandDiagnostic {
   scale: number;

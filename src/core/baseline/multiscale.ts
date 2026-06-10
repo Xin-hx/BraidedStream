@@ -1,9 +1,9 @@
 import type { LayerInput } from "../types";
-import { clamp, normalize01, sumAbs } from "../math";
+import { clamp, normalize01, sumAbs } from "../utils";
 import { diffSeries, maxAbsStep, meanAbsStep, meanCurvature, movingAverage, removeMean } from "../series";
 import { validateTimeLengths } from "../validate";
 import { computeSineStreamBaseline } from "./sineStream";
-import { sumLayerHeights } from "./shared";
+import { sumLayerHeights } from "./compute";
 import type {
   BaselineParameters,
   MultiscaleBaselineDiagnostics,
@@ -635,7 +635,7 @@ function highAlignedWindowRatio(values: number[], reference: number[]): number {
 }
 
 function baselineOptimizationMetrics(layers: LayerInput[], baseline: number[]): BaselineOptimizationMetrics {
-  const total = sumLayerMeans(baseline.length, layers);
+  const total = sumLayerHeights(baseline.length, layers);
   const centerline = streamCenterlineFromBaseline(baseline, total);
   const centers = layerCenterSeries(layers, baseline);
   const centerlineWindows = derivativeWindowMetrics(centerline, 0.05);

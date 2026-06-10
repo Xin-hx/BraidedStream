@@ -1,5 +1,5 @@
 import type { LayerInput, PidUncertaintySource } from "../types";
-import { clamp, finiteOr, median, sortPair, sum } from "../math";
+import { clamp, finiteOr, median, sortPair, sum } from "../utils";
 
 export interface PidOrderingScore {
   id: string;

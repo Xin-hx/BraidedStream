@@ -1,7 +1,7 @@
 import type { LayerInput, OptimizingBaselineMode } from "../types";
 import { computeBaseline } from "./compute";
 import { computeMultiscaleDistributedBaseline } from "./multiscale";
-import type { SineStreamHooks } from "./types";
+import type { SineStreamParams } from "./types";
 
 export interface OptimizingBaselineResult {
   baseline: number[];
@@ -12,7 +12,7 @@ export function computeOptimizingBaseline(
   times: number[],
   orderedLayers: LayerInput[],
   mode: OptimizingBaselineMode,
-  hooks: SineStreamHooks,
+  hooks: SineStreamParams,
   waveStrength: number,
   energyThreshold = 0.08
 ): OptimizingBaselineResult {

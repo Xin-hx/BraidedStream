@@ -62,9 +62,9 @@ export function tooltipText(info: HoverInfo, extra: string[]): string {
     : `t=${info.timeLabel} total=${info.total.toFixed(2)}`;
   const top = info.layerValues
     .slice()
-    .sort((a, b) => b.mean - a.mean)
+    .sort((a, b) => b.value - a.value)
     .slice(0, info.focusLayerId ? 1 : 4)
-    .map((item) => `${item.label}: ${item.mean.toFixed(2)} (u ${item.unc.toFixed(2)})`);
+    .map((item) => `${item.label}: ${item.value.toFixed(2)} (u ${item.unc.toFixed(2)})`);
   if (top.length === 0 && info.focusLayerId) {
     top.push("no substream at cursor");
   }
@@ -75,12 +75,12 @@ function topLayerValuesAt(
   entries: HoverLayerEntry[],
   timeIndex: number,
   limit: number
-): Array<{ id: string; label: string; mean: number; unc: number }> {
-  const top: Array<{ id: string; label: string; mean: number; unc: number }> = [];
+): HoverInfo["layerValues"] {
+  const top: HoverInfo["layerValues"] = [];
   for (const entry of entries) {
     const item = layerValue(entry, timeIndex);
     let insertAt = top.length;
-    while (insertAt > 0 && item.mean > top[insertAt - 1].mean) {
+    while (insertAt > 0 && item.value > top[insertAt - 1].value) {
       insertAt -= 1;
     }
     if (insertAt < limit) {
@@ -96,7 +96,7 @@ function topLayerValuesAt(
 function layerValueAt(
   entry: HoverLayerEntry | undefined,
   timeIndex: number
-): Array<{ id: string; label: string; mean: number; unc: number }> {
+): HoverInfo["layerValues"] {
   return entry ? [layerValue(entry, timeIndex)] : [];
 }
 

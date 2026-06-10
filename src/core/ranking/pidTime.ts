@@ -1,5 +1,5 @@
 import type { PidTimeOrderMode } from "../types";
-import { clamp, sum } from "../math";
+import { clamp, sum } from "../utils";
 
 export interface PidOrderingCompositeScore {
   layerId: string;

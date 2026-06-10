@@ -1,5 +1,5 @@
 import type { LayerInput, PidUncertaintySource } from "../types";
-import { EPSILON, clamp, finiteOr, firstFinite } from "../math";
+import { EPSILON, clamp, finiteOr, firstFinite } from "../utils";
 
 type QuantileMaskKey = "p025" | "p10" | "p25" | "p50" | "p75" | "p90" | "p975";
 

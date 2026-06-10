@@ -2,7 +2,7 @@
  * Validation and small data-access helpers shared by layout algorithms.
  */
 import type { LayerInput } from "./types";
-import { EPSILON } from "./math";
+import { EPSILON } from "./utils";
 
 /**
  * Assert that all per-time layer series match the dataset timeline length. 时间序列校验，每一层长度一致，每个时间点都有值

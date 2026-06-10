@@ -292,8 +292,6 @@ function buildCovidLayer(
     id: `${abbreviation}|h1`,
     // Representative per-time value for plotting: use q50 (median) for ensemble.
     height: counts.q50.slice(),
-    // Keep `mean` for backward compatibility for now (will be removed after migration).
-    mean: counts.q50.slice(),
     unc: wideSeries.slice(),
     poportionMean: poportion.q50.slice(),
     poportionUnc: poportionUncSeries.slice(),

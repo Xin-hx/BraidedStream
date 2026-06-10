@@ -8,7 +8,7 @@ import {
   type OptimizingVariantConfig,
   type SceneBuildResult
 } from "./app/sceneBuilder";
-import type { SineStreamHooks } from "./core/baseline";
+import type { SineStreamParams } from "./core/baseline";
 import type { DatasetBundle } from "./core/datasets";
 import { applyCovidUncertaintyBand, createSyntheticBundle, loadCovidBundle } from "./core/datasets";
 import { clampRoiToParent, roiFromIsoDateRange } from "./core/roi";
@@ -308,7 +308,7 @@ function sineOrderConfigFromCompare(): OptimizingVariantConfig["sineOrder"] {
   };
 }
 
-function baselineHooksFromState(): SineStreamHooks {
+function baselineHooksFromState(): SineStreamParams {
   return {
     centerType: state.optimization.baselineCenterType ?? "median",
     wiggleWeightL1: state.optimization.wiggleWeightL1,
@@ -319,7 +319,7 @@ function baselineHooksFromState(): SineStreamHooks {
   };
 }
 
-function baselineHooksFromCompare(): SineStreamHooks {
+function baselineHooksFromCompare(): SineStreamParams {
   return {
     centerType: state.compare.baselineCenterType,
     wiggleWeightL1: state.compare.wiggleWeightL1,

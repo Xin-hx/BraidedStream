@@ -7,7 +7,7 @@
  */
 import type { BaselineMode, BraidLayout, GapMode, LayerInput, ROI, RoiSupportWindow, SmoothKernel, StackLayout } from "./types";
 import { normalizeROI } from "./roi";
-import { clamp, clamp01, percentile } from "./math";
+import { clamp, clamp01, percentile } from "./utils";
 import { boundaryUncertaintyAt } from "./validate";
 
 export interface BraidArgs {

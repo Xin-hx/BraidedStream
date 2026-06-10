@@ -2,10 +2,69 @@ import type { BaselineMode, LayerInput } from "../types";
 import { validateTimeLengths } from "../validate";
 import { computeSineStreamBaseline } from "./sineStream";
 import type { BaselineParameters } from "./types";
-import { computeWiggleBaseline } from "./wiggle";
+import { computeWiggleBaseline } from "./measure";
+
+export function sumLayerHeights(tLength: number, layers: LayerInput[]): number[] {
+  const totals = new Array<number>(tLength).fill(0);
+  for (const layer of layers) {
+    for (let t = 0; t < tLength; t += 1) {
+      totals[t] += layer.height[t];
+    }
+  }
+  return totals;
+}
+
+// 计算中心对齐的基线，对应 silhouette 外轮廓上下边界平方和的最小值。
+export function computeCenteredBaseline(tLength: number, layers: LayerInput[]): number[] {
+  const totals = sumLayerHeights(tLength, layers);
+  return totals.map((value) => -0.5 * value);
+}
+
+export function computeCenterLine(tLength: number, layers: LayerInput[]): number[] {
+  return computeCenteredBaseline(tLength, layers);
+}
+
+// 计算层高度的一阶差分。
+export function computeLayerHeightFirstDifference(tLength: number, layers: LayerInput[]): number[][] {
+  const offsets: number[][] = Array.from({ length: tLength }, () => []);
+  if (tLength <= 1 || layers.length === 0) {
+    return offsets;
+  }
+
+  for (const layer of layers) {
+    for (let t = 1; t < tLength; t += 1) {
+      offsets[t].push(layer.height[t] - layer.height[t - 1]);
+    }
+  }
+  return offsets;
+}
+
+// 计算层中心线的一阶差分。
+export function computeLayerCenterFirstDifference(tLength: number, layers: LayerInput[]): number[][] {
+  // 创建结果容器，长度为 tLength，每个元素存储对应时间点的中心线差分值。
+  const offsets: number[][] = Array.from({ length: tLength }, () => []);
+  // 如果时间长度小于等于 1 或者没有层，直接返回空 offsets。
+  if (tLength <= 1 || layers.length === 0) {
+    return offsets;
+  }
+
+  // prefix 用于累计每个时间点之前层的高度总和，初始值为 0。
+  const prefix = new Array<number>(tLength).fill(0);
+  for (const layer of layers) {
+    for (let t = 1; t < tLength; t += 1) {
+      const centerNow = prefix[t] + 0.5 * layer.height[t];  // 当前时间点的层中心位置。
+      const centerPrev = prefix[t - 1] + 0.5 * layer.height[t - 1];  // 前一个时间点的层中心位置。
+      offsets[t].push(centerNow - centerPrev);  // offset = 一阶差分。
+    }
+    // 当前 layer 处理完成后，把它加入 prefix。
+    for (let t = 0; t < tLength; t += 1) {
+      prefix[t] += layer.height[t];
+    }
+  }
+  return offsets;
+}
 
 /** Compute a baseline by the selected global baseline mode. */
-// 根据选择的模式，计算基线（y_bottom）
 export function computeBaseline(
   times: number[],
   layers: LayerInput[],
@@ -18,48 +77,10 @@ export function computeBaseline(
     return new Array(times.length).fill(0);
   }
   if (mode === "center") {
-    return computeCenterLine(times.length, layers);
+    return computeCenteredBaseline(times.length, layers);
   }
   if (mode === "l1" || mode === "l2") {
     return computeWiggleBaseline(times.length, layers, mode, params);
   }
   return computeSineStreamBaseline(times.length, layers, params);
-}
-
-
-// 计算t个时间点上各层的总高度，return 长度为t的数组，每个元素是对应时间点上各层高度之和
-export function sumLayerHeights(tLength: number, layers: LayerInput[]): number[] {
-  const totals = new Array<number>(tLength).fill(0);
-  for (const layer of layers) {
-    for (let t = 0; t < tLength; t += 1) {
-      totals[t] += layer.height[t];
-    }
-  }
-  return totals;
-}
-
-// 计算河流中心线（center line），return 长度为t的数组，每个元素是对应时间点上各层高度之和的负一半，即中心线位置
-export function computeCenterLine(tLength: number, layers: LayerInput[]): number[] {
-  const totals = sumLayerHeights(tLength, layers);
-  return totals.map((v) => -0.5 * v);
-}
-
-// 河流每一层的中心线的一阶差分，即每层中心线在相邻时间点上的变化量，return 长度为t的数组，每个元素是对应时间点上各层中心线的一阶差分数组
-export function computeLayerCenterFirstDifference(tLength: number, layers: LayerInput[]): number[][] {
-  const offsets: number[][] = Array.from({ length: tLength }, () => []);
-  if (tLength <= 1 || layers.length === 0) {
-    return offsets;
-  }
-  const prefix = new Array<number>(tLength).fill(0);
-  for (const layer of layers) {
-    for (let t = 1; t < tLength; t += 1) {
-      const centerNow = prefix[t] + 0.5 * layer.height[t];
-      const centerPrev = prefix[t - 1] + 0.5 * layer.height[t - 1];
-      offsets[t].push(centerNow - centerPrev);
-    }
-    for (let t = 0; t < tLength; t += 1) {
-      prefix[t] += layer.height[t];
-    }
-  }
-  return offsets;  // offsets[t][layerIndex]
 }

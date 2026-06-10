@@ -1,4 +1,4 @@
-﻿import { computeBaseline, computeMultiscaleDistributedBaseline, type SineStreamHooks } from "../core/baseline";
+﻿import { computeBaseline, computeMultiscaleDistributedBaseline, type SineStreamParams } from "../core/baseline";
 /**
  * Grid search for multiscale baseline parameters under a fixed layer order.
  */
@@ -85,7 +85,7 @@ export interface MultiscaleSearchInput {
   roi: ROI | null;
   orderedLayers: LayerInput[];
   searchSpace: MultiscaleSearchSpace;
-  baseHooks?: Omit<SineStreamHooks, "centerType">;
+  baseHooks?: Omit<SineStreamParams, "centerType">;
 }
 
 export function buildFixedOrder(
@@ -123,7 +123,7 @@ export function runMultiscaleSearch(input: MultiscaleSearchInput): MultiscaleSea
   const invariant = emptyInvariantSummary();
 
   for (const centerType of searchSpace.centerTypes) {
-    const hooks: SineStreamHooks = {
+    const hooks: SineStreamParams = {
       ...(input.baseHooks ?? {}),
       centerType
     };

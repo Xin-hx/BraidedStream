@@ -1,14 +1,44 @@
-import type { LayerInput } from "../types";
-import { median } from "../math";
-import type { SineStreamHooks } from "./types";
-import { computeLayerCenterFirstDifference, computeCenterLine } from "./shared";
+/**
+ * StreamGraph用于优化"measures of distortion"
+ * 这个文件包含若干distortion measurements，包括Silhouette、Wiggle
+ */
 
-// 计算Wiggle
+import type { LayerInput, StackLayout } from "../types";
+import { median } from "../utils";
+import type { SineStreamParams } from "./types";
+import { computeLayerCenterFirstDifference, computeCenterLine, computeCenteredBaseline } from "./compute";
+
+
+// Silhouette的计算：仅看整体上界和下界； silhouette(0) = (g_0)^2 + （g_n)^2
+// Silhouette energy only depends on the final outer envelope:
+// silhouette(t) = bottom_0(t)^2 + top_n(t)^2.
+export function computeSilhouette(layout: StackLayout): number {
+  const layerCount = layout.yBottom.length;
+  if (layerCount === 0) {
+    return 0;
+  }
+
+  const tLength = layout.baseline.length;
+  const bottom = layout.yBottom[0];
+  const top = layout.yTop[layerCount - 1];
+  let silhouette = 0;
+  for (let t = 0; t < tLength; t += 1) {
+    const g0 = bottom[t] ?? 0;
+    const gn = top[t] ?? 0;
+    silhouette += g0 * g0 + gn * gn;
+  }
+  return silhouette;
+}
+
+
+
+// 计算Wiggle的选择器
+// 参数：类型（L1 or L2），权重，IRLS迭代次数和epsilon
 export function computeWiggleBaseline(
   tLength: number,
   layers: LayerInput[],
   mode: "l1" | "l2",
-  params: SineStreamHooks
+  params: SineStreamParams
 ): number[] {
   if (mode === "l1") {
     return computeWiggleBaselineL1(tLength, layers, params);
@@ -17,8 +47,8 @@ export function computeWiggleBaseline(
   return computeWiggleBaselineL2(tLength, layers, params);
 }
 
-export function computeWiggleBaselineL2(tLength: number, layers: LayerInput[], params: SineStreamHooks): number[] {
-  const centers = computeCenterLine(tLength, layers);
+export function computeWiggleBaselineL2(tLength: number, layers: LayerInput[], params: SineStreamParams): number[] {
+  const centers = computeCenteredBaseline(tLength, layers);
   const offsets = computeLayerCenterFirstDifference(tLength, layers);
   const deltas = new Array<number>(tLength).fill(0);
   for (let t = 1; t < tLength; t += 1) {
@@ -38,8 +68,8 @@ export function computeWiggleBaselineL2(tLength: number, layers: LayerInput[], p
   return blendWithCenteredBaseline(baseline, centers, Math.max(0, params.wiggleWeightL2 ?? 1), params);
 }
 
-export function computeWiggleBaselineL1(tLength: number, layers: LayerInput[], hooks: SineStreamHooks): number[] {
-  const centers = computeCenterLine(tLength, layers);
+export function computeWiggleBaselineL1(tLength: number, layers: LayerInput[], hooks: SineStreamParams): number[] {
+  const centers = computeCenteredBaseline(tLength, layers);
   const offsets = computeLayerCenterFirstDifference(tLength, layers);
   const deltas = new Array<number>(tLength).fill(0);
 
@@ -86,7 +116,7 @@ function blendWithCenteredBaseline(
   baseline: number[],
   centers: number[],
   wiggleWeight: number,
-  hooks: SineStreamHooks
+  hooks: SineStreamParams
 ): number[] {
   const anchor = Math.max(0, hooks.centerAnchorWeight ?? 0.35);
   const denom = wiggleWeight + anchor;

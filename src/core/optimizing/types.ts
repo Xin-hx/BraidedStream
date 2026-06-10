@@ -6,7 +6,7 @@ import type {
   PidUncertaintySource,
   ROI
 } from "../types";
-import type { SineStreamHooks } from "../baseline";
+import type { SineStreamParams } from "../baseline";
 
 export interface SineStreamOrderConfig {
   clusterAutoCutScale: number;
@@ -29,7 +29,7 @@ export interface OptimizingVariantConfig {
   pidTimeAlpha: number;
   baselineUncertaintyWeight: number;
   multiscaleEnergyThreshold: number;
-  baselineHooks: SineStreamHooks;
+  baselineHooks: SineStreamParams;
   orderRoi: ROI | null;
   sineOrder: SineStreamOrderConfig;
 }

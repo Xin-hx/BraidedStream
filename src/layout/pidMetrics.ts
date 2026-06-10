@@ -1,7 +1,7 @@
 /**
  * PID ordering metric bundle assembly for comparison panels.
  */
-import type { SineStreamHooks } from "../core/baseline";
+import type { SineStreamParams } from "../core/baseline";
 import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
 import { buildCenterOutOrder, normalizeOrderForComparison, orderLayers, rankMap } from "../core/ordering";
 import { computePidOrdering } from "../core/ranking";
@@ -16,7 +16,7 @@ export interface PidOrderingMetricsInput {
   sineOrder: string[];
   uncertaintyStrength: number;
   uncertaintySource?: PidUncertaintySource;
-  baselineHooks?: SineStreamHooks;
+  baselineHooks?: SineStreamParams;
 }
 
 export interface PidOrderingMetricsSummary {

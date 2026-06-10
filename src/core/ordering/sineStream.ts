@@ -8,7 +8,7 @@
 import { FIXED_SEED } from "../seed";
 import { roiBounds } from "../roi";
 import type { LayerInput, ROI } from "../types";
-import { median } from "../math";
+import { median } from "../utils";
 import { seededShuffleIndices } from "../random";
 import { layerUncertaintyAt } from "../validate";
 
