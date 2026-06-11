@@ -117,24 +117,6 @@ export function computeOptimizingBaseline(
   };
 }
 
-/** Compute the silhouette energy from a stacked layout. */
-export function computeSilhouette(layout: StackLayout): number {
-  const layerCount = layout.yBottom.length;
-  if (layerCount === 0) {
-    return 0;
-  }
-
-  const tLength = layout.baseline.length;
-  const bottom = layout.yBottom[0];
-  const top = layout.yTop[layerCount - 1];
-  let silhouette = 0;
-  for (let t = 0; t < tLength; t += 1) {
-    const g0 = bottom[t] ?? 0;
-    const gn = top[t] ?? 0;
-    silhouette += g0 * g0 + gn * gn;
-  }
-  return silhouette;
-}
 
 /** Compute a baseline by the selected wiggle mode. */
 export function computeWiggleBaseline(

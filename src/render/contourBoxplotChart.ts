@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import { computeContourPid } from "../core/ranking";
+import { computeContourPid } from "../core/ranking/pid";
 import { roiBounds } from "../interactions/roi";
 import type { LayerInput, PidUncertaintySource, PreparedDataset, ROI } from "../core/types";
 import { clamp } from "../core/utils";

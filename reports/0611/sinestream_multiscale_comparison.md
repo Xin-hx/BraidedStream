@@ -1,6 +1,6 @@
 # 0611 SineStream Multi-scale Baseline Verification
 
-Generated at: 2026-06-10T17:33:51.104Z
+Generated at: 2026-06-11T04:10:42.463Z
 
 Overall status: **FAIL**
 
@@ -8,10 +8,11 @@ Overall status: **FAIL**
 
 - Goal: compare only baseline behavior while holding the layer set and layer order fixed.
 - Controls: SineStream baseline, weighted wiggle L1 baseline, weighted wiggle L2 baseline.
-- Experiment: current multi_scale baseline (`computeMultiscaleDistributedBaseline`).
+- Experiment A: Sine-anchored multi_scale (`computeMultiscaleDistributedBaseline`), the original route: start from SineStream and redistribute its centerline derivative bursts.
+- Experiment B: Independent multi_scale (`computeIndependentMultiscaleBaseline`), the direct/centered ablation: start from centered baseline and optimize layer counter-motion multiscale bases.
 - Ordering: fixed source layer order for all methods; this report does not claim TPID ordering contribution.
 - Multi-scale parameters are selected from a deterministic grid over strength and Haar energy threshold.
-- PASS requires multi_scale to improve every core metric against every control in Global and selected peak-change windows.
+- PASS requires each multi_scale variant to improve every core metric against every control in Global and selected peak-change windows.
 - Guardrail: layer mean slope, layer max slope, layer curvature, and wiggle energy may not regress by more than 3%.
 
 ## Source Check
@@ -39,11 +40,15 @@ Overall status: **FAIL**
 - Time points: 44
 - Layers: 10
 - Order policy: fixed source layer order for all baselines
+- Fixed order: Germany, Spain, Turkey, Italy, Netherlands, Iran, US, Belgium, United Kingdom, France
+
+### Variant: Sine-anchored multi_scale
+
+- Route: original multi_scale: start from SineStream and redistribute SineStream centerline derivative bursts
 - Selected params: center=median, strength=0.2000, threshold=0.2000
 - Search: total=198, pass=0, fail=198
 - Selected status: FAIL
 - Diagnostics: verified=yes, fallback=no, effectiveScales=2
-- Fixed order: Germany, Spain, Turkey, Italy, Netherlands, Iran, US, Belgium, United Kingdom, France
 
 Selected failure reasons:
 - Global vs SineStream: Paper Eq.(5) illusion did not improve (-3.25%)
@@ -66,14 +71,14 @@ Selected failure reasons:
 - Peak-change window 1 vs Wiggle L2: Derivative concentration did not improve (-1.74%)
 - ... 17 more
 
-### Global
+#### Global
 
 - Window: t0..t43
-- Figure: [assets/covid-countries-demo-global.svg](assets/covid-countries-demo-global.svg)
+- Figure: [assets/covid-countries-demo-sineAnchoredMultiScale-global.svg](assets/covid-countries-demo-sineAnchoredMultiScale-global.svg)
 
-![COVID countries demo Global](assets/covid-countries-demo-global.svg)
+![COVID countries demo Sine-anchored multi_scale Global](assets/covid-countries-demo-sineAnchoredMultiScale-global.svg)
 
-| Control | Status | Metric | Control | Multi-scale | Delta | Improvement |
+| Control | Status | Metric | Control | Candidate | Delta | Improvement |
 |---|---|---|---:|---:|---:|---:|
 | SineStream | FAIL | Paper Eq.(5) illusion | 3.5131e+9 | 3.6272e+9 | 1.1409e+8 | -3.25% |
 | SineStream | PASS | Readability score | 4.8153 | 4.6751 | -0.1402 | +2.91% |
@@ -103,15 +108,15 @@ Selected failure reasons:
 | Wiggle L2 | PASS | Layer curvature | 1885.06 | 1613.16 | -271.9022 | +14.42% |
 | Wiggle L2 | PASS | Wiggle energy | 3.3951e+8 | 3.4056e+8 | 1.0478e+6 | -0.31% |
 
-### Peak-change window 1
+#### Peak-change window 1
 
 - Window: t30..t40
 - Peak change index: t35, delta=28516.00
-- Figure: [assets/covid-countries-demo-peak-1.svg](assets/covid-countries-demo-peak-1.svg)
+- Figure: [assets/covid-countries-demo-sineAnchoredMultiScale-peak-1.svg](assets/covid-countries-demo-sineAnchoredMultiScale-peak-1.svg)
 
-![COVID countries demo Peak-change window 1](assets/covid-countries-demo-peak-1.svg)
+![COVID countries demo Sine-anchored multi_scale Peak-change window 1](assets/covid-countries-demo-sineAnchoredMultiScale-peak-1.svg)
 
-| Control | Status | Metric | Control | Multi-scale | Delta | Improvement |
+| Control | Status | Metric | Control | Candidate | Delta | Improvement |
 |---|---|---|---:|---:|---:|---:|
 | SineStream | FAIL | Paper Eq.(5) illusion | 4.4068e+9 | 4.8079e+9 | 4.0109e+8 | -9.10% |
 | SineStream | PASS | Readability score | 4.8000 | 4.6439 | -0.1561 | +3.25% |
@@ -141,15 +146,15 @@ Selected failure reasons:
 | Wiggle L2 | PASS | Layer curvature | 3012.84 | 2159.02 | -853.8228 | +28.34% |
 | Wiggle L2 | PASS | Wiggle energy | 1.5729e+8 | 1.2749e+8 | -2.9799e+7 | +18.95% |
 
-### Peak-change window 2
+#### Peak-change window 2
 
 - Window: t7..t17
 - Peak change index: t12, delta=12211.00
-- Figure: [assets/covid-countries-demo-peak-2.svg](assets/covid-countries-demo-peak-2.svg)
+- Figure: [assets/covid-countries-demo-sineAnchoredMultiScale-peak-2.svg](assets/covid-countries-demo-sineAnchoredMultiScale-peak-2.svg)
 
-![COVID countries demo Peak-change window 2](assets/covid-countries-demo-peak-2.svg)
+![COVID countries demo Sine-anchored multi_scale Peak-change window 2](assets/covid-countries-demo-sineAnchoredMultiScale-peak-2.svg)
 
-| Control | Status | Metric | Control | Multi-scale | Delta | Improvement |
+| Control | Status | Metric | Control | Candidate | Delta | Improvement |
 |---|---|---|---:|---:|---:|---:|
 | SineStream | FAIL | Paper Eq.(5) illusion | 5.4074e+7 | 1.3977e+8 | 8.5692e+7 | -158.47% |
 | SineStream | PASS | Readability score | 4.9155 | 4.1884 | -0.7271 | +14.79% |
@@ -179,15 +184,15 @@ Selected failure reasons:
 | Wiggle L2 | PASS | Layer curvature | 1642.90 | 1441.74 | -201.1621 | +12.24% |
 | Wiggle L2 | FAIL | Wiggle energy | 5.6472e+7 | 6.0222e+7 | 3.7501e+6 | -6.64% |
 
-### Peak-change window 3
+#### Peak-change window 3
 
 - Window: t19..t29
 - Peak change index: t24, delta=8757.00
-- Figure: [assets/covid-countries-demo-peak-3.svg](assets/covid-countries-demo-peak-3.svg)
+- Figure: [assets/covid-countries-demo-sineAnchoredMultiScale-peak-3.svg](assets/covid-countries-demo-sineAnchoredMultiScale-peak-3.svg)
 
-![COVID countries demo Peak-change window 3](assets/covid-countries-demo-peak-3.svg)
+![COVID countries demo Sine-anchored multi_scale Peak-change window 3](assets/covid-countries-demo-sineAnchoredMultiScale-peak-3.svg)
 
-| Control | Status | Metric | Control | Multi-scale | Delta | Improvement |
+| Control | Status | Metric | Control | Candidate | Delta | Improvement |
 |---|---|---|---:|---:|---:|---:|
 | SineStream | FAIL | Paper Eq.(5) illusion | 6.4546e+9 | 6.4557e+9 | 1.0835e+6 | -0.02% |
 | SineStream | PASS | Readability score | 4.8000 | 4.7883 | -0.0117 | +0.24% |
@@ -216,3 +221,183 @@ Selected failure reasons:
 | Wiggle L2 | FAIL | Layer max slope | 5779.81 | 6044.31 | 264.4967 | -4.58% |
 | Wiggle L2 | PASS | Layer curvature | 1753.19 | 1733.75 | -19.4474 | +1.11% |
 | Wiggle L2 | PASS | Wiggle energy | 4.3498e+7 | 4.3986e+7 | 487266.91 | -1.12% |
+
+### Variant: Independent multi_scale
+
+- Route: direct/centered ablation: start from centered baseline and optimize layer counter-motion multiscale bases
+- Selected params: center=median, strength=1.2000, threshold=0.1800
+- Search: total=198, pass=0, fail=198
+- Selected status: FAIL
+- Diagnostics: verified=yes, fallback=no, effectiveScales=3
+
+Selected failure reasons:
+- Global vs SineStream: Paper Eq.(5) illusion did not improve (-699.36%)
+- Global vs SineStream: Layer mean slope regressed -72.19%
+- Global vs SineStream: Layer curvature regressed -78.55%
+- Global vs SineStream: Wiggle energy regressed -159.71%
+- Global vs Wiggle L1: Paper Eq.(5) illusion did not improve (-404.99%)
+- Global vs Wiggle L1: Layer mean slope regressed -60.83%
+- Global vs Wiggle L1: Layer max slope regressed -21.16%
+- Global vs Wiggle L1: Layer curvature regressed -66.53%
+- Global vs Wiggle L1: Wiggle energy regressed -199.51%
+- Global vs Wiggle L2: Paper Eq.(5) illusion did not improve (-250.73%)
+- Global vs Wiggle L2: Layer mean slope regressed -46.35%
+- Global vs Wiggle L2: Layer max slope regressed -42.40%
+- Global vs Wiggle L2: Layer curvature regressed -51.21%
+- Global vs Wiggle L2: Wiggle energy regressed -186.33%
+- Peak-change window 1 vs SineStream: Paper Eq.(5) illusion did not improve (-2018.74%)
+- Peak-change window 1 vs SineStream: Layer mean slope regressed -182.04%
+- Peak-change window 1 vs SineStream: Layer curvature regressed -201.72%
+- Peak-change window 1 vs SineStream: Wiggle energy regressed -407.07%
+- ... 33 more
+
+#### Global
+
+- Window: t0..t43
+- Figure: [assets/covid-countries-demo-independentMultiScale-global.svg](assets/covid-countries-demo-independentMultiScale-global.svg)
+
+![COVID countries demo Independent multi_scale Global](assets/covid-countries-demo-independentMultiScale-global.svg)
+
+| Control | Status | Metric | Control | Candidate | Delta | Improvement |
+|---|---|---|---:|---:|---:|---:|
+| SineStream | FAIL | Paper Eq.(5) illusion | 3.5131e+9 | 2.8082e+10 | 2.4569e+10 | -699.36% |
+| SineStream | PASS | Readability score | 4.8153 | 2.5703 | -2.2450 | +46.62% |
+| SineStream | PASS | Centerline max derivative | 11655.40 | 446.2122 | -11209.19 | +96.17% |
+| SineStream | PASS | Derivative concentration | 7.3272 | 3.1299 | -4.1973 | +57.28% |
+| SineStream | PASS | Top derivative mass share | 0.4070 | 0.1705 | -0.2365 | +58.11% |
+| SineStream | FAIL | Layer mean slope | 1003.35 | 1727.63 | 724.2749 | -72.19% |
+| SineStream | PASS | Layer max slope | 14552.90 | 14011.09 | -541.8160 | +3.72% |
+| SineStream | FAIL | Layer curvature | 1596.39 | 2850.35 | 1253.95 | -78.55% |
+| SineStream | FAIL | Wiggle energy | 3.7432e+8 | 9.7213e+8 | 5.9781e+8 | -159.71% |
+| Wiggle L1 | FAIL | Paper Eq.(5) illusion | 5.5609e+9 | 2.8082e+10 | 2.2521e+10 | -404.99% |
+| Wiggle L1 | PASS | Readability score | 4.8006 | 2.5909 | -2.2097 | +46.03% |
+| Wiggle L1 | PASS | Centerline max derivative | 8666.85 | 446.2122 | -8220.64 | +94.85% |
+| Wiggle L1 | PASS | Derivative concentration | 7.2654 | 3.1299 | -4.1355 | +56.92% |
+| Wiggle L1 | PASS | Top derivative mass share | 0.3982 | 0.1705 | -0.2277 | +57.19% |
+| Wiggle L1 | FAIL | Layer mean slope | 1074.17 | 1727.63 | 653.4628 | -60.83% |
+| Wiggle L1 | FAIL | Layer max slope | 11564.35 | 14011.09 | 2446.73 | -21.16% |
+| Wiggle L1 | FAIL | Layer curvature | 1711.65 | 2850.35 | 1138.70 | -66.53% |
+| Wiggle L1 | FAIL | Wiggle energy | 3.2457e+8 | 9.7213e+8 | 6.4756e+8 | -199.51% |
+| Wiggle L2 | FAIL | Paper Eq.(5) illusion | 8.0067e+9 | 2.8082e+10 | 2.0075e+10 | -250.73% |
+| Wiggle L2 | PASS | Readability score | 4.8000 | 2.4760 | -2.3240 | +48.42% |
+| Wiggle L2 | PASS | Centerline max derivative | 7259.44 | 446.2122 | -6813.23 | +93.85% |
+| Wiggle L2 | PASS | Derivative concentration | 8.1775 | 3.1299 | -5.0475 | +61.73% |
+| Wiggle L2 | PASS | Top derivative mass share | 0.4360 | 0.1705 | -0.2655 | +60.89% |
+| Wiggle L2 | FAIL | Layer mean slope | 1180.48 | 1727.63 | 547.1500 | -46.35% |
+| Wiggle L2 | FAIL | Layer max slope | 9839.20 | 14011.09 | 4171.88 | -42.40% |
+| Wiggle L2 | FAIL | Layer curvature | 1885.06 | 2850.35 | 965.2837 | -51.21% |
+| Wiggle L2 | FAIL | Wiggle energy | 3.3951e+8 | 9.7213e+8 | 6.3262e+8 | -186.33% |
+
+#### Peak-change window 1
+
+- Window: t30..t40
+- Peak change index: t35, delta=28516.00
+- Figure: [assets/covid-countries-demo-independentMultiScale-peak-1.svg](assets/covid-countries-demo-independentMultiScale-peak-1.svg)
+
+![COVID countries demo Independent multi_scale Peak-change window 1](assets/covid-countries-demo-independentMultiScale-peak-1.svg)
+
+| Control | Status | Metric | Control | Candidate | Delta | Improvement |
+|---|---|---|---:|---:|---:|---:|
+| SineStream | FAIL | Paper Eq.(5) illusion | 4.4068e+9 | 9.3368e+10 | 8.8961e+10 | -2018.74% |
+| SineStream | PASS | Readability score | 4.8000 | 3.3501 | -1.4499 | +30.21% |
+| SineStream | PASS | Centerline max derivative | 11655.40 | 204.7973 | -11450.60 | +98.24% |
+| SineStream | PASS | Derivative concentration | 3.0004 | 1.4285 | -1.5719 | +52.39% |
+| SineStream | PASS | Top derivative mass share | 0.3000 | 0.1429 | -0.1572 | +52.39% |
+| SineStream | FAIL | Layer mean slope | 1284.79 | 3623.65 | 2338.86 | -182.04% |
+| SineStream | PASS | Layer max slope | 14552.90 | 14011.09 | -541.8160 | +3.72% |
+| SineStream | FAIL | Layer curvature | 2131.02 | 6429.74 | 4298.72 | -201.72% |
+| SineStream | FAIL | Wiggle energy | 1.4082e+8 | 7.1407e+8 | 5.7325e+8 | -407.07% |
+| Wiggle L1 | FAIL | Paper Eq.(5) illusion | 1.1273e+10 | 9.3368e+10 | 8.2095e+10 | -728.22% |
+| Wiggle L1 | PASS | Readability score | 4.8000 | 3.1028 | -1.6972 | +35.36% |
+| Wiggle L1 | PASS | Centerline max derivative | 8666.85 | 204.7973 | -8462.05 | +97.64% |
+| Wiggle L1 | PASS | Derivative concentration | 2.9539 | 1.4285 | -1.5254 | +51.64% |
+| Wiggle L1 | PASS | Top derivative mass share | 0.2954 | 0.1429 | -0.1525 | +51.64% |
+| Wiggle L1 | FAIL | Layer mean slope | 1584.93 | 3623.65 | 2038.71 | -128.63% |
+| Wiggle L1 | FAIL | Layer max slope | 11564.35 | 14011.09 | 2446.73 | -21.16% |
+| Wiggle L1 | FAIL | Layer curvature | 2644.85 | 6429.74 | 3784.89 | -143.10% |
+| Wiggle L1 | FAIL | Wiggle energy | 1.3381e+8 | 7.1407e+8 | 5.8026e+8 | -433.65% |
+| Wiggle L2 | FAIL | Paper Eq.(5) illusion | 1.7944e+10 | 9.3368e+10 | 7.5424e+10 | -420.34% |
+| Wiggle L2 | PASS | Readability score | 4.8000 | 3.0453 | -1.7547 | +36.56% |
+| Wiggle L2 | PASS | Centerline max derivative | 7259.44 | 204.7973 | -7054.65 | +97.18% |
+| Wiggle L2 | PASS | Derivative concentration | 2.8877 | 1.4285 | -1.4592 | +50.53% |
+| Wiggle L2 | PASS | Top derivative mass share | 0.2888 | 0.1429 | -0.1459 | +50.53% |
+| Wiggle L2 | FAIL | Layer mean slope | 1820.25 | 3623.65 | 1803.39 | -99.07% |
+| Wiggle L2 | FAIL | Layer max slope | 9839.20 | 14011.09 | 4171.88 | -42.40% |
+| Wiggle L2 | FAIL | Layer curvature | 3012.84 | 6429.74 | 3416.90 | -113.41% |
+| Wiggle L2 | FAIL | Wiggle energy | 1.5729e+8 | 7.1407e+8 | 5.5678e+8 | -353.98% |
+
+#### Peak-change window 2
+
+- Window: t7..t17
+- Peak change index: t12, delta=12211.00
+- Figure: [assets/covid-countries-demo-independentMultiScale-peak-2.svg](assets/covid-countries-demo-independentMultiScale-peak-2.svg)
+
+![COVID countries demo Independent multi_scale Peak-change window 2](assets/covid-countries-demo-independentMultiScale-peak-2.svg)
+
+| Control | Status | Metric | Control | Candidate | Delta | Improvement |
+|---|---|---|---:|---:|---:|---:|
+| SineStream | FAIL | Paper Eq.(5) illusion | 5.4074e+7 | 1.0648e+9 | 1.0107e+9 | -1869.15% |
+| SineStream | PASS | Readability score | 4.9155 | 2.7104 | -2.2051 | +44.86% |
+| SineStream | PASS | Centerline max derivative | 3986.25 | 275.4095 | -3710.84 | +93.09% |
+| SineStream | PASS | Derivative concentration | 3.6631 | 2.0577 | -1.6054 | +43.83% |
+| SineStream | PASS | Top derivative mass share | 0.3663 | 0.2058 | -0.1605 | +43.83% |
+| SineStream | FAIL | Layer mean slope | 692.0022 | 981.3900 | 289.3878 | -41.82% |
+| SineStream | PASS | Layer max slope | 9378.25 | 5511.95 | -3866.29 | +41.23% |
+| SineStream | FAIL | Layer curvature | 1370.30 | 1996.42 | 626.1191 | -45.69% |
+| SineStream | PASS | Wiggle energy | 7.8250e+7 | 7.1300e+7 | -6.9499e+6 | +8.88% |
+| Wiggle L1 | FAIL | Paper Eq.(5) illusion | 1.5256e+8 | 1.0648e+9 | 9.1223e+8 | -597.95% |
+| Wiggle L1 | PASS | Readability score | 4.9005 | 2.7708 | -2.1297 | +43.46% |
+| Wiggle L1 | PASS | Centerline max derivative | 2784.63 | 275.4095 | -2509.22 | +90.11% |
+| Wiggle L1 | PASS | Derivative concentration | 3.5050 | 2.0577 | -1.4472 | +41.29% |
+| Wiggle L1 | PASS | Top derivative mass share | 0.3505 | 0.2058 | -0.1447 | +41.29% |
+| Wiggle L1 | FAIL | Layer mean slope | 731.7511 | 981.3900 | 249.6389 | -34.12% |
+| Wiggle L1 | PASS | Layer max slope | 8176.63 | 5511.95 | -2664.68 | +32.59% |
+| Wiggle L1 | FAIL | Layer curvature | 1478.39 | 1996.42 | 518.0265 | -35.04% |
+| Wiggle L1 | FAIL | Wiggle energy | 6.1374e+7 | 7.1300e+7 | 9.9263e+6 | -16.17% |
+| Wiggle L2 | FAIL | Paper Eq.(5) illusion | 4.9037e+8 | 1.0648e+9 | 5.7442e+8 | -117.14% |
+| Wiggle L2 | PASS | Readability score | 4.8093 | 3.3554 | -1.4539 | +30.23% |
+| Wiggle L2 | PASS | Centerline max derivative | 1211.52 | 275.4095 | -936.1090 | +77.27% |
+| Wiggle L2 | PASS | Derivative concentration | 2.6300 | 2.0577 | -0.5722 | +21.76% |
+| Wiggle L2 | PASS | Top derivative mass share | 0.2630 | 0.2058 | -0.0572 | +21.76% |
+| Wiggle L2 | FAIL | Layer mean slope | 810.7867 | 981.3900 | 170.6034 | -21.04% |
+| Wiggle L2 | PASS | Layer max slope | 6603.52 | 5511.95 | -1091.57 | +16.53% |
+| Wiggle L2 | FAIL | Layer curvature | 1642.90 | 1996.42 | 353.5236 | -21.52% |
+| Wiggle L2 | FAIL | Wiggle energy | 5.6472e+7 | 7.1300e+7 | 1.4828e+7 | -26.26% |
+
+#### Peak-change window 3
+
+- Window: t19..t29
+- Peak change index: t24, delta=8757.00
+- Figure: [assets/covid-countries-demo-independentMultiScale-peak-3.svg](assets/covid-countries-demo-independentMultiScale-peak-3.svg)
+
+![COVID countries demo Independent multi_scale Peak-change window 3](assets/covid-countries-demo-independentMultiScale-peak-3.svg)
+
+| Control | Status | Metric | Control | Candidate | Delta | Improvement |
+|---|---|---|---:|---:|---:|---:|
+| SineStream | FAIL | Paper Eq.(5) illusion | 6.4546e+9 | 8.6695e+9 | 2.2149e+9 | -34.31% |
+| SineStream | PASS | Readability score | 4.8000 | 2.7965 | -2.0035 | +41.74% |
+| SineStream | PASS | Centerline max derivative | 1575.48 | 239.7679 | -1335.72 | +84.78% |
+| SineStream | PASS | Derivative concentration | 2.3947 | 1.5814 | -0.8133 | +33.96% |
+| SineStream | PASS | Top derivative mass share | 0.2395 | 0.1581 | -0.0813 | +33.96% |
+| SineStream | FAIL | Layer mean slope | 1124.29 | 1318.21 | 193.9204 | -17.25% |
+| SineStream | PASS | Layer max slope | 6075.48 | 4972.09 | -1103.39 | +18.16% |
+| SineStream | FAIL | Layer curvature | 1727.89 | 1989.42 | 261.5276 | -15.14% |
+| SineStream | FAIL | Wiggle energy | 4.4017e+7 | 5.2647e+7 | 8.6297e+6 | -19.61% |
+| Wiggle L1 | FAIL | Paper Eq.(5) illusion | 7.0856e+9 | 8.6695e+9 | 1.5839e+9 | -22.35% |
+| Wiggle L1 | PASS | Readability score | 4.8000 | 2.2890 | -2.5110 | +52.31% |
+| Wiggle L1 | PASS | Centerline max derivative | 2139.81 | 239.7679 | -1900.05 | +88.79% |
+| Wiggle L1 | PASS | Derivative concentration | 3.5480 | 1.5814 | -1.9666 | +55.43% |
+| Wiggle L1 | PASS | Top derivative mass share | 0.3548 | 0.1581 | -0.1967 | +55.43% |
+| Wiggle L1 | FAIL | Layer mean slope | 1097.92 | 1318.21 | 220.2850 | -20.06% |
+| Wiggle L1 | PASS | Layer max slope | 7263.81 | 4972.09 | -2291.72 | +31.55% |
+| Wiggle L1 | FAIL | Layer curvature | 1729.54 | 1989.42 | 259.8767 | -15.03% |
+| Wiggle L1 | FAIL | Wiggle energy | 4.5757e+7 | 5.2647e+7 | 6.8892e+6 | -15.06% |
+| Wiggle L2 | FAIL | Paper Eq.(5) illusion | 6.9457e+9 | 8.6695e+9 | 1.7238e+9 | -24.82% |
+| Wiggle L2 | PASS | Readability score | 4.8000 | 2.8721 | -1.9279 | +40.16% |
+| Wiggle L2 | PASS | Centerline max derivative | 988.1111 | 239.7679 | -748.3432 | +75.73% |
+| Wiggle L2 | PASS | Derivative concentration | 2.5779 | 1.5814 | -0.9966 | +38.66% |
+| Wiggle L2 | PASS | Top derivative mass share | 0.2578 | 0.1581 | -0.0997 | +38.66% |
+| Wiggle L2 | FAIL | Layer mean slope | 1142.72 | 1318.21 | 175.4858 | -15.36% |
+| Wiggle L2 | PASS | Layer max slope | 5779.81 | 4972.09 | -807.7245 | +13.97% |
+| Wiggle L2 | FAIL | Layer curvature | 1753.19 | 1989.42 | 236.2249 | -13.47% |
+| Wiggle L2 | FAIL | Wiggle energy | 4.3498e+7 | 5.2647e+7 | 9.1483e+6 | -21.03% |

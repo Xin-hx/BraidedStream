@@ -5,7 +5,7 @@ import { computeBaseline } from "../core/baseline/compute";
 import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale";
 import type { BaselineParameters } from "../core/baseline/types";
 import { buildCenterOutOrder, normalizeOrderForComparison, orderLayers, rankMap } from "../core/ordering";
-import { computePidOrdering } from "../core/ranking";
+import { computePidOrdering } from "../core/ranking/pid";
 import { computeStackedBoundaries } from "../core/stack";
 import type { InvariantSummary, PidUncertaintySource, PreparedDataset, ROI } from "../core/types";
 import { computeMetrics, type MetricResult, type MultiscaleDiagnosticsSummary } from "./metrics";

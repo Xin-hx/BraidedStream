@@ -3,7 +3,7 @@ import {
   computePidOrdering,
   computePidOrderingScores,
   computeTemporalSelfInclusion
-} from "../ranking";
+} from "../ranking/pid";
 import type { PreparedDataset } from "../types";
 import { resolveOptimizingVariantConfig } from "../optimizing/config";
 import type { OptimizingVariantConfig } from "../optimizing/types";

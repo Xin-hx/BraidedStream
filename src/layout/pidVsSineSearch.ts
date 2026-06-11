@@ -5,7 +5,7 @@ import type { BaselineParameters } from "../core/baseline/types";
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
 import { buildCenterOutOrder, normalizeOrderForComparison, optimizeLayerOrder, orderLayers } from "../core/ordering";
-import { computePidOrdering } from "../core/ranking";
+import { computePidOrdering } from "../core/ranking/pid";
 import { computeStackedBoundaries } from "../core/stack";
 import type {
   LayerInput,
