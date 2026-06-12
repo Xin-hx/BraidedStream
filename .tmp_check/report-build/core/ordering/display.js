@@ -1,3 +1,24 @@
+/** Reorder layers by id, rejecting missing or duplicate ids. */
+export function orderLayers(layers, order) {
+    const byId = new Map(layers.map((layer) => [layer.id, layer]));
+    const seen = new Set();
+    const ordered = [];
+    for (const id of order) {
+        const layer = byId.get(id);
+        if (!layer) {
+            throw new Error(`order references unknown layer id: ${id}`);
+        }
+        if (seen.has(id)) {
+            throw new Error(`order contains duplicate id: ${id}`);
+        }
+        seen.add(id);
+        ordered.push(layer);
+    }
+    if (ordered.length !== layers.length) {
+        throw new Error("order length must match layers length");
+    }
+    return ordered;
+}
 /** Preserve the dataset order, appending any layers omitted from the order list. */
 export function normalizedInputOrder(dataset) {
     const layerIds = dataset.layers.map((layer) => layer.id);
@@ -20,7 +41,7 @@ export function buildCenterOutOrder(sortedOrder) {
 export function buildInsideOutOrder(layers, inputOrder) {
     const byId = new Map(layers.map((layer) => [layer.id, layer]));
     const totals = inputOrder
-        .map((id) => ({ id, total: byId.get(id)?.mean.reduce((acc, value) => acc + Math.max(0, value), 0) ?? 0 }))
+        .map((id) => ({ id, total: byId.get(id)?.height.reduce((acc, value) => acc + Math.max(0, value), 0) ?? 0 }))
         .sort((a, b) => {
         if (b.total !== a.total) {
             return b.total - a.total;

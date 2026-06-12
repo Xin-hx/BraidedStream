@@ -5,8 +5,7 @@
  * uncertainty-jagged paths; helper functions keep geometry and noise separate.
  */
 import * as d3 from "d3";
-import { withFixedSeed } from "../core/seed";
-import { clamp, clamp01, nearlyEqual, percentile } from "../core/utils";
+import { clamp, clamp01, nearlyEqual, percentile, withFixedSeed } from "../core/utils.js";
 /** Create one closed area path for a layer band. */
 export function createAreaPath(times, yBottom, yTop, xScale, yScale, options) {
     if (options?.jagged) {

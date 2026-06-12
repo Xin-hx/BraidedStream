@@ -13,7 +13,7 @@ function buildHoverInfoFromEntries(timeIndex, times, entries, byId, focusLayerId
     const clamped = Math.max(0, Math.min(times.length - 1, timeIndex));
     let total = 0;
     for (const entry of entries) {
-        total += entry.layer.mean[clamped] ?? 0;
+        total += entry.layer.height[clamped] ?? 0;
     }
     const layerValues = focusLayerId
         ? layerValueAt(byId.get(focusLayerId), clamped)
@@ -33,9 +33,9 @@ export function tooltipText(info, extra) {
         : `t=${info.timeLabel} total=${info.total.toFixed(2)}`;
     const top = info.layerValues
         .slice()
-        .sort((a, b) => b.mean - a.mean)
+        .sort((a, b) => b.value - a.value)
         .slice(0, info.focusLayerId ? 1 : 4)
-        .map((item) => `${item.label}: ${item.mean.toFixed(2)} (u ${item.unc.toFixed(2)})`);
+        .map((item) => `${item.label}: ${item.value.toFixed(2)} (u ${item.unc.toFixed(2)})`);
     if (top.length === 0 && info.focusLayerId) {
         top.push("no substream at cursor");
     }
@@ -46,7 +46,7 @@ function topLayerValuesAt(entries, timeIndex, limit) {
     for (const entry of entries) {
         const item = layerValue(entry, timeIndex);
         let insertAt = top.length;
-        while (insertAt > 0 && item.mean > top[insertAt - 1].mean) {
+        while (insertAt > 0 && item.value > top[insertAt - 1].value) {
             insertAt -= 1;
         }
         if (insertAt < limit) {
@@ -65,7 +65,7 @@ function layerValue(entry, timeIndex) {
     return {
         id: entry.layer.id,
         label: entry.label,
-        mean: entry.layer.mean[timeIndex] ?? 0,
+        value: entry.layer.height[timeIndex] ?? 0,
         unc: entry.layer.unc?.[timeIndex] ?? 0
     };
 }

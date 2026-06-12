@@ -1,5 +1,5 @@
-import { computeBaseline } from "./compute";
-import { computeMultiscaleDistributedBaseline } from "./multiscale";
+import { computeBaseline } from "./compute.js";
+import { computeMultiscaleDistributedBaseline } from "./multiscale.js";
 export function computeOptimizingBaseline(times, orderedLayers, mode, hooks, waveStrength, energyThreshold = 0.08) {
     if (mode !== "multiscale") {
         return {

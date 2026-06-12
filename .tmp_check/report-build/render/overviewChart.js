@@ -2,21 +2,21 @@
  * Compact overview renderer and primary ROI brush.
  */
 import * as d3 from "d3";
-import { angleAxisLabels, formatTimeTick, plotAreaFromSize, readChartSize } from "./chartUtils";
-import { createRoiBrush } from "../ui/brush";
+import { angleAxisLabels, createChartFrame, formatTimeTick } from "./chartUtils.js";
+import { createRoiBrush } from "../ui/brush.js";
 export class OverviewChart {
     constructor(svg) {
         this.svg = svg;
         this.margin = { top: 10, right: 12, bottom: 34, left: 52 };
         this.lastOnRoiChange = null;
-        const size = readChartSize(svg, 1180, 118, this.margin);
+        const frame = createChartFrame(svg, 1180, 118, this.margin);
+        const size = frame.size;
         this.width = size.width;
         this.height = size.height;
         this.innerWidth = size.innerWidth;
         this.innerHeight = size.innerHeight;
-        this.plotArea = plotAreaFromSize(size);
-        const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
-        this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
+        this.plotArea = frame.plotArea;
+        this.root = frame.root;
         this.trendGroup = this.root.append("g").attr("class", "overview-trend");
         this.brushGroup = this.root.append("g").attr("class", "overview-brush");
         this.axisX = this.root.append("g").attr("class", "x-axis");
@@ -33,7 +33,7 @@ export class OverviewChart {
             .scaleLinear()
             .domain([dataset.times[0], dataset.times[dataset.times.length - 1]])
             .range([0, this.innerWidth]);
-        const totals = dataset.times.map((_, t) => d3.sum(dataset.layers, (layer) => layer.mean[t]) ?? 0);
+        const totals = dataset.times.map((_, t) => d3.sum(dataset.layers, (layer) => layer.height[t]) ?? 0);
         const yMax = d3.max(totals) ?? 1;
         const yScale = d3.scaleLinear().domain([0, yMax]).range([this.innerHeight, 0]);
         const area = d3

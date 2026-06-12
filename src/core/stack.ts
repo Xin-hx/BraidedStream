@@ -1,7 +1,7 @@
 /**
  * Basic stack geometry construction from a baseline and ordered layers.
  */
-import type { LayerInput, StackLayout } from "./types";
+import type { BraidLayout, BraidOptimizationDiagnostics, LayerInput, StackLayout } from "./types";
 
 /** Convert layer thickness series into bottom/top boundaries. */
 export function computeStackedBoundaries(baseline: number[], orderedLayers: LayerInput[]): StackLayout {
@@ -25,4 +25,21 @@ export function computeStackedBoundaries(baseline: number[], orderedLayers: Laye
 
   // Keep baseline immutable to avoid accidental downstream mutation.
   return { baseline: baseline.slice(), yBottom, yTop };
+}
+
+/** Wrap a plain stack layout in the BraidLayout shape expected by comparison code. */
+export function stackToBraidLayout(layout: StackLayout, diagnostics?: BraidOptimizationDiagnostics): BraidLayout {
+  const tLength = layout.baseline.length;
+  const gapCount = Math.max(0, layout.yBottom.length - 1);
+  return {
+    baseline: layout.baseline.slice(),
+    yBottom: layout.yBottom.map((row) => row.slice()),
+    yTop: layout.yTop.map((row) => row.slice()),
+    omega: new Array<number>(tLength).fill(0),
+    gapsPx: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
+    gapsValue: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
+    sumGapPx: new Array<number>(tLength).fill(0),
+    roiSupport: null,
+    ...(diagnostics ? { diagnostics } : {})
+  };
 }

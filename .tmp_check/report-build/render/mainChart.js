@@ -2,24 +2,24 @@
  * Main streamgraph renderer with inset-ROI brushing.
  */
 import * as d3 from "d3";
-import { roiBounds } from "../core/roi";
-import { createAreaPath } from "./paths";
-import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtent, plotAreaFromSize, readChartSize, roiXRange } from "./chartUtils";
-import { layerColor } from "../styles/palette";
-import { createRoiBrush } from "../ui/brush";
+import { roiBounds } from "../interactions/roi.js";
+import { createAreaPath } from "./paths.js";
+import { angleAxisLabels, createChartFrame, drawCrosshair, formatTimeTick, layoutExtent, roiXRange } from "./chartUtils.js";
+import { layerColor } from "../styles/palette.js";
+import { createRoiBrush } from "../ui/brush.js";
 export class MainChart {
     constructor(svg) {
         this.svg = svg;
         this.margin = { top: 22, right: 16, bottom: 44, left: 52 };
         this.lastOnInsetRoiChange = null;
-        const size = readChartSize(svg, 1180, 360, this.margin);
+        const frame = createChartFrame(svg, 1180, 360, this.margin);
+        const size = frame.size;
         this.width = size.width;
         this.height = size.height;
         this.innerWidth = size.innerWidth;
         this.innerHeight = size.innerHeight;
-        this.plotArea = plotAreaFromSize(size);
-        const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
-        this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
+        this.plotArea = frame.plotArea;
+        this.root = frame.root;
         this.layersGroup = this.root.append("g").attr("class", "main-layers");
         this.roiGroup = this.root.append("g").attr("class", "main-roi");
         this.insetRoiGroup = this.root.append("g").attr("class", "main-inset-roi");

@@ -1,14 +1,21 @@
-import { clamp, normalize01, sumAbs } from "../math";
-import { diffSeries, maxAbsStep, meanAbsStep, meanCurvature, movingAverage, removeMean } from "../series";
-import { validateTimeLengths } from "../validate";
-import { computeSineStreamBaseline } from "./sineStream";
-import { sumLayerMeans } from "./shared";
+import { clamp, normalize01, sumAbs } from "../utils.js";
+import { diffSeries, maxAbsStep, meanAbsStep, meanCurvature, movingAverage, removeMean } from "../../data/series.js";
+import { validateTimeLengths } from "../validate.js";
+import { computeCenteredBaseline, sumLayerHeights } from "./compute.js";
+import { computeSineStreamBaseline } from "./sineStream.js";
 /** Redistribute SineStream centerline derivative bursts through layer-slope multiscale wave bases. */
 export function computeMultiscaleDistributedBaseline(times, layers, strength = 0.45, hooks = {}, energyThreshold = 0.08) {
+    return computeMultiscaleBaselineWithAnchor("sine", times, layers, strength, hooks, energyThreshold);
+}
+/** Build an independent multiscale baseline from centered baseline plus layer-slope wave bases. */
+export function computeIndependentMultiscaleBaseline(times, layers, strength = 0.45, hooks = {}, energyThreshold = 0.08) {
+    return computeMultiscaleBaselineWithAnchor("independent", times, layers, strength, hooks, energyThreshold);
+}
+function computeMultiscaleBaselineWithAnchor(anchorMode, times, layers, strength, hooks, energyThreshold) {
     validateTimeLengths(times, layers);
     const tLength = times.length;
     const kLength = layers.length;
-    const total = sumLayerMeans(tLength, layers);
+    const total = sumLayerHeights(tLength, layers);
     const clippedThreshold = clamp(energyThreshold, 0, 1);
     const clippedStrength = clamp(strength, 0, 1.5);
     const emptyDiagnostics = () => ({
@@ -49,11 +56,13 @@ export function computeMultiscaleDistributedBaseline(times, layers, strength = 0
             diagnostics: emptyDiagnostics()
         };
     }
-    const anchorBaselineRaw = computeSineStreamBaseline(tLength, layers, { centerType: hooks.centerType ?? "median" });
-    const anchorBaseline = recenterBaseline(anchorBaselineRaw, total);
-    const anchorCenterline = streamCenterlineFromBaseline(anchorBaseline, total);
-    const anchorCenterlineDerivative = diffSeries(anchorCenterline);
-    const localShiftAbs = anchorCenterlineDerivative.map((value) => Math.abs(value));
+    const centeredBaseline = recenterBaseline(computeCenteredBaseline(tLength, layers), total);
+    const anchorBaseline = anchorMode === "sine"
+        ? recenterBaseline(computeSineStreamBaseline(tLength, layers, { centerType: hooks.centerType ?? "median" }), total)
+        : centeredBaseline;
+    const anchorCenterlineDerivative = anchorMode === "sine" ? diffSeries(streamCenterlineFromBaseline(anchorBaseline, total)) : null;
+    const counterMotionDerivative = anchorMode === "independent" ? computeLayerCounterMotionDerivative(layers, tLength) : null;
+    const localShiftAbs = (anchorCenterlineDerivative ?? counterMotionDerivative ?? []).map((value) => Math.abs(value));
     const slopeSignal = aggregateMultiscaleLayerSlopeSignal(layers, tLength);
     const bands = haarDyadicBands(slopeSignal).map((band) => ({
         ...band,
@@ -114,16 +123,30 @@ export function computeMultiscaleDistributedBaseline(times, layers, strength = 0
     const bases = selected.map((item) => ({
         scale: item.band.scale,
         ratio: item.ratio,
-        values: buildSlopeWaveShiftBasis(item.band, anchorCenterlineDerivative, clippedStrength)
+        values: anchorMode === "sine"
+            ? buildSlopeWaveShiftBasis(item.band, anchorCenterlineDerivative ?? [], clippedStrength)
+            : buildIndependentScaleShiftBasis(item.band, counterMotionDerivative ?? [], clippedStrength)
     }));
-    const localShiftBudget = bases.reduce((acc, basis) => acc + sumAbs(basis.values), 0);
-    const optimized = optimizeScaleCoefficients(layers, anchorBaseline, bases, localShiftBudget);
+    const selectedRatioSum = selected.reduce((acc, item) => acc + item.ratio, 0);
+    const seedCoefficients = anchorMode === "independent" ? selected.map((item) => item.ratio / Math.max(1e-12, selectedRatioSum)) : [];
+    const seedShift = anchorMode === "independent" ? combineBasisShift(bases, seedCoefficients) : new Array(tLength).fill(0);
+    const optimizationAnchor = anchorMode === "independent"
+        ? recenterBaseline(centeredBaseline.map((value, index) => value + seedShift[index]), total)
+        : anchorBaseline;
+    const localShiftBudget = anchorMode === "independent"
+        ? Math.max(sumAbs(seedShift), bases.reduce((acc, basis) => acc + sumAbs(basis.values), 0))
+        : bases.reduce((acc, basis) => acc + sumAbs(basis.values), 0);
+    const optimized = optimizeScaleCoefficients(layers, optimizationAnchor, bases, localShiftBudget);
+    const totalCoefficients = anchorMode === "independent"
+        ? seedCoefficients.map((value, index) => value + (optimized.coefficients[index] ?? 0))
+        : optimized.coefficients;
     const distributedShiftAligned = optimized.shift;
-    const baseline = recenterBaseline(anchorBaseline.map((value, i) => value + distributedShiftAligned[i]), total);
-    const distributedShift = baseline.map((value, i) => value - anchorBaseline[i]);
+    const baseline = recenterBaseline(optimizationAnchor.map((value, i) => value + distributedShiftAligned[i]), total);
+    const shiftReference = anchorMode === "independent" ? centeredBaseline : anchorBaseline;
+    const distributedShift = baseline.map((value, i) => value - shiftReference[i]);
     const distributedShiftAbs = distributedShift.map((v) => Math.abs(v));
     const distributedShiftBudget = sumAbs(distributedShift);
-    const effectiveScaleCount = optimized.coefficients.filter((value) => Math.abs(value) > 1e-6).length;
+    const effectiveScaleCount = totalCoefficients.filter((value) => Math.abs(value) > 1e-6).length;
     const verifiedMultiscale = selected.length >= 2 &&
         effectiveScaleCount > 0 &&
         optimized.objectiveAfter < optimized.objectiveBefore - 1e-9 &&
@@ -158,7 +181,7 @@ export function computeMultiscaleDistributedBaseline(times, layers, strength = 0
             globalMeanSlopeGuardrailPassed: optimized.globalMeanSlopeGuardrailPassed,
             scaleCoefficients: bases.map((basis, index) => ({
                 scale: basis.scale,
-                coefficient: optimized.coefficients[index] ?? 0
+                coefficient: totalCoefficients[index] ?? 0
             })),
             scaleBands,
             uncertaintySaliency,
@@ -187,8 +210,8 @@ function aggregateMultiscaleLayerSlopeSignal(layers, tLength) {
         let acc = 0;
         let mass = 0;
         for (const layer of layers) {
-            const previous = Math.max(0, layer.mean[t - 1] ?? 0);
-            const current = Math.max(0, layer.mean[t] ?? 0);
+            const previous = Math.max(0, layer.height[t - 1] ?? 0);
+            const current = Math.max(0, layer.height[t] ?? 0);
             acc += Math.abs(current - previous);
             mass += 0.5 * (previous + current);
         }
@@ -233,12 +256,75 @@ function buildSlopeWaveShiftBasis(band, anchorCenterlineDerivative, strength) {
     const saliency = normalize01(band.saliency);
     const localizedDerivative = new Array(length).fill(0);
     for (let t = 1; t < length; t += 1) {
-        localizedDerivative[t] = saliency[t] * anchorCenterlineDerivative[t];
+        localizedDerivative[t] = (saliency[t] ?? 0) * (anchorCenterlineDerivative[t] ?? 0);
     }
     const redistributed = movingAverage(localizedDerivative, Math.max(3, band.scale * 2 + 1));
     const derivativeBasis = new Array(length).fill(0);
     for (let t = 1; t < length; t += 1) {
         derivativeBasis[t] = redistributed[t] - localizedDerivative[t];
+    }
+    let derivativeMean = 0;
+    for (let t = 1; t < length; t += 1) {
+        derivativeMean += derivativeBasis[t];
+    }
+    derivativeMean /= Math.max(1, length - 1);
+    for (let t = 1; t < length; t += 1) {
+        derivativeBasis[t] -= derivativeMean;
+    }
+    const shift = new Array(length).fill(0);
+    for (let t = 1; t < length; t += 1) {
+        shift[t] = shift[t - 1] + strength * derivativeBasis[t];
+    }
+    return removeMean(shift);
+}
+function computeLayerCounterMotionDerivative(layers, tLength) {
+    const derivative = new Array(tLength).fill(0);
+    if (layers.length === 0 || tLength <= 1) {
+        return derivative;
+    }
+    for (let t = 1; t < tLength; t += 1) {
+        const offsets = [];
+        let prefixDelta = 0;
+        for (const layer of layers) {
+            const previous = Math.max(0, layer.height[t - 1] ?? 0);
+            const current = Math.max(0, layer.height[t] ?? 0);
+            const dHeight = current - previous;
+            offsets.push(prefixDelta + 0.5 * dHeight);
+            prefixDelta += dHeight;
+        }
+        const meanOffset = offsets.reduce((acc, value) => acc + value, 0) / Math.max(1, offsets.length);
+        const medianOffset = median(offsets);
+        derivative[t] = -(0.65 * meanOffset + 0.35 * medianOffset);
+    }
+    let meanDerivative = 0;
+    for (let t = 1; t < tLength; t += 1) {
+        meanDerivative += derivative[t];
+    }
+    meanDerivative /= Math.max(1, tLength - 1);
+    for (let t = 1; t < tLength; t += 1) {
+        derivative[t] -= meanDerivative;
+    }
+    return derivative;
+}
+function median(values) {
+    if (values.length === 0) {
+        return 0;
+    }
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 ? 0.5 * (sorted[mid - 1] + sorted[mid]) : sorted[mid];
+}
+function buildIndependentScaleShiftBasis(band, counterMotionDerivative, strength) {
+    const length = counterMotionDerivative.length;
+    const saliency = normalize01(band.saliency);
+    const weightedDerivative = new Array(length).fill(0);
+    for (let t = 1; t < length; t += 1) {
+        weightedDerivative[t] = (0.35 + 0.65 * (saliency[t] ?? 0)) * (counterMotionDerivative[t] ?? 0);
+    }
+    const redistributed = movingAverage(weightedDerivative, Math.max(3, band.scale * 2 + 1));
+    const derivativeBasis = new Array(length).fill(0);
+    for (let t = 1; t < length; t += 1) {
+        derivativeBasis[t] = redistributed[t];
     }
     let derivativeMean = 0;
     for (let t = 1; t < length; t += 1) {
@@ -480,7 +566,7 @@ function highAlignedWindowRatio(values, reference) {
     return ratios[Math.floor(0.9 * (ratios.length - 1))];
 }
 function baselineOptimizationMetrics(layers, baseline) {
-    const total = sumLayerMeans(baseline.length, layers);
+    const total = sumLayerHeights(baseline.length, layers);
     const centerline = streamCenterlineFromBaseline(baseline, total);
     const centers = layerCenterSeries(layers, baseline);
     const centerlineWindows = derivativeWindowMetrics(centerline, 0.05);
@@ -509,11 +595,11 @@ function layerCenterSeries(layers, baseline) {
     for (const layer of layers) {
         const center = new Array(tLength).fill(0);
         for (let t = 0; t < tLength; t += 1) {
-            center[t] = baseline[t] + prefix[t] + 0.5 * layer.mean[t];
+            center[t] = baseline[t] + prefix[t] + 0.5 * layer.height[t];
         }
         centers.push(center);
         for (let t = 0; t < tLength; t += 1) {
-            prefix[t] += layer.mean[t];
+            prefix[t] += layer.height[t];
         }
     }
     return centers;

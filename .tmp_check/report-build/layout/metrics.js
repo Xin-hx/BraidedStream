@@ -1,8 +1,8 @@
 /**
  * Layout quality metrics used by UI panels and search routines.
  */
-import { computePidOrdering } from "../core/ranking";
-import { meanFinite, range } from "../core/utils";
+import { computePidOrdering } from "../core/ordering/pid.js";
+import { meanFinite, range } from "../core/utils.js";
 export function computeMetrics(dataset, beforeLayout, afterLayout, roi, invariant, orderedLayersForAfter, options = {}) {
     const idx = computeIndices(dataset.times.length, roi);
     const idxGlobal = range(0, dataset.times.length);
@@ -216,7 +216,7 @@ function thicknessError(referenceLayers, after, idx) {
     for (let k = 0; k < layers.length; k += 1) {
         for (const t of idx) {
             const thickness = after.yTop[k][t] - after.yBottom[k][t];
-            maxErr = Math.max(maxErr, Math.abs(thickness - layers[k].mean[t]));
+            maxErr = Math.max(maxErr, Math.abs(thickness - layers[k].height[t]));
         }
     }
     return maxErr;

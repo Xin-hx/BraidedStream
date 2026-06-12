@@ -1,3 +1,3 @@
-export * from "./display";
-export * from "./optimizing";
-export * from "./sineStream";
+export * from "./display.js";
+export * from "./optimizing.js";
+export * from "./sineStream.js";

@@ -8,11 +8,10 @@ import { clamp01, percentile, range } from "../core/utils";
 import { createAreaPath } from "./paths";
 import {
   angleAxisLabels,
+  createChartFrame,
   drawCrosshair,
   formatTimeTick,
   layoutExtentForIndices,
-  plotAreaFromSize,
-  readChartSize,
   type PlotArea
 } from "./chartUtils";
 import { diffColor, layerColor } from "../styles/palette";
@@ -65,15 +64,15 @@ export class InsetChart {
   private hoveredLayerId: string | null = null;
 
   constructor(private readonly svg: SVGSVGElement) {
-    const size = readChartSize(svg, 1180, 300, this.margin);
+    const frame = createChartFrame(svg, 1180, 300, this.margin);
+    const size = frame.size;
     this.width = size.width;
     this.height = size.height;
     this.innerWidth = size.innerWidth;
     this.innerHeight = size.innerHeight;
-    this.plotArea = plotAreaFromSize(size);
+    this.plotArea = frame.plotArea;
 
-    const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
-    this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
+    this.root = frame.root;
     this.titleGroup = this.root.append("g").attr("class", "inset-title");
     this.beforeGroup = this.root.append("g").attr("class", "inset-before");
     this.afterGroup = this.root.append("g").attr("class", "inset-after");

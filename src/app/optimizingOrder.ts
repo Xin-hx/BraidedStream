@@ -3,12 +3,11 @@ import {
   computePidOrdering,
   computePidOrderingScores,
   computeTemporalSelfInclusion
-} from "../ranking/pid";
-import type { PreparedDataset } from "../types";
-import { resolveOptimizingVariantConfig } from "../optimizing/config";
-import type { OptimizingVariantConfig } from "../optimizing/types";
-import { buildCenterOutOrder, buildInsideOutOrder, normalizedInputOrder } from "./display";
-import { optimizeLayerOrder } from "./sineStream";
+} from "../core/ordering/pid";
+import type { PreparedDataset } from "../core/types";
+import { resolveOptimizingVariantConfig, type OptimizingVariantConfig } from "../optimizingConfig";
+import { buildCenterOutOrder, buildInsideOutOrder, normalizedInputOrder } from "../core/ordering/display";
+import { optimizeLayerOrder } from "../core/ordering/sineStream";
 
 export interface OptimizingOrderResult {
   displayOrder: string[];

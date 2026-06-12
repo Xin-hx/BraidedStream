@@ -1,10 +1,13 @@
-import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
-import { buildCenterOutOrder, normalizeOrderForComparison, rankMap } from "../core/ordering";
-import { computePidOrdering } from "../core/ranking";
-import { computeStackedBoundaries } from "../core/stack";
-import { orderLayers } from "../core/validate";
-import { computeMetrics } from "./metrics";
-import { stackToBraidLayout } from "./searchUtils";
+/**
+ * PID ordering metric bundle assembly for comparison panels.
+ */
+import { computeBaseline } from "../core/baseline/compute.js";
+import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale.js";
+import { buildCenterOutOrder, normalizeOrderForComparison, orderLayers, rankMap } from "../core/ordering/display.js";
+import { computePidOrdering } from "../core/ordering/pid.js";
+import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack.js";
+import { toMultiscaleDiagnosticsSummary } from "./diagnostics.js";
+import { computeMetrics } from "./metrics.js";
 export function computePidOrderingMetrics(input) {
     const layerIds = input.dataset.layers.map((layer) => layer.id);
     const sineBaseOrder = normalizeOrderForComparison(input.sineOrder, layerIds, input.dataset.order);
@@ -28,14 +31,7 @@ export function computePidOrderingMetrics(input) {
         violations: [],
         maxThicknessError: 0
     };
-    const multiscaleSummary = {
-        method: multiscale.diagnostics.method,
-        verified: multiscale.diagnostics.verifiedMultiscale,
-        fallbackUsed: multiscale.diagnostics.fallbackUsed,
-        effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
-        threshold: multiscale.diagnostics.energyThreshold,
-        scaleBands: multiscale.diagnostics.scaleBands.map((band) => ({ scale: band.scale, ratio: band.ratio }))
-    };
+    const multiscaleSummary = toMultiscaleDiagnosticsSummary(multiscale.diagnostics);
     const core = computeMetrics(input.dataset, beforeLayout, afterLayout, input.roi, invariant, pidDisplayLayers, {
         semantic: {
             enableTpidCenterAlignment: true,

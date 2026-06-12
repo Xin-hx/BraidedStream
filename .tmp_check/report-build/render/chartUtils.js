@@ -6,7 +6,7 @@
  * layout modules.
  */
 import * as d3 from "d3";
-import { clamp } from "../core/utils";
+import { clamp } from "../core/utils.js";
 /** Read SVG dimensions and derive the inner plotting rectangle. */
 export function readChartSize(svg, fallbackWidth, fallbackHeight, margin) {
     const width = Number(svg.getAttribute("width") ?? String(fallbackWidth));
@@ -25,6 +25,16 @@ export function plotAreaFromSize(size) {
         top: size.margin.top,
         width: size.innerWidth,
         height: size.innerHeight
+    };
+}
+/** Initialize the shared SVG viewport and translated plotting root. */
+export function createChartFrame(svg, fallbackWidth, fallbackHeight, margin) {
+    const size = readChartSize(svg, fallbackWidth, fallbackHeight, margin);
+    const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${size.width} ${size.height}`);
+    return {
+        size,
+        plotArea: plotAreaFromSize(size),
+        root: rootSvg.append("g").attr("transform", `translate(${margin.left},${margin.top})`)
     };
 }
 /** Format UTC timestamps for compact axis ticks. */

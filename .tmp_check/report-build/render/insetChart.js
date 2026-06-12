@@ -2,26 +2,26 @@
  * Inset renderer for before/after/diff/split layout comparisons.
  */
 import * as d3 from "d3";
-import { roiBounds } from "../core/roi";
-import { clamp01, percentile, range } from "../core/utils";
-import { createAreaPath } from "./paths";
-import { angleAxisLabels, drawCrosshair, formatTimeTick, layoutExtentForIndices, plotAreaFromSize, readChartSize } from "./chartUtils";
-import { diffColor, layerColor } from "../styles/palette";
-import { boundaryUncertaintyAt } from "../core/validate";
-import { applyLayerHoverHighlight as applyPathLayerHoverHighlight } from "./layerHoverHighlight";
+import { roiBounds } from "../interactions/roi.js";
+import { clamp01, percentile, range } from "../core/utils.js";
+import { createAreaPath } from "./paths.js";
+import { angleAxisLabels, createChartFrame, drawCrosshair, formatTimeTick, layoutExtentForIndices } from "./chartUtils.js";
+import { diffColor, layerColor } from "../styles/palette.js";
+import { boundaryUncertaintyAt } from "../core/validate.js";
+import { applyLayerHoverHighlight as applyPathLayerHoverHighlight } from "./layerHoverHighlight.js";
 export class InsetChart {
     constructor(svg) {
         this.svg = svg;
         this.margin = { top: 24, right: 16, bottom: 44, left: 52 };
         this.hoveredLayerId = null;
-        const size = readChartSize(svg, 1180, 300, this.margin);
+        const frame = createChartFrame(svg, 1180, 300, this.margin);
+        const size = frame.size;
         this.width = size.width;
         this.height = size.height;
         this.innerWidth = size.innerWidth;
         this.innerHeight = size.innerHeight;
-        this.plotArea = plotAreaFromSize(size);
-        const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
-        this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
+        this.plotArea = frame.plotArea;
+        this.root = frame.root;
         this.titleGroup = this.root.append("g").attr("class", "inset-title");
         this.beforeGroup = this.root.append("g").attr("class", "inset-before");
         this.afterGroup = this.root.append("g").attr("class", "inset-after");

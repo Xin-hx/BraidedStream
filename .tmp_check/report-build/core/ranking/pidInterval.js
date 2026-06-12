@@ -1,4 +1,4 @@
-import { clamp, finiteOr, median, sortPair, sum } from "../math";
+import { clamp, finiteOr, median, sortPair, sum } from "../math.js";
 const QUANTILE_BAND_PAIRS = [
     ["p025", "p975"],
     ["p05", "p95"],

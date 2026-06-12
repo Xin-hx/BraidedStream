@@ -7,16 +7,15 @@ import type { LayerInput, PreparedDataset, ROI, StackLayout } from "../core/type
 import { createAreaPath } from "./paths";
 import {
   angleAxisLabels,
+  createChartFrame,
   drawCrosshair,
   formatTimeTick,
   layoutExtent,
-  plotAreaFromSize,
-  readChartSize,
   roiXRange,
   type PlotArea
 } from "./chartUtils";
 import { layerColor } from "../styles/palette";
-import { createRoiBrush, type RoiBrushController } from "../ui/brush";
+import { createRoiBrush, type RoiBrushController } from "../interactions/brush";
 
 export interface MainChartRenderArgs {
   dataset: PreparedDataset;
@@ -52,15 +51,15 @@ export class MainChart {
   private lastOnInsetRoiChange: ((roi: ROI | null) => void) | null = null;
 
   constructor(private readonly svg: SVGSVGElement) {
-    const size = readChartSize(svg, 1180, 360, this.margin);
+    const frame = createChartFrame(svg, 1180, 360, this.margin);
+    const size = frame.size;
     this.width = size.width;
     this.height = size.height;
     this.innerWidth = size.innerWidth;
     this.innerHeight = size.innerHeight;
-    this.plotArea = plotAreaFromSize(size);
+    this.plotArea = frame.plotArea;
 
-    const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
-    this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
+    this.root = frame.root;
     this.layersGroup = this.root.append("g").attr("class", "main-layers");
     this.roiGroup = this.root.append("g").attr("class", "main-roi");
     this.insetRoiGroup = this.root.append("g").attr("class", "main-inset-roi");

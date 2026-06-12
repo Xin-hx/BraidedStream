@@ -1,20 +1,23 @@
-import { median } from "../math";
+import { median } from "../utils.js";
+import { computeCenteredBaseline, computeLayerCenterFirstDifference, computeLayerHeightFirstDifference } from "./compute.js";
 /**
  * SineStream baseline computation using Gaussian-weighted adjustments.
  * Following: StreamLayout_2norm_Gauss from the SineStream paper.
  */
-export function computeSineStreamBaseline(tLength, layers, hooks) {
-    const centerType = hooks.centerType ?? "median";
+export function computeSineStreamBaseline(tLength, layers, params) {
+    const centerType = params.centerType ?? "median";
     const baseline = new Array(tLength).fill(0);
-    let totalSize = 0;
-    for (const layer of layers) {
-        totalSize += layer.mean[0];
+    const centeredBaseline = computeCenteredBaseline(tLength, layers);
+    const heightFirstDifferences = computeLayerHeightFirstDifference(tLength, layers);
+    const centerFirstDifferences = computeLayerCenterFirstDifference(tLength, layers);
+    if (tLength === 0) {
+        return baseline;
     }
-    baseline[0] = -0.5 * totalSize;
+    baseline[0] = centeredBaseline[0] ?? 0;
     for (let i = 1; i < tLength; i += 1) {
-        const thicknessChanges = layers.map((layer) => Math.abs(layer.mean[i] - layer.mean[i - 1]));
+        const thicknessChanges = heightFirstDifferences[i].map((value) => Math.abs(value));
         const c = computeThicknessChangeMetric(thicknessChanges, centerType);
-        const deltaG = computeGaussianWeightedAdjustment(layers, i, c);
+        const deltaG = computeGaussianWeightedAdjustment(layers, i, c, heightFirstDifferences[i], centerFirstDifferences[i]);
         baseline[i] = baseline[i - 1] + deltaG;
     }
     return baseline;
@@ -70,39 +73,26 @@ function computeThicknessChangeMetric(changes, centerType) {
             return curC;
     }
 }
-function computeGaussianWeightedAdjustment(layers, i, c) {
+function computeGaussianWeightedAdjustment(layers, i, c, heightFirstDifferences, centerFirstDifferences) {
     const n = layers.length;
-    const dFi = new Array(n);
-    const Fi = new Array(n);
-    const Qi = new Array(n);
-    for (let j = 0; j < n; j += 1) {
-        const current = layers[j].mean[i];
-        const previous = layers[j].mean[i - 1];
-        Fi[j] = current;
-        dFi[j] = current - previous;
-    }
-    for (let j = 0; j < n; j += 1) {
-        let p = 0;
-        for (let k = 0; k <= j; k += 1) {
-            p += 2 * dFi[k];
-        }
-        Qi[j] = (p - dFi[j]) / 2;
-    }
     let numerator = 0;
     let denominator = 0;
     for (let j = 0; j < n; j += 1) {
+        const Fi = layers[j].height[i];
+        const dFi = heightFirstDifferences[j] ?? 0;
+        const Qi = centerFirstDifferences[j] ?? 0;
         let gaussianWeight = 1;
         if (c !== 0 && Number.isFinite(c)) {
-            gaussianWeight = Math.exp(-((dFi[j] * dFi[j]) / (2 * c * c)));
+            gaussianWeight = Math.exp(-((dFi * dFi) / (2 * c * c)));
         }
-        const contribution = gaussianWeight * Fi[j];
+        const contribution = gaussianWeight * Fi;
         denominator += contribution;
-        numerator += contribution * Qi[j];
+        numerator += contribution * Qi;
     }
     if (Number.isFinite(denominator) === false || Math.abs(denominator) <= 1e-12) {
         let totalSizePrev = 0;
         for (let j = 0; j < n; j += 1) {
-            totalSizePrev += layers[j].mean[i - 1];
+            totalSizePrev += layers[j].height[i - 1];
         }
         return totalSizePrev / 2;
     }

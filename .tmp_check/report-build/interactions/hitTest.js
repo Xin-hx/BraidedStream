@@ -1,4 +1,4 @@
-import { clamp } from "../core/utils";
+import { clamp } from "../core/utils.js";
 export function pointerToPlot(svg, event, plotArea) {
     const point = clientPointToSvg(svg, event);
     const rawX = point.x - plotArea.left;

@@ -1,7 +1,7 @@
 /**
  * Validation and small data-access helpers shared by layout algorithms.
  */
-import type { LayerInput } from "./types";
+import type { InvariantSummary, LayerInput } from "./types";
 import { EPSILON } from "./utils";
 
 /**
@@ -87,4 +87,13 @@ export function boundaryUncertaintyAt(a: LayerInput, b: LayerInput, t: number): 
 /** Numeric equality check used by invariant and geometry code. */
 export function almostEqual(a: number, b: number, eps = EPSILON): boolean {
   return Math.abs(a - b) <= eps;
+}
+
+/** Empty invariant placeholder for layouts that are compared but not assertion-checked. */
+export function emptyInvariantSummary(): InvariantSummary {
+  return {
+    checked: false,
+    violations: [],
+    maxThicknessError: 0
+  };
 }

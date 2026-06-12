@@ -4,12 +4,12 @@
 import { computeBaseline } from "../core/baseline/compute";
 import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale";
 import type { BaselineParameters } from "../core/baseline/types";
-import { buildCenterOutOrder, normalizeOrderForComparison, orderLayers, rankMap } from "../core/ordering";
-import { computePidOrdering } from "../core/ranking/pid";
-import { computeStackedBoundaries } from "../core/stack";
+import { buildCenterOutOrder, normalizeOrderForComparison, orderLayers, rankMap } from "../core/ordering/display";
+import { computePidOrdering } from "../core/ordering/pid";
+import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack";
 import type { InvariantSummary, PidUncertaintySource, PreparedDataset, ROI } from "../core/types";
+import { toMultiscaleDiagnosticsSummary } from "./diagnostics";
 import { computeMetrics, type MetricResult, type MultiscaleDiagnosticsSummary } from "./metrics";
-import { stackToBraidLayout } from "./searchUtils";
 
 export interface PidOrderingMetricsInput {
   dataset: PreparedDataset;
@@ -71,14 +71,7 @@ export function computePidOrderingMetrics(input: PidOrderingMetricsInput): PidOr
     violations: [],
     maxThicknessError: 0
   };
-  const multiscaleSummary: MultiscaleDiagnosticsSummary = {
-    method: multiscale.diagnostics.method,
-    verified: multiscale.diagnostics.verifiedMultiscale,
-    fallbackUsed: multiscale.diagnostics.fallbackUsed,
-    effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
-    threshold: multiscale.diagnostics.energyThreshold,
-    scaleBands: multiscale.diagnostics.scaleBands.map((band) => ({ scale: band.scale, ratio: band.ratio }))
-  };
+  const multiscaleSummary: MultiscaleDiagnosticsSummary = toMultiscaleDiagnosticsSummary(multiscale.diagnostics);
   const core = computeMetrics(input.dataset, beforeLayout, afterLayout, input.roi, invariant, pidDisplayLayers, {
     semantic: {
       enableTpidCenterAlignment: true,

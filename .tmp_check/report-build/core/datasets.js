@@ -5,8 +5,8 @@
  * quantile interpolation, and uncertainty-band switching.
  */
 import * as d3 from "d3";
-import { generateSyntheticDataset } from "./synthetic";
-import { hasFinite, nearlyEqual, sum, toFiniteNumber } from "./utils";
+import { generateSyntheticDataset } from "./synthetic.js";
+import { hasFinite, nearlyEqual, sum, toFiniteNumber } from "./utils.js";
 /** Create the built-in synthetic example bundle. */
 export function createSyntheticBundle() {
     return {

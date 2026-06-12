@@ -3,8 +3,8 @@
  */
 import * as d3 from "d3";
 import type { PreparedDataset, ROI } from "../core/types";
-import { angleAxisLabels, formatTimeTick, plotAreaFromSize, readChartSize, type PlotArea } from "./chartUtils";
-import { createRoiBrush, type RoiBrushController } from "../ui/brush";
+import { angleAxisLabels, createChartFrame, formatTimeTick, type PlotArea } from "./chartUtils";
+import { createRoiBrush, type RoiBrushController } from "../interactions/brush";
 
 export interface OverviewRenderArgs {
   dataset: PreparedDataset;
@@ -31,15 +31,15 @@ export class OverviewChart {
   private readonly roiBrush: RoiBrushController;
 
   constructor(private readonly svg: SVGSVGElement) {
-    const size = readChartSize(svg, 1180, 118, this.margin);
+    const frame = createChartFrame(svg, 1180, 118, this.margin);
+    const size = frame.size;
     this.width = size.width;
     this.height = size.height;
     this.innerWidth = size.innerWidth;
     this.innerHeight = size.innerHeight;
-    this.plotArea = plotAreaFromSize(size);
+    this.plotArea = frame.plotArea;
 
-    const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
-    this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
+    this.root = frame.root;
     this.trendGroup = this.root.append("g").attr("class", "overview-trend");
     this.brushGroup = this.root.append("g").attr("class", "overview-brush");
     this.axisX = this.root.append("g").attr("class", "x-axis");

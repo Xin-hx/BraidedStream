@@ -1,13 +1,15 @@
-import { computeBaseline, computeMultiscaleDistributedBaseline } from "../core/baseline";
+import { computeBaseline } from "../core/baseline/compute.js";
+import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale.js";
 /**
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
-import { buildCenterOutOrder, normalizeOrderForComparison, optimizeLayerOrder } from "../core/ordering";
-import { computePidOrdering } from "../core/ranking";
-import { computeStackedBoundaries } from "../core/stack";
-import { orderLayers } from "../core/validate";
-import { computeMetrics } from "./metrics";
-import { compareSearchCandidates, discreteValues as discreteSearchValues, emptyInvariantSummary, finiteNumber, passReasons, regressionReasons, sanitizeCenterTypes, sanitizeRange as sanitizeSearchRange, scopeSummaryFromMetricRows, sortKeyFromParams, stackToBraidLayout } from "./searchUtils";
+import { buildCenterOutOrder, normalizeOrderForComparison, orderLayers } from "../core/ordering/display.js";
+import { optimizeLayerOrder } from "../core/ordering/sineStream.js";
+import { computePidOrdering } from "../core/ordering/pid.js";
+import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack.js";
+import { emptyInvariantSummary } from "../core/validate.js";
+import { computeMetrics } from "./metrics.js";
+import { discreteValues as discreteSearchValues, finiteNumber, passReasons, regressionReasons, runParameterGridSearch, sanitizeCenterTypes, sanitizeRange as sanitizeSearchRange, scopeSummaryFromMetricRows, sortKeyFromParams } from "./searchUtils.js";
 export function runPidVsSineSearch(input) {
     const searchSpace = sanitizeSearchSpace(input.searchSpace);
     const strengths = discreteSearchValues(searchSpace.baselineUncertaintyWeight);
@@ -24,56 +26,43 @@ export function runPidVsSineSearch(input) {
     const controlBaseline = computeBaseline(input.dataset.times, controlLayers, "sineStream", controlHooks);
     const controlLayout = computeStackedBoundaries(controlBaseline, controlLayers);
     const invariant = emptyInvariantSummary();
-    const candidates = [];
-    for (const centerType of searchSpace.centerTypes) {
-        const experimentHooks = {
-            ...(input.experimentBaselineHooks ?? {}),
-            centerType
-        };
-        for (const baselineUncertaintyWeight of strengths) {
-            for (const energyThreshold of thresholds) {
-                const params = {
-                    baselineCenterType: centerType,
-                    baselineUncertaintyWeight,
-                    energyThreshold
-                };
-                const multiscale = computeMultiscaleDistributedBaseline(input.dataset.times, experimentLayers, baselineUncertaintyWeight, experimentHooks, energyThreshold);
-                const experimentLayout = stackToBraidLayout(computeStackedBoundaries(multiscale.baseline, experimentLayers));
-                const metrics = computeMetrics(input.dataset, controlLayout, experimentLayout, input.roi, invariant, experimentLayers, {
-                    includeGlobalRows: true
-                });
-                const roi = scopeSummaryFromMetricRows(metrics.rows);
-                const global = scopeSummaryFromMetricRows(metrics.globalRows ?? metrics.rows);
-                const reasons = evaluateCandidate(roi, global, searchSpace.regressionGuardrailPct, multiscale.diagnostics.fallbackUsed, multiscale.diagnostics.fallbackReason);
-                candidates.push({
-                    params,
-                    pass: reasons.length === 0,
-                    reasons: reasons.length === 0 ? passReasons(roi, global) : reasons,
-                    roi,
-                    global,
-                    diagnostics: {
-                        fallbackUsed: multiscale.diagnostics.fallbackUsed,
-                        fallbackReason: multiscale.diagnostics.fallbackReason,
-                        verified: multiscale.diagnostics.verifiedMultiscale,
-                        effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
-                        threshold: multiscale.diagnostics.energyThreshold
-                    },
-                    sortKey: sortKeyFromParams(params)
-                });
-            }
+    const result = runParameterGridSearch({
+        centerTypes: searchSpace.centerTypes,
+        baselineUncertaintyWeights: strengths,
+        energyThresholds: thresholds,
+        topN: searchSpace.topN,
+        buildCandidate: (params) => {
+            const experimentHooks = {
+                ...(input.experimentBaselineHooks ?? {}),
+                centerType: params.baselineCenterType
+            };
+            const multiscale = computeMultiscaleDistributedBaseline(input.dataset.times, experimentLayers, params.baselineUncertaintyWeight, experimentHooks, params.energyThreshold);
+            const experimentLayout = stackToBraidLayout(computeStackedBoundaries(multiscale.baseline, experimentLayers));
+            const metrics = computeMetrics(input.dataset, controlLayout, experimentLayout, input.roi, invariant, experimentLayers, {
+                includeGlobalRows: true
+            });
+            const roi = scopeSummaryFromMetricRows(metrics.rows);
+            const global = scopeSummaryFromMetricRows(metrics.globalRows ?? metrics.rows);
+            const reasons = evaluateCandidate(roi, global, searchSpace.regressionGuardrailPct, multiscale.diagnostics.fallbackUsed, multiscale.diagnostics.fallbackReason);
+            return {
+                params,
+                pass: reasons.length === 0,
+                reasons: reasons.length === 0 ? passReasons(roi, global) : reasons,
+                roi,
+                global,
+                diagnostics: {
+                    fallbackUsed: multiscale.diagnostics.fallbackUsed,
+                    fallbackReason: multiscale.diagnostics.fallbackReason,
+                    verified: multiscale.diagnostics.verifiedMultiscale,
+                    effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
+                    threshold: multiscale.diagnostics.energyThreshold
+                },
+                sortKey: sortKeyFromParams(params)
+            };
         }
-    }
-    candidates.sort(compareSearchCandidates);
-    const topN = Math.max(1, Math.round(searchSpace.topN));
+    });
     return {
-        summary: {
-            totalCandidates: candidates.length,
-            passCount: candidates.filter((candidate) => candidate.pass).length,
-            failCount: candidates.filter((candidate) => !candidate.pass).length
-        },
-        best: candidates[0] ?? null,
-        candidates,
-        topCandidates: candidates.slice(0, topN),
+        ...result,
         controlOrder,
         experimentOrder
     };

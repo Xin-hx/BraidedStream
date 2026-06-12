@@ -1,6 +1,6 @@
 # Multiscale Centerline Readability Check
 
-Generated at: 2026-05-28T03:35:30.827Z
+Generated at: 2026-06-11T19:28:09.134Z
 
 ## Formal problem
 
@@ -22,64 +22,9 @@ Lower J is better. For the current implementation, SineStream is the anchor and 
 - Wiggle energy: sum of squared second differences of layer centerlines. Lower means less stream wiggle.
 - Corridor violation: amount by which centerline amplitude exceeds 18% of local stream thickness. Lower keeps the wave bounded.
 
-## Project data: Covid H1, TPID order, SineStream baseline -> multiscale baseline
+## Project data: Covid H1
 
-- time points: 135
-- layers: 56
-- ordering notes: TPID scoring: alpha=0.80 | top PID-time layer: NE score=0.461
-
-Diagnostics:
-- verifiedMultiscale: yes
-- fallback: no
-- energyThreshold: 0.0800
-- selected/effective scales: 6/6
-- active coefficients: 16:0.50, 256:-1.00, 2:1.00, 64:0.50, 8:1.00, 4:-0.20
-- top scale energy: 16:21.7%, 256:20.7%, 2:14.8%, 64:13.8%, 8:11.7%, 4:8.9%
-- internal objective: 8.2000 -> 6.8718
-
-### Main window
-
-- ROI: [57, 90] (2021-08-28 to 2022-04-16)
-- Status: PASS
-- Notes: all core centerline checks passed
-
-![Project data: Covid H1, TPID order, SineStream baseline -> multiscale baseline Main window comparison](assets/multiscale-project-data-covid-h1-tpid-order-sinestream-baseline-multiscale-baseline-main-window.svg)
-
-| Metric | SineStream | Multiscale | Delta | Improvement | Better |
-|---|---:|---:|---:|---:|---|
-| Readability score | 4.8056 | 3.5783 | -1.2273 | +25.54% | down |
-| Centerline peak derivative | 88790.8 | 37828.0 | -50962.8 | +57.40% | down |
-| Derivative concentration | 4.5160 | 3.5041 | -1.0118 | +22.41% | down |
-| Top-5% derivative mass | 0.2543 | 0.2091 | -0.0452 | +17.78% | down |
-| Slope coverage | 0.8993 | 0.9388 | 0.0396 | +4.40% | up |
-| Centerline curvature | 25874.1 | 13093.7 | -12780.4 | +49.39% | down |
-| Wiggle energy | 3.806e+11 | 3.700e+11 | -1.064e+10 | +2.80% | down |
-| Layer mean slope | 52640.0 | 53615.9 | 975.8382 | -1.85% | down |
-| Layer max slope | 9.960e+5 | 9.925e+5 | -3511.2 | +0.35% | down |
-| Layer curvature | 51430.5 | 51154.6 | -275.8820 | +0.54% | down |
-| Corridor violation | 4.477e-3 | 9.810e-3 | 5.332e-3 | -119.10% | down |
-
-### ROI
-
-- ROI: [72, 85] (2021-12-11 to 2022-03-12)
-- Status: PASS
-- Notes: all core centerline checks passed
-
-![Project data: Covid H1, TPID order, SineStream baseline -> multiscale baseline ROI comparison](assets/multiscale-project-data-covid-h1-tpid-order-sinestream-baseline-multiscale-baseline-roi.svg)
-
-| Metric | SineStream | Multiscale | Delta | Improvement | Better |
-|---|---:|---:|---:|---:|---|
-| Readability score | 4.8000 | 3.8500 | -0.9500 | +19.79% | down |
-| Centerline peak derivative | 88790.8 | 37828.0 | -50962.8 | +57.40% | down |
-| Derivative concentration | 2.4168 | 2.3151 | -0.1017 | +4.21% | down |
-| Top-5% derivative mass | 0.1859 | 0.1781 | -7.821e-3 | +4.21% | down |
-| Slope coverage | 0.8761 | 0.9275 | 0.0514 | +5.86% | up |
-| Centerline curvature | 52107.5 | 22147.5 | -29960.0 | +57.50% | down |
-| Wiggle energy | 3.692e+11 | 3.585e+11 | -1.074e+10 | +2.91% | down |
-| Layer mean slope | 1.156e+5 | 1.179e+5 | 2268.5 | -1.96% | down |
-| Layer max slope | 9.960e+5 | 9.925e+5 | -3511.2 | +0.35% | down |
-| Layer curvature | 1.136e+5 | 1.125e+5 | -1058.3 | +0.93% | down |
-| Corridor violation | 0.0000 | 0.0000 | 0.0000 | +0.00% | down |
+- ERROR: TypeError: Cannot read properties of undefined (reading 'length')
 
 ## Simulated burst: asymmetric layer burst, TPID order, SineStream baseline -> multiscale baseline
 

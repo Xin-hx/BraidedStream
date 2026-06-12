@@ -5,11 +5,9 @@
  * groups below build the hierarchy, solve optimal leaf ordering, and evaluate
  * pairwise distances.
  */
-import { FIXED_SEED } from "../seed";
-import { roiBounds } from "../roi";
-import { median } from "../math";
-import { seededShuffleIndices } from "../random";
-import { layerUncertaintyAt } from "../validate";
+import { roiBounds } from "../../interactions/roi.js";
+import { FIXED_SEED, median, seededShuffleIndices } from "../utils.js";
+import { layerUncertaintyAt } from "../validate.js";
 const ORIENTATION_ENUM = [
     [0, 0, 1, 1],
     [0, 1, 1, 0],
@@ -32,7 +30,7 @@ export function optimizeLayerOrder(layers, roi, config, initialOrder) {
             }
         };
     }
-    const [left, right] = roiBounds(layers[0].mean.length, roi);
+    const [left, right] = roiBounds(layers[0].height.length, roi);
     const options = {
         weightType: config.weightType ?? "max",
         useThicknessWeight: config.useThicknessWeight !== false,
@@ -125,7 +123,7 @@ function buildLeafNodes(layers, shuffledIndices) {
     for (let i = 0; i < shuffledIndices.length; i += 1) {
         const layerIndex = shuffledIndices[i];
         const layer = layers[layerIndex];
-        const size = layer.mean.slice();
+        const size = layer.height.slice();
         const dFi = toDiff(size);
         const uncertainty = size.map((_v, t) => Math.max(0, layerUncertaintyAt(layer, t)));
         nodes.push({

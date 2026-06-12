@@ -1,4 +1,4 @@
-import { roiBounds } from "../core/roi";
+import { roiBounds } from "../interactions/roi.js";
 export const CENTERLINE_READABILITY_DIRECTIONS = {
     sampleCount: "up",
     derivativeCount: "up",
@@ -33,7 +33,7 @@ export function streamTotal(layers, length) {
     const total = new Array(length).fill(0);
     for (const layer of layers) {
         for (let t = 0; t < length; t += 1) {
-            total[t] += Math.max(0, layer.mean[t] ?? 0);
+            total[t] += Math.max(0, layer.height[t] ?? 0);
         }
     }
     return total;
@@ -167,7 +167,7 @@ function layerGeometryMetrics(layers, baseline, left, right) {
     for (const layer of layers) {
         const center = new Array(baseline.length).fill(0);
         for (let t = 0; t < baseline.length; t += 1) {
-            center[t] = baseline[t] + prefix[t] + 0.5 * (layer.mean[t] ?? 0);
+            center[t] = baseline[t] + prefix[t] + 0.5 * (layer.height[t] ?? 0);
         }
         for (let t = Math.max(left + 1, 1); t <= right; t += 1) {
             const slope = Math.abs(center[t] - center[t - 1]);
@@ -178,7 +178,7 @@ function layerGeometryMetrics(layers, baseline, left, right) {
             curvatures.push(Math.abs(center[t] - 2 * center[t - 1] + center[t - 2]));
         }
         for (let t = 0; t < baseline.length; t += 1) {
-            prefix[t] += Math.max(0, layer.mean[t] ?? 0);
+            prefix[t] += Math.max(0, layer.height[t] ?? 0);
         }
     }
     return {

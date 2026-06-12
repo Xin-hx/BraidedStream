@@ -1,18 +1,19 @@
-import { computeBaseline } from "../core/baseline/compute";
+import { computeBaseline, computeOptimizingBaseline } from "../core/baseline/compute";
 import { computeBraidLayout } from "../core/NOT_IN_USE/braid";
 import type { DatasetBundle } from "../data/datasets";
-import { optimizeLayerOrder, orderLayers, type OrderOptimizationResult } from "../core/ordering";
+import { orderLayers } from "../core/ordering/display";
+import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/ordering/sineStream";
+import { computeOptimizingOrder } from "./optimizingOrder";
 import {
-  computeOptimizingBaseline,
-  computeOptimizingOrder,
   optimizingBaselineModeLabel,
   optimizingStageLabel,
   orderingScoringLabel,
   resolveOptimizingVariantConfig,
   type OptimizingVariantConfig
-} from "../core/optimizing";
+} from "../optimizingConfig";
 import { clampRoiToParent, normalizeROI } from "../interactions/roi";
-import { computeStackedBoundaries } from "../core/stack";
+import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack";
+import { emptyInvariantSummary } from "../core/validate";
 import type {
   BaselineMode,
   BraidLayout,
@@ -26,6 +27,7 @@ import type {
   StackLayout
 } from "../core/types";
 import { preprocessDataset } from "../data/transforms";
+import { toMultiscaleDiagnosticsSummary } from "../layout/diagnostics";
 import { computeMetrics, type MetricResult } from "../layout/metrics";
 import type { AppState } from "../state/appState";
 
@@ -43,7 +45,7 @@ export interface SceneBuildResult {
   pidUncertaintySource: PidUncertaintySource | null;
 }
 
-export type { OptimizingVariantConfig } from "../core/optimizing";
+export type { OptimizingVariantConfig } from "../optimizingConfig";
 
 export function buildScene(bundle: DatasetBundle, state: AppState): SceneBuildResult {
   const context = prepareDatasetWindowContext(bundle, state);
@@ -120,34 +122,7 @@ export function buildOptimizingVariantScene(
   const metrics = computeMetrics(context.dataset, layoutStack, layout, context.insetRoi, invariant, orderedLayers, {
     includeGlobalRows: true,
     multiscale: baselineResult.multiscaleDiagnostics
-      ? {
-          method: baselineResult.multiscaleDiagnostics.method,
-          verified: baselineResult.multiscaleDiagnostics.verifiedMultiscale,
-          fallbackUsed: baselineResult.multiscaleDiagnostics.fallbackUsed,
-          effectiveScaleCount: baselineResult.multiscaleDiagnostics.effectiveScaleCount,
-          selectedScaleCount: baselineResult.multiscaleDiagnostics.selectedScaleCount,
-          threshold: baselineResult.multiscaleDiagnostics.energyThreshold,
-          scaleBands: baselineResult.multiscaleDiagnostics.scaleBands.map((band) => ({
-            scale: band.scale,
-            ratio: band.ratio
-          })),
-          scaleCoefficients: baselineResult.multiscaleDiagnostics.scaleCoefficients,
-          objectiveBefore: baselineResult.multiscaleDiagnostics.objectiveBefore,
-          objectiveAfter: baselineResult.multiscaleDiagnostics.objectiveAfter,
-          meanSlopeBefore: baselineResult.multiscaleDiagnostics.meanSlopeBefore,
-          meanSlopeAfter: baselineResult.multiscaleDiagnostics.meanSlopeAfter,
-          maxSlopeBefore: baselineResult.multiscaleDiagnostics.maxSlopeBefore,
-          maxSlopeAfter: baselineResult.multiscaleDiagnostics.maxSlopeAfter,
-          curvatureBefore: baselineResult.multiscaleDiagnostics.curvatureBefore,
-          curvatureAfter: baselineResult.multiscaleDiagnostics.curvatureAfter,
-          burstBefore: baselineResult.multiscaleDiagnostics.burstBefore,
-          burstAfter: baselineResult.multiscaleDiagnostics.burstAfter,
-          derivativeConcentrationBefore: baselineResult.multiscaleDiagnostics.derivativeConcentrationBefore,
-          derivativeConcentrationAfter: baselineResult.multiscaleDiagnostics.derivativeConcentrationAfter,
-          centerlineSlopeCoverageBefore: baselineResult.multiscaleDiagnostics.centerlineSlopeCoverageBefore,
-          centerlineSlopeCoverageAfter: baselineResult.multiscaleDiagnostics.centerlineSlopeCoverageAfter,
-          globalMeanSlopeGuardrailPassed: baselineResult.multiscaleDiagnostics.globalMeanSlopeGuardrailPassed
-        }
+      ? toMultiscaleDiagnosticsSummary(baselineResult.multiscaleDiagnostics)
       : null
   });
   const diagnosticsNotes = [
@@ -336,14 +311,6 @@ function prepareSceneContext(bundle: DatasetBundle, state: AppState, options: Sc
     optimized,
     orderedLayers,
     preprocessedNotes: base.preprocessedNotes
-  };
-}
-
-function emptyInvariantSummary(): InvariantSummary {
-  return {
-    checked: false,
-    violations: [],
-    maxThicknessError: 0
   };
 }
 
@@ -609,27 +576,4 @@ function checkRoiSupportContinuity(
       }
     }
   }
-}
-
-function stackToBraidLayout(layout: StackLayout): BraidLayout {
-  const tLength = layout.baseline.length;
-  const gapCount = Math.max(0, layout.yBottom.length - 1);
-  return {
-    baseline: layout.baseline.slice(),
-    yBottom: layout.yBottom.map((row) => row.slice()),
-    yTop: layout.yTop.map((row) => row.slice()),
-    omega: new Array<number>(tLength).fill(0),
-    gapsPx: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
-    gapsValue: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
-    sumGapPx: new Array<number>(tLength).fill(0),
-    roiSupport: null,
-    diagnostics: {
-      spacingObjective: 0,
-      spacingUncertaintyTerm: 0,
-      spacingSlopeTerm: 0,
-      spacingTemporalTerm: 0,
-      spacingIterations: 0,
-      spacingObjectiveHistory: []
-    }
-  };
 }

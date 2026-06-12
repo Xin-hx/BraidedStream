@@ -1,21 +1,20 @@
 import * as d3 from "d3";
-import { computeContourPid } from "../core/ranking";
-import { roiBounds } from "../core/roi";
-import { clamp } from "../core/utils";
-import { createAreaPath } from "./paths";
-import { angleAxisLabels, formatTimeTick, plotAreaFromSize, readChartSize } from "./chartUtils";
+import { computeContourPid } from "../core/ordering/pid.js";
+import { roiBounds } from "../interactions/roi.js";
+import { clamp } from "../core/utils.js";
+import { createAreaPath } from "./paths.js";
+import { angleAxisLabels, createChartFrame, formatTimeTick } from "./chartUtils.js";
 export class ContourBoxplotChart {
     constructor(svg) {
         this.svg = svg;
         this.margin = { top: 26, right: 18, bottom: 40, left: 52 };
-        const size = readChartSize(svg, 1180, 190, this.margin);
+        const frame = createChartFrame(svg, 1180, 190, this.margin);
+        const size = frame.size;
         this.width = size.width;
         this.height = size.height;
         this.innerWidth = size.innerWidth;
         this.innerHeight = size.innerHeight;
-        plotAreaFromSize(size);
-        const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
-        this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
+        this.root = frame.root;
         this.plotGroup = this.root.append("g").attr("class", "contour-boxplot-layers");
         this.titleGroup = this.root.append("g").attr("class", "contour-boxplot-title");
         this.axisX = this.root.append("g").attr("class", "x-axis");

@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { defaultWindow } from "../app/sceneBuilder";
 import { createSyntheticBundle, loadCovidBundle, type DatasetBundle } from "../data/datasets";
-import { orderLayers } from "../core/ordering";
+import { orderLayers } from "../core/ordering/display";
 import { normalizeROI } from "../interactions/roi";
 import type { DatasetKind, PreparedDataset, ROI } from "../core/types";
 import { preprocessDataset } from "../data/transforms";

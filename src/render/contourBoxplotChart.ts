@@ -1,10 +1,10 @@
 import * as d3 from "d3";
-import { computeContourPid } from "../core/ranking/pid";
+import { computeContourPid } from "../core/ordering/pid";
 import { roiBounds } from "../interactions/roi";
 import type { LayerInput, PidUncertaintySource, PreparedDataset, ROI } from "../core/types";
 import { clamp } from "../core/utils";
 import { createAreaPath } from "./paths";
-import { angleAxisLabels, formatTimeTick, plotAreaFromSize, readChartSize } from "./chartUtils";
+import { angleAxisLabels, createChartFrame, formatTimeTick } from "./chartUtils";
 
 export interface ContourBoxplotRenderArgs {
   dataset: PreparedDataset;
@@ -36,15 +36,14 @@ export class ContourBoxplotChart {
   private readonly axisY: d3.Selection<SVGGElement, unknown, null, undefined>;
 
   constructor(private readonly svg: SVGSVGElement) {
-    const size = readChartSize(svg, 1180, 190, this.margin);
+    const frame = createChartFrame(svg, 1180, 190, this.margin);
+    const size = frame.size;
     this.width = size.width;
     this.height = size.height;
     this.innerWidth = size.innerWidth;
     this.innerHeight = size.innerHeight;
-    plotAreaFromSize(size);
 
-    const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${this.width} ${this.height}`);
-    this.root = rootSvg.append("g").attr("transform", `translate(${this.margin.left},${this.margin.top})`);
+    this.root = frame.root;
     this.plotGroup = this.root.append("g").attr("class", "contour-boxplot-layers");
     this.titleGroup = this.root.append("g").attr("class", "contour-boxplot-title");
     this.axisX = this.root.append("g").attr("class", "x-axis");

@@ -1,4 +1,4 @@
-import { FIXED_SEED } from "../core/seed";
+import { FIXED_SEED } from "../core/utils.js";
 export function createInitialState() {
     return {
         datasetKind: "covid",

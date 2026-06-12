@@ -1,14 +1,14 @@
-import { EPSILON } from "./math";
+import { EPSILON } from "./utils.js";
 /**
- * Assert that all per-time layer series match the dataset timeline length.
- * Series normalization is handled in data ingestion/preprocessing.
+ * Assert that all per-time layer series match the dataset timeline length. 时间序列校验，每一层长度一致，每个时间点都有值
+ * Series normalization is handled in data ingestion/preprocessing. 缺失值补0在数据预处理阶段完成
  */
 export function validateTimeLengths(times, layers) {
     if (times.length === 0) {
         throw new Error("times must not be empty");
     }
     for (const layer of layers) {
-        if (layer.mean.length !== times.length) {
+        if (layer.height.length !== times.length) {
             throw new Error(`Layer ${layer.id} mean length mismatch: expected ${times.length}`);
         }
         if (layer.unc && layer.unc.length !== times.length) {
@@ -48,27 +48,6 @@ export function validateTimeLengths(times, layers) {
         }
     }
 }
-/** Reorder layers by id, rejecting missing or duplicate ids. */
-export function orderLayers(layers, order) {
-    const byId = new Map(layers.map((layer) => [layer.id, layer]));
-    const seen = new Set();
-    const ordered = [];
-    for (const id of order) {
-        const layer = byId.get(id);
-        if (!layer) {
-            throw new Error(`order references unknown layer id: ${id}`);
-        }
-        if (seen.has(id)) {
-            throw new Error(`order contains duplicate id: ${id}`);
-        }
-        seen.add(id);
-        ordered.push(layer);
-    }
-    if (ordered.length !== layers.length) {
-        throw new Error("order length must match layers length");
-    }
-    return ordered;
-}
 /** Estimate a layer's uncertainty spread at one time sample. */
 export function layerUncertaintyAt(layer, t) {
     if (layer.quantiles) {
@@ -96,4 +75,12 @@ export function boundaryUncertaintyAt(a, b, t) {
 /** Numeric equality check used by invariant and geometry code. */
 export function almostEqual(a, b, eps = EPSILON) {
     return Math.abs(a - b) <= eps;
+}
+/** Empty invariant placeholder for layouts that are compared but not assertion-checked. */
+export function emptyInvariantSummary() {
+    return {
+        checked: false,
+        violations: [],
+        maxThicknessError: 0
+    };
 }

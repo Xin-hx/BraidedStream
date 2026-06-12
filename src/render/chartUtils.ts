@@ -31,6 +31,12 @@ export interface PlotArea {
   height: number;
 }
 
+export interface ChartFrame {
+  size: ChartSize;
+  plotArea: PlotArea;
+  root: d3.Selection<SVGGElement, unknown, null, undefined>;
+}
+
 /** Read SVG dimensions and derive the inner plotting rectangle. */
 export function readChartSize(svg: SVGSVGElement, fallbackWidth: number, fallbackHeight: number, margin: ChartMargin): ChartSize {
   const width = Number(svg.getAttribute("width") ?? String(fallbackWidth));
@@ -50,6 +56,22 @@ export function plotAreaFromSize(size: ChartSize): PlotArea {
     top: size.margin.top,
     width: size.innerWidth,
     height: size.innerHeight
+  };
+}
+
+/** Initialize the shared SVG viewport and translated plotting root. */
+export function createChartFrame(
+  svg: SVGSVGElement,
+  fallbackWidth: number,
+  fallbackHeight: number,
+  margin: ChartMargin
+): ChartFrame {
+  const size = readChartSize(svg, fallbackWidth, fallbackHeight, margin);
+  const rootSvg = d3.select(svg).attr("viewBox", `0 0 ${size.width} ${size.height}`);
+  return {
+    size,
+    plotArea: plotAreaFromSize(size),
+    root: rootSvg.append("g").attr("transform", `translate(${margin.left},${margin.top})`)
   };
 }
 

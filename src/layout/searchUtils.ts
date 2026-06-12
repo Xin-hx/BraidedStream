@@ -4,7 +4,6 @@
  * Multiscale-only and PID-vs-Sine experiments use different setup logic but
  * share range sanitization, candidate summaries, and sorting rules.
  */
-import type { BraidLayout, InvariantSummary, StackLayout } from "../core/types";
 import { clamp, round } from "../core/utils";
 import type { MetricRow } from "./metrics";
 
@@ -39,6 +38,41 @@ export interface SearchCandidateForSort {
   roi: ScopeSummary;
   global: ScopeSummary;
   sortKey: string;
+}
+
+export interface SearchCandidateParams {
+  baselineCenterType: SearchCenterType;
+  baselineUncertaintyWeight: number;
+  energyThreshold: number;
+}
+
+export interface SearchCandidateDiagnostics {
+  fallbackUsed: boolean;
+  fallbackReason: string | null;
+  verified: boolean;
+  effectiveScaleCount: number;
+  threshold: number;
+}
+
+export interface SearchSummary {
+  totalCandidates: number;
+  passCount: number;
+  failCount: number;
+}
+
+export interface ParameterGridSearchOptions<TCandidate extends SearchCandidateForSort> {
+  centerTypes: SearchCenterType[];
+  baselineUncertaintyWeights: number[];
+  energyThresholds: number[];
+  topN: number;
+  buildCandidate: (params: SearchCandidateParams) => TCandidate;
+}
+
+export interface ParameterGridSearchResult<TCandidate extends SearchCandidateForSort> {
+  summary: SearchSummary;
+  best: TCandidate | null;
+  candidates: TCandidate[];
+  topCandidates: TCandidate[];
 }
 
 /** Normalize user-provided center type sets. */
@@ -141,6 +175,41 @@ export function compareSearchCandidates(a: SearchCandidateForSort, b: SearchCand
   return a.sortKey.localeCompare(b.sortKey);
 }
 
+/** Shared grid-search shell for layout experiments that vary center, strength, and threshold. */
+export function runParameterGridSearch<TCandidate extends SearchCandidateForSort>(
+  options: ParameterGridSearchOptions<TCandidate>
+): ParameterGridSearchResult<TCandidate> {
+  const candidates: TCandidate[] = [];
+
+  for (const baselineCenterType of options.centerTypes) {
+    for (const baselineUncertaintyWeight of options.baselineUncertaintyWeights) {
+      for (const energyThreshold of options.energyThresholds) {
+        candidates.push(
+          options.buildCandidate({
+            baselineCenterType,
+            baselineUncertaintyWeight,
+            energyThreshold
+          })
+        );
+      }
+    }
+  }
+
+  candidates.sort(compareSearchCandidates);
+  const topN = Math.max(1, Math.round(options.topN));
+
+  return {
+    summary: {
+      totalCandidates: candidates.length,
+      passCount: candidates.filter((item) => item.pass).length,
+      failCount: candidates.filter((item) => !item.pass).length
+    },
+    best: candidates[0] ?? null,
+    candidates,
+    topCandidates: candidates.slice(0, topN)
+  };
+}
+
 /** Stable sort key for parameter combinations. */
 export function sortKeyFromParams(params: {
   baselineCenterType: SearchCenterType;
@@ -152,31 +221,6 @@ export function sortKeyFromParams(params: {
     params.baselineUncertaintyWeight.toFixed(6),
     params.energyThreshold.toFixed(6)
   ].join("|");
-}
-
-/** Empty invariant placeholder for search-only layouts. */
-export function emptyInvariantSummary(): InvariantSummary {
-  return {
-    checked: false,
-    violations: [],
-    maxThicknessError: 0
-  };
-}
-
-/** Wrap a plain stack layout in the BraidLayout shape expected by metrics. */
-export function stackToBraidLayout(layout: StackLayout): BraidLayout {
-  const tLength = layout.baseline.length;
-  const gapCount = Math.max(0, layout.yBottom.length - 1);
-  return {
-    baseline: layout.baseline.slice(),
-    yBottom: layout.yBottom.map((row) => row.slice()),
-    yTop: layout.yTop.map((row) => row.slice()),
-    omega: new Array<number>(tLength).fill(0),
-    gapsPx: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
-    gapsValue: Array.from({ length: gapCount }, () => new Array<number>(tLength).fill(0)),
-    sumGapPx: new Array<number>(tLength).fill(0),
-    roiSupport: null
-  };
 }
 
 export function finiteNumber(value: number, fallback: number): number {

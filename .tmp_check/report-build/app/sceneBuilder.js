@@ -1,12 +1,15 @@
-import { computeBaseline } from "../core/baseline";
-import { computeBraidLayout } from "../core/braid";
-import { optimizeLayerOrder } from "../core/ordering";
-import { computeOptimizingBaseline, computeOptimizingOrder, optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../core/optimizing";
-import { clampRoiToParent, normalizeROI } from "../core/roi";
-import { computeStackedBoundaries } from "../core/stack";
-import { orderLayers } from "../core/validate";
-import { preprocessDataset } from "../data/transforms";
-import { computeMetrics } from "../layout/metrics";
+import { computeBaseline, computeOptimizingBaseline } from "../core/baseline/compute.js";
+import { computeBraidLayout } from "../core/NOT_IN_USE/braid.js";
+import { orderLayers } from "../core/ordering/display.js";
+import { optimizeLayerOrder } from "../core/ordering/sineStream.js";
+import { computeOptimizingOrder } from "./optimizingOrder.js";
+import { optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../optimizingConfig.js";
+import { clampRoiToParent, normalizeROI } from "../interactions/roi.js";
+import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack.js";
+import { emptyInvariantSummary } from "../core/validate.js";
+import { preprocessDataset } from "../data/transforms.js";
+import { toMultiscaleDiagnosticsSummary } from "../layout/diagnostics.js";
+import { computeMetrics } from "../layout/metrics.js";
 export function buildScene(bundle, state) {
     const context = prepareDatasetWindowContext(bundle, state);
     const orderedLayers = orderLayers(context.dataset.layers, context.dataset.order);
@@ -67,34 +70,7 @@ export function buildOptimizingVariantScene(bundle, state, config) {
     const metrics = computeMetrics(context.dataset, layoutStack, layout, context.insetRoi, invariant, orderedLayers, {
         includeGlobalRows: true,
         multiscale: baselineResult.multiscaleDiagnostics
-            ? {
-                method: baselineResult.multiscaleDiagnostics.method,
-                verified: baselineResult.multiscaleDiagnostics.verifiedMultiscale,
-                fallbackUsed: baselineResult.multiscaleDiagnostics.fallbackUsed,
-                effectiveScaleCount: baselineResult.multiscaleDiagnostics.effectiveScaleCount,
-                selectedScaleCount: baselineResult.multiscaleDiagnostics.selectedScaleCount,
-                threshold: baselineResult.multiscaleDiagnostics.energyThreshold,
-                scaleBands: baselineResult.multiscaleDiagnostics.scaleBands.map((band) => ({
-                    scale: band.scale,
-                    ratio: band.ratio
-                })),
-                scaleCoefficients: baselineResult.multiscaleDiagnostics.scaleCoefficients,
-                objectiveBefore: baselineResult.multiscaleDiagnostics.objectiveBefore,
-                objectiveAfter: baselineResult.multiscaleDiagnostics.objectiveAfter,
-                meanSlopeBefore: baselineResult.multiscaleDiagnostics.meanSlopeBefore,
-                meanSlopeAfter: baselineResult.multiscaleDiagnostics.meanSlopeAfter,
-                maxSlopeBefore: baselineResult.multiscaleDiagnostics.maxSlopeBefore,
-                maxSlopeAfter: baselineResult.multiscaleDiagnostics.maxSlopeAfter,
-                curvatureBefore: baselineResult.multiscaleDiagnostics.curvatureBefore,
-                curvatureAfter: baselineResult.multiscaleDiagnostics.curvatureAfter,
-                burstBefore: baselineResult.multiscaleDiagnostics.burstBefore,
-                burstAfter: baselineResult.multiscaleDiagnostics.burstAfter,
-                derivativeConcentrationBefore: baselineResult.multiscaleDiagnostics.derivativeConcentrationBefore,
-                derivativeConcentrationAfter: baselineResult.multiscaleDiagnostics.derivativeConcentrationAfter,
-                centerlineSlopeCoverageBefore: baselineResult.multiscaleDiagnostics.centerlineSlopeCoverageBefore,
-                centerlineSlopeCoverageAfter: baselineResult.multiscaleDiagnostics.centerlineSlopeCoverageAfter,
-                globalMeanSlopeGuardrailPassed: baselineResult.multiscaleDiagnostics.globalMeanSlopeGuardrailPassed
-            }
+            ? toMultiscaleDiagnosticsSummary(baselineResult.multiscaleDiagnostics)
             : null
     });
     const diagnosticsNotes = [
@@ -239,13 +215,6 @@ function prepareSceneContext(bundle, state, options) {
         preprocessedNotes: base.preprocessedNotes
     };
 }
-function emptyInvariantSummary() {
-    return {
-        checked: false,
-        violations: [],
-        maxThicknessError: 0
-    };
-}
 function baselineHooksFromState(state) {
     return {
         centerType: state.optimization.baselineCenterType ?? "median",
@@ -326,7 +295,7 @@ function runInvariantChecks(orderedLayers, base, braided, _roi, options) {
     for (let k = 0; k < kLength; k += 1) {
         for (let t = 0; t < tLength; t += 1) {
             const thickness = braided.yTop[k][t] - braided.yBottom[k][t];
-            const err = Math.abs(thickness - orderedLayers[k].mean[t]);
+            const err = Math.abs(thickness - orderedLayers[k].height[t]);
             maxThicknessError = Math.max(maxThicknessError, err);
             if (err > eps) {
                 pushViolation(`A thickness mismatch at k=${k}, t=${t}, err=${err.toExponential(3)}`);
@@ -443,26 +412,4 @@ function checkRoiSupportContinuity(base, braided, kLength, tLength, eps, pushVio
             }
         }
     }
-}
-function stackToBraidLayout(layout) {
-    const tLength = layout.baseline.length;
-    const gapCount = Math.max(0, layout.yBottom.length - 1);
-    return {
-        baseline: layout.baseline.slice(),
-        yBottom: layout.yBottom.map((row) => row.slice()),
-        yTop: layout.yTop.map((row) => row.slice()),
-        omega: new Array(tLength).fill(0),
-        gapsPx: Array.from({ length: gapCount }, () => new Array(tLength).fill(0)),
-        gapsValue: Array.from({ length: gapCount }, () => new Array(tLength).fill(0)),
-        sumGapPx: new Array(tLength).fill(0),
-        roiSupport: null,
-        diagnostics: {
-            spacingObjective: 0,
-            spacingUncertaintyTerm: 0,
-            spacingSlopeTerm: 0,
-            spacingTemporalTerm: 0,
-            spacingIterations: 0,
-            spacingObjectiveHistory: []
-        }
-    };
 }

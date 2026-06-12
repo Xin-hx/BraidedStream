@@ -4,9 +4,11 @@ import type { BaselineParameters } from "../core/baseline/types";
 /**
  * Search experiment comparing PID-new ordering against SineStream control ordering.
  */
-import { buildCenterOutOrder, normalizeOrderForComparison, optimizeLayerOrder, orderLayers } from "../core/ordering";
-import { computePidOrdering } from "../core/ranking/pid";
-import { computeStackedBoundaries } from "../core/stack";
+import { buildCenterOutOrder, normalizeOrderForComparison, orderLayers } from "../core/ordering/display";
+import { optimizeLayerOrder } from "../core/ordering/sineStream";
+import { computePidOrdering } from "../core/ordering/pid";
+import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack";
+import { emptyInvariantSummary } from "../core/validate";
 import type {
   LayerInput,
   LayoutOptimizationConfig,
@@ -15,68 +17,43 @@ import type {
 } from "../core/types";
 import { computeMetrics } from "./metrics";
 import {
-  compareSearchCandidates,
   discreteValues as discreteSearchValues,
-  emptyInvariantSummary,
   finiteNumber,
   passReasons,
   regressionReasons,
+  runParameterGridSearch,
   sanitizeCenterTypes,
   sanitizeRange as sanitizeSearchRange,
   scopeSummaryFromMetricRows,
   sortKeyFromParams,
-  stackToBraidLayout,
-  type CoreMetricDelta,
-  type CoreMetricKey,
+  type SearchCandidateDiagnostics,
+  type SearchCandidateParams,
+  type SearchSummary,
   type ScopeSummary,
   type SearchCenterType as CenterType,
   type SearchRange
 } from "./searchUtils";
 
-export interface PidVsSineSearchRange extends SearchRange {}
-
 export interface PidVsSineSearchSpace {
-  baselineUncertaintyWeight: PidVsSineSearchRange;
-  energyThreshold: PidVsSineSearchRange;
+  baselineUncertaintyWeight: SearchRange;
+  energyThreshold: SearchRange;
   centerTypes: CenterType[];
   regressionGuardrailPct: number;
   topN: number;
 }
 
-export interface PidVsSineCandidateParams {
-  baselineUncertaintyWeight: number;
-  energyThreshold: number;
-  baselineCenterType: CenterType;
-}
-
-export interface PidVsSineCoreMetricDelta extends CoreMetricDelta {}
-
-export interface PidVsSineScopeSummary extends ScopeSummary {}
-
 export interface PidVsSineCandidateResult {
-  params: PidVsSineCandidateParams;
+  params: SearchCandidateParams;
   pass: boolean;
   reasons: string[];
-  roi: PidVsSineScopeSummary;
-  global: PidVsSineScopeSummary;
-  diagnostics: {
-    fallbackUsed: boolean;
-    fallbackReason: string | null;
-    verified: boolean;
-    effectiveScaleCount: number;
-    threshold: number;
-  };
+  roi: ScopeSummary;
+  global: ScopeSummary;
+  diagnostics: SearchCandidateDiagnostics;
   sortKey: string;
 }
 
-export interface PidVsSineSearchSummary {
-  totalCandidates: number;
-  passCount: number;
-  failCount: number;
-}
-
 export interface PidVsSineSearchResult {
-  summary: PidVsSineSearchSummary;
+  summary: SearchSummary;
   best: PidVsSineCandidateResult | null;
   candidates: PidVsSineCandidateResult[];
   topCandidates: PidVsSineCandidateResult[];
@@ -115,76 +92,57 @@ export function runPidVsSineSearch(input: PidVsSineSearchInput): PidVsSineSearch
 
   const invariant = emptyInvariantSummary();
 
-  const candidates: PidVsSineCandidateResult[] = [];
+  const result = runParameterGridSearch<PidVsSineCandidateResult>({
+    centerTypes: searchSpace.centerTypes,
+    baselineUncertaintyWeights: strengths,
+    energyThresholds: thresholds,
+    topN: searchSpace.topN,
+    buildCandidate: (params) => {
+      const experimentHooks: BaselineParameters = {
+        ...(input.experimentBaselineHooks ?? {}),
+        centerType: params.baselineCenterType
+      };
+      const multiscale = computeMultiscaleDistributedBaseline(
+        input.dataset.times,
+        experimentLayers,
+        params.baselineUncertaintyWeight,
+        experimentHooks,
+        params.energyThreshold
+      );
+      const experimentLayout = stackToBraidLayout(computeStackedBoundaries(multiscale.baseline, experimentLayers));
+      const metrics = computeMetrics(input.dataset, controlLayout, experimentLayout, input.roi, invariant, experimentLayers, {
+        includeGlobalRows: true
+      });
+      const roi = scopeSummaryFromMetricRows(metrics.rows);
+      const global = scopeSummaryFromMetricRows(metrics.globalRows ?? metrics.rows);
+      const reasons = evaluateCandidate(
+        roi,
+        global,
+        searchSpace.regressionGuardrailPct,
+        multiscale.diagnostics.fallbackUsed,
+        multiscale.diagnostics.fallbackReason
+      );
 
-  for (const centerType of searchSpace.centerTypes) {
-    const experimentHooks: BaselineParameters = {
-      ...(input.experimentBaselineHooks ?? {}),
-      centerType
-    };
-
-    for (const baselineUncertaintyWeight of strengths) {
-      for (const energyThreshold of thresholds) {
-        const params: PidVsSineCandidateParams = {
-          baselineCenterType: centerType,
-          baselineUncertaintyWeight,
-          energyThreshold
-        };
-
-        const multiscale = computeMultiscaleDistributedBaseline(
-          input.dataset.times,
-          experimentLayers,
-          baselineUncertaintyWeight,
-          experimentHooks,
-          energyThreshold
-        );
-        const experimentLayout = stackToBraidLayout(computeStackedBoundaries(multiscale.baseline, experimentLayers));
-
-        const metrics = computeMetrics(input.dataset, controlLayout, experimentLayout, input.roi, invariant, experimentLayers, {
-          includeGlobalRows: true
-        });
-        const roi = scopeSummaryFromMetricRows(metrics.rows);
-        const global = scopeSummaryFromMetricRows(metrics.globalRows ?? metrics.rows);
-
-        const reasons = evaluateCandidate(
-          roi,
-          global,
-          searchSpace.regressionGuardrailPct,
-          multiscale.diagnostics.fallbackUsed,
-          multiscale.diagnostics.fallbackReason
-        );
-
-        candidates.push({
-          params,
-          pass: reasons.length === 0,
-          reasons: reasons.length === 0 ? passReasons(roi, global) : reasons,
-          roi,
-          global,
-          diagnostics: {
-            fallbackUsed: multiscale.diagnostics.fallbackUsed,
-            fallbackReason: multiscale.diagnostics.fallbackReason,
-            verified: multiscale.diagnostics.verifiedMultiscale,
-            effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
-            threshold: multiscale.diagnostics.energyThreshold
-          },
-          sortKey: sortKeyFromParams(params)
-        });
-      }
+      return {
+        params,
+        pass: reasons.length === 0,
+        reasons: reasons.length === 0 ? passReasons(roi, global) : reasons,
+        roi,
+        global,
+        diagnostics: {
+          fallbackUsed: multiscale.diagnostics.fallbackUsed,
+          fallbackReason: multiscale.diagnostics.fallbackReason,
+          verified: multiscale.diagnostics.verifiedMultiscale,
+          effectiveScaleCount: multiscale.diagnostics.effectiveScaleCount,
+          threshold: multiscale.diagnostics.energyThreshold
+        },
+        sortKey: sortKeyFromParams(params)
+      };
     }
-  }
-
-  candidates.sort(compareSearchCandidates);
-  const topN = Math.max(1, Math.round(searchSpace.topN));
+  });
 
   return {
-    summary: {
-      totalCandidates: candidates.length,
-      passCount: candidates.filter((candidate) => candidate.pass).length,
-      failCount: candidates.filter((candidate) => !candidate.pass).length
-    },
-    best: candidates[0] ?? null,
-    candidates,
-    topCandidates: candidates.slice(0, topN),
+    ...result,
     controlOrder,
     experimentOrder
   };
@@ -239,8 +197,8 @@ function sanitizeSearchSpace(space: PidVsSineSearchSpace): PidVsSineSearchSpace 
 }
 
 function evaluateCandidate(
-  roi: PidVsSineScopeSummary,
-  global: PidVsSineScopeSummary,
+  roi: ScopeSummary,
+  global: ScopeSummary,
   regressionGuardrailPct: number,
   fallbackUsed: boolean,
   fallbackReason: string | null

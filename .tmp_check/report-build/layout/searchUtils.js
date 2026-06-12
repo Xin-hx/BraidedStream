@@ -1,4 +1,10 @@
-import { clamp, round } from "../core/utils";
+/**
+ * Shared utilities for layout parameter searches.
+ *
+ * Multiscale-only and PID-vs-Sine experiments use different setup logic but
+ * share range sanitization, candidate summaries, and sorting rules.
+ */
+import { clamp, round } from "../core/utils.js";
 export const CORE_METRIC_KEYS = ["meanSlope", "wiggle", "illusion"];
 /** Normalize user-provided center type sets. */
 export function sanitizeCenterTypes(values) {
@@ -82,6 +88,33 @@ export function compareSearchCandidates(a, b) {
     }
     return a.sortKey.localeCompare(b.sortKey);
 }
+/** Shared grid-search shell for layout experiments that vary center, strength, and threshold. */
+export function runParameterGridSearch(options) {
+    const candidates = [];
+    for (const baselineCenterType of options.centerTypes) {
+        for (const baselineUncertaintyWeight of options.baselineUncertaintyWeights) {
+            for (const energyThreshold of options.energyThresholds) {
+                candidates.push(options.buildCandidate({
+                    baselineCenterType,
+                    baselineUncertaintyWeight,
+                    energyThreshold
+                }));
+            }
+        }
+    }
+    candidates.sort(compareSearchCandidates);
+    const topN = Math.max(1, Math.round(options.topN));
+    return {
+        summary: {
+            totalCandidates: candidates.length,
+            passCount: candidates.filter((item) => item.pass).length,
+            failCount: candidates.filter((item) => !item.pass).length
+        },
+        best: candidates[0] ?? null,
+        candidates,
+        topCandidates: candidates.slice(0, topN)
+    };
+}
 /** Stable sort key for parameter combinations. */
 export function sortKeyFromParams(params) {
     return [
@@ -89,29 +122,6 @@ export function sortKeyFromParams(params) {
         params.baselineUncertaintyWeight.toFixed(6),
         params.energyThreshold.toFixed(6)
     ].join("|");
-}
-/** Empty invariant placeholder for search-only layouts. */
-export function emptyInvariantSummary() {
-    return {
-        checked: false,
-        violations: [],
-        maxThicknessError: 0
-    };
-}
-/** Wrap a plain stack layout in the BraidLayout shape expected by metrics. */
-export function stackToBraidLayout(layout) {
-    const tLength = layout.baseline.length;
-    const gapCount = Math.max(0, layout.yBottom.length - 1);
-    return {
-        baseline: layout.baseline.slice(),
-        yBottom: layout.yBottom.map((row) => row.slice()),
-        yTop: layout.yTop.map((row) => row.slice()),
-        omega: new Array(tLength).fill(0),
-        gapsPx: Array.from({ length: gapCount }, () => new Array(tLength).fill(0)),
-        gapsValue: Array.from({ length: gapCount }, () => new Array(tLength).fill(0)),
-        sumGapPx: new Array(tLength).fill(0),
-        roiSupport: null
-    };
 }
 export function finiteNumber(value, fallback) {
     return Number.isFinite(value) ? value : fallback;
