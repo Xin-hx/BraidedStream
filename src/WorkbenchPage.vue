@@ -10,7 +10,13 @@ import {
 } from "./app/sceneBuilder";
 import type { BaselineParameters } from "./core/baseline/types";
 import type { DatasetBundle } from "./data/datasets";
-import { applyCovidUncertaintyBand, createSyntheticBundle, loadCovidBundle } from "./data/datasets";
+import {
+  applyCovidUncertaintyBand,
+  createDataGeneratorBundle,
+  createSyntheticBundle,
+  loadCovidBundle,
+  loadSineBankBundle
+} from "./data/datasets";
 import { clampRoiToParent, roiFromIsoDateRange } from "./interactions/roi";
 import type { BaselineMode, DatasetKind, LayerInput, ROI } from "./core/types";
 import { FIXED_SEED } from "./core/utils";
@@ -169,10 +175,13 @@ onMounted(async () => {
 });
 
 async function ensureDataset(kind: DatasetKind): Promise<DatasetBundle> {
+  if (kind === "dataGenerator") {
+    return createDataGeneratorBundle(state.generatorLayerCount, state.generatorTimeCount);
+  }
   if (datasetCache.has(kind)) {
     return datasetCache.get(kind)!;
   }
-  const bundle = kind === "covid" ? await loadCovidBundle() : createSyntheticBundle();
+  const bundle = kind === "covid" ? await loadCovidBundle() : kind === "sineBank" ? await loadSineBankBundle() : createSyntheticBundle();
   datasetCache.set(kind, bundle);
   return bundle;
 }
@@ -450,6 +459,8 @@ function sanitizeState(): void {
   }
   state.fixedSeed = FIXED_SEED;
   state.enableJaggedEdge = false;
+  state.generatorLayerCount = Math.max(1, Math.round(finiteAtLeast(state.generatorLayerCount, 15, 1)));
+  state.generatorTimeCount = Math.max(2, Math.round(finiteAtLeast(state.generatorTimeCount, 30, 2)));
   state.gapAlphaPx = finiteAtLeast(state.gapAlphaPx, defaultState.gapAlphaPx, 0);
   state.maxExtraHeightPx = finiteAtLeast(state.maxExtraHeightPx, defaultState.maxExtraHeightPx, 1);
   state.insetJaggedAmplitude = finiteAtLeast(state.insetJaggedAmplitude, defaultState.insetJaggedAmplitude, 0);

@@ -229,7 +229,7 @@ export class InsetChart {
           uncertainty: layer.unc?.slice(left, right + 1)
         }
       ),
-      color: layerColor(k, layer.id),
+      color: layerColor(k, layer),
       fillOpacity: beforeFillOpacity,
       stroke: "#1e293b",
       strokeOpacity: beforeStrokeOpacity,
@@ -254,7 +254,7 @@ export class InsetChart {
           uncertainty: layer.unc?.slice(left, right + 1)
         }
       ),
-      color: layerColor(k, layer.id),
+      color: layerColor(k, layer),
       fillOpacity: afterFillOpacity,
       stroke: "#f8fafc",
       strokeOpacity: 1,

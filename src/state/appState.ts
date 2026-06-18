@@ -73,6 +73,8 @@ export interface AppState {
   yZoomInset: number;
   covidUncertaintyBand: UncertaintyBandMode;
   covidHorizonFilter: HorizonFilterMode;
+  generatorLayerCount: number;
+  generatorTimeCount: number;
   optimization: LayoutOptimizationConfig;
   enableUncertaintyGap: boolean;
   enableJaggedEdge: boolean;
@@ -134,6 +136,8 @@ export function createInitialState(): AppState {
     yZoomInset: 1.1,
     covidUncertaintyBand: "95",
     covidHorizonFilter: "h1",
+    generatorLayerCount: 15,
+    generatorTimeCount: 30,
     optimization: {
       spacingBudgetPx: 320,
       spacingUncertaintyWeight: 1.6,

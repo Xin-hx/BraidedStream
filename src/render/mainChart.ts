@@ -108,7 +108,7 @@ export class MainChart {
           interpolationSubsteps: 8
         }
       ),
-      color: layerColor(k, layer.id)
+      color: layerColor(k, layer)
     }));
 
     this.layersGroup

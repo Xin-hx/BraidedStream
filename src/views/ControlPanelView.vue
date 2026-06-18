@@ -48,7 +48,17 @@ function onSpaghettiSelectionChange(event: Event): void {
           <select v-model="state.datasetKind" @change="emit('dataset-change')">
             <option value="synthetic">synthetic</option>
             <option value="covid">Covid Ensemble</option>
+            <option value="sineBank">Sine Bank</option>
+            <option value="dataGenerator">Data Generator</option>
           </select>
+        </label>
+        <label v-if="state.datasetKind === 'dataGenerator'">
+          layers cnt
+          <input v-model.number="state.generatorLayerCount" type="number" step="1" min="1" @change="emit('dataset-change')" />
+        </label>
+        <label v-if="state.datasetKind === 'dataGenerator'">
+          time cnt
+          <input v-model.number="state.generatorTimeCount" type="number" step="1" min="2" @change="emit('dataset-change')" />
         </label>
         <span class="control-inline-note">seed={{ state.fixedSeed }}</span>
         

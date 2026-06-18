@@ -5,7 +5,8 @@
  * quantile interpolation, and uncertainty-band switching.
  */
 import * as d3 from "d3";
-import { generateSyntheticDataset } from "./synthetic";
+import { layerColor } from "../styles/palette";
+import { generateBelievableDataset, generateSyntheticDataset } from "./synthetic";
 import type { DatasetKind, LayerInput, PreparedDataset, QuantileBands, UncertaintyBandMode } from "../core/types";
 import { hasFinite, nearlyEqual, sum, toFiniteNumber } from "../core/utils";
 
@@ -41,6 +42,14 @@ interface CovidLayerMeta {
 
 type CovidLayerInput = LayerInput & CovidLayerMeta;
 
+interface SineBankRow {
+  name?: string;
+  size?: unknown;
+  fill_color?: string;
+  fillColor?: string;
+  color?: string;
+}
+
 interface CovidQuantileSeries {
   q025: number[];
   q10: number[];
@@ -57,6 +66,22 @@ export function createSyntheticBundle(): DatasetBundle {
     kind: "synthetic",
     dataset: generateSyntheticDataset(190, 8),
     notes: ["source: synthetic generator"],
+    uncNote: null
+  };
+}
+
+/** Create a parameterized generated streamgraph dataset. */
+export function createDataGeneratorBundle(layerCount = 15, timeCount = 30): DatasetBundle {
+  const dataset = generateBelievableDataset(layerCount, timeCount);
+  return {
+    kind: "dataGenerator",
+    dataset,
+    notes: [
+      "source: data generator",
+      "method: Lee Byron believable streamgraph bumps",
+      `layers: ${dataset.layers.length}`,
+      `time points: ${dataset.times.length}`
+    ],
     uncNote: null
   };
 }
@@ -99,6 +124,28 @@ export async function loadCovidBundle(): Promise<DatasetBundle> {
       `regions shown: ${uniqueRegions}`
     ],
     uncNote: "unc mode: 95% spread (q97.5-q2.5), switchable to IQR (q75-q25)"
+  };
+}
+
+/** Load the SineStream bank-format JSON dataset. */
+export async function loadSineBankBundle(): Promise<DatasetBundle> {
+  const rows = await fetchSineBankRows();
+  const dataset = normalizeSineBankRows(rows);
+  if (dataset.layers.length === 0) {
+    throw new Error("sine_bank.json has no parseable layers");
+  }
+
+  return {
+    kind: "sineBank",
+    dataset,
+    notes: [
+      "source: sine_bank.json",
+      "schema: bank-format JSON ({ name, size[], optional fill_color })",
+      `timeline points: ${dataset.times.length}`,
+      `categories shown: ${dataset.layers.length}`,
+      "missing fill_color values are assigned deterministic fallback colors"
+    ],
+    uncNote: null
   };
 }
 
@@ -145,6 +192,61 @@ async function fetchEnsembleCovidRows(): Promise<EnsembleCovidRow[]> {
     }
   }
   throw new Error(`Unable to load ensemble_covid.csv: ${String(lastError)}`);
+}
+
+async function fetchSineBankRows(): Promise<SineBankRow[]> {
+  const urlCandidates = [
+    new URL("../../Data/sine_bank.json", import.meta.url).toString(),
+    "/Data/sine_bank.json",
+    "/data/sine_bank.json",
+    "/sine_bank.json"
+  ];
+  let lastError: unknown = null;
+  for (const url of urlCandidates) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const parsed = await response.json();
+      if (!Array.isArray(parsed)) {
+        throw new Error("expected top-level array");
+      }
+      return parsed as SineBankRow[];
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error(`Unable to load sine_bank.json: ${String(lastError)}`);
+}
+
+function normalizeSineBankRows(rows: SineBankRow[]): PreparedDataset {
+  const seriesRows = rows
+    .map((row, index) => {
+      const id = sanitizeSineLayerName(row.name, index);
+      const rawSeries = Array.isArray(row.size) ? row.size : [];
+      const height = rawSeries.map((value) => Math.max(0, toFiniteNumber(value) ?? 0));
+      const sourceColor = normalizeColor(row.fill_color ?? row.fillColor ?? row.color);
+      return {
+        id,
+        height,
+        fill_color: sourceColor ?? layerColor(index, id)
+      };
+    })
+    .filter((row) => row.height.length > 0);
+
+  const timeLength = Math.max(0, ...seriesRows.map((row) => row.height.length));
+  const times = Array.from({ length: timeLength }, (_, i) => Date.UTC(2020, i, 1));
+  const layers = seriesRows.map((row) => ({
+    ...row,
+    height: normalizeSeriesLength(row.height, timeLength)
+  }));
+
+  return {
+    times,
+    layers,
+    order: layers.map((layer) => layer.id)
+  };
 }
 
 function normalizeEnsembleCovidRows(rows: EnsembleCovidRow[]): { times: number[]; layers: CovidLayerInput[] } {
@@ -346,6 +448,27 @@ function selectAllLayers(layers: LayerInput[]): { layers: LayerInput[] } {
       return a.id.localeCompare(b.id);
     });
   return { layers: sorted };
+}
+
+function sanitizeSineLayerName(value: string | undefined, index: number): string {
+  const trimmed = String(value ?? "").trim();
+  return trimmed !== "" ? trimmed : `series-${index + 1}`;
+}
+
+function normalizeColor(value: string | undefined): string | null {
+  const trimmed = String(value ?? "").trim();
+  return trimmed !== "" ? trimmed : null;
+}
+
+function normalizeSeriesLength(values: number[], length: number): number[] {
+  if (values.length === length) {
+    return values.slice();
+  }
+  const out = new Array<number>(length).fill(0);
+  for (let i = 0; i < Math.min(values.length, length); i += 1) {
+    out[i] = Number.isFinite(values[i]) ? values[i] : 0;
+  }
+  return out;
 }
 
 function filledSeries(length: number, fill = Number.NaN): number[] {

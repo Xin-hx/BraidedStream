@@ -1,7 +1,13 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { defaultWindow } from "../app/sceneBuilder";
-import { createSyntheticBundle, loadCovidBundle, type DatasetBundle } from "../data/datasets";
+import {
+  createDataGeneratorBundle,
+  createSyntheticBundle,
+  loadCovidBundle,
+  loadSineBankBundle,
+  type DatasetBundle
+} from "../data/datasets";
 import { orderLayers } from "../core/ordering/display";
 import { normalizeROI } from "../interactions/roi";
 import type { DatasetKind, PreparedDataset, ROI } from "../core/types";
@@ -28,6 +34,8 @@ interface LabState {
   passThresholdPct: number;
   regressionGuardrailPct: number;
   topN: number;
+  generatorLayerCount: number;
+  generatorTimeCount: number;
   centerMedian: boolean;
   centerMean: boolean;
   centerGeometric: boolean;
@@ -52,6 +60,8 @@ const state = reactive<LabState>({
   passThresholdPct: 5,
   regressionGuardrailPct: 3,
   topN: 20,
+  generatorLayerCount: 15,
+  generatorTimeCount: 30,
   centerMedian: true,
   centerMean: true,
   centerGeometric: true,
@@ -154,10 +164,13 @@ async function activateDataset(kind: DatasetKind): Promise<void> {
 }
 
 async function ensureDataset(kind: DatasetKind): Promise<DatasetBundle> {
+  if (kind === "dataGenerator") {
+    return createDataGeneratorBundle(state.generatorLayerCount, state.generatorTimeCount);
+  }
   if (datasetCache.has(kind)) {
     return datasetCache.get(kind)!;
   }
-  const bundle = kind === "covid" ? await loadCovidBundle() : createSyntheticBundle();
+  const bundle = kind === "covid" ? await loadCovidBundle() : kind === "sineBank" ? await loadSineBankBundle() : createSyntheticBundle();
   datasetCache.set(kind, bundle);
   return bundle;
 }
@@ -305,7 +318,31 @@ function countValues(minValue: number, maxValue: number, stepValue: number): num
           <select v-model="state.datasetKind" :disabled="loadingDataset || runningSearch" @change="onDatasetChange">
             <option value="synthetic">synthetic</option>
             <option value="covid">Covid Ensemble</option>
+            <option value="sineBank">Sine Bank</option>
+            <option value="dataGenerator">Data Generator</option>
           </select>
+        </label>
+        <label v-if="state.datasetKind === 'dataGenerator'">
+          layers cnt
+          <input
+            v-model.number="state.generatorLayerCount"
+            type="number"
+            step="1"
+            min="1"
+            :disabled="loadingDataset || runningSearch"
+            @change="onDatasetChange"
+          />
+        </label>
+        <label v-if="state.datasetKind === 'dataGenerator'">
+          time cnt
+          <input
+            v-model.number="state.generatorTimeCount"
+            type="number"
+            step="1"
+            min="2"
+            :disabled="loadingDataset || runningSearch"
+            @change="onDatasetChange"
+          />
         </label>
         <label>
           ROI start index

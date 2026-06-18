@@ -38,6 +38,7 @@ function normalizeLayerToTimeline(
 
   return {
     ...layer,
+    fill_color: layer.fill_color,
     timeKeys: undefined,
     height: normalizeRequired(layer.height),
     unc: normalizeOptional(layer.unc),

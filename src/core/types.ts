@@ -6,7 +6,7 @@ export type BaselineMode = "sineStream" | "center" | "zero" | "l1" | "l2";
 export type OptimizingBaselineMode = BaselineMode | "multiscale";
 export type GapMode = "none" | "uncGap" | "fixedGap";
 export type SmoothKernel = "cubic";
-export type DatasetKind = "synthetic" | "covid";
+export type DatasetKind = "synthetic" | "covid" | "sineBank" | "dataGenerator";
 export type InsetViewMode = "before" | "after" | "diff" | "split";
 export type EnhanceTab = "optimize" | "braided" | "spaghetti";
 export type PidUncertaintySource = "value" | "poportion";
@@ -83,6 +83,8 @@ export type BraidOptimizationDiagnostics = BraidSpacingDiagnostics & Partial<Bra
 
 export interface LayerInput {
   id: string;
+  /** Optional source color. Loaders should provide a fallback when source data omits it. */
+  fill_color?: string;
   /** Optional per-sample time keys aligned with this layer's series values. */
   timeKeys?: number[];
   height: number[];

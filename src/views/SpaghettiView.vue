@@ -223,7 +223,7 @@ function buildSpaghettiLines(layers: LayerInput[]): SpaghettiLineDatum[] {
   const lines: SpaghettiLineDatum[] = [];
   for (let i = 0; i < layers.length; i += 1) {
     const layer = layers[i];
-    const baseColor = layerColor(i, layer.id);
+    const baseColor = layerColor(i, layer);
     if (!layer.quantiles) {
       lines.push({
         key: `${layer.id}:mean`,
@@ -413,7 +413,7 @@ function updateHover(timeIndex: number, focusLayer: LayerInput | null): void {
     id: layer.id,
     x,
     y: yScale!(medianAt(layer, timeIndex)),
-    color: layerColor(i, layer.id),
+    color: layerColor(i, layer),
     focused: layer.id === focusLayer?.id
   }));
 

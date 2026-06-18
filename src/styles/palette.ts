@@ -22,7 +22,12 @@ export interface StateLegendEntry {
   color: string;
 }
 
-export function layerColor(index: number, layerId?: string): string {
+export function layerColor(index: number, layer?: string | { id: string; fill_color?: string }): string {
+  const sourceColor = typeof layer === "object" ? normalizeColor(layer.fill_color) : null;
+  if (sourceColor) {
+    return sourceColor;
+  }
+  const layerId = typeof layer === "object" ? layer.id : layer;
   const stateKey = stateKeyFromLayerId(layerId);
   if (stateKey) {
     return stateColor(stateKey);
@@ -31,6 +36,11 @@ export function layerColor(index: number, layerId?: string): string {
     return stateColor(layerId.trim());
   }
   return CATEGORICAL[index % CATEGORICAL.length];
+}
+
+function normalizeColor(value?: string): string | null {
+  const trimmed = String(value ?? "").trim();
+  return trimmed !== "" ? trimmed : null;
 }
 
 export function stateLegendEntriesForLayers(layers: Array<{ id: string }>): StateLegendEntry[] {
