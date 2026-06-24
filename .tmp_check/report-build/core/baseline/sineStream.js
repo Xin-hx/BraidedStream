@@ -1,5 +1,5 @@
-import { median } from "../utils.js";
-import { computeCenteredBaseline, computeLayerCenterFirstDifference, computeLayerHeightFirstDifference } from "./compute.js";
+import { median } from "../utils";
+import { computeCenteredBaseline, computeLayerCenterFirstDifference, computeLayerHeightFirstDifference } from "./compute";
 /**
  * SineStream baseline computation using Gaussian-weighted adjustments.
  * Following: StreamLayout_2norm_Gauss from the SineStream paper.

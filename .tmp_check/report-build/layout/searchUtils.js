@@ -4,7 +4,7 @@
  * Multiscale-only and PID-vs-Sine experiments use different setup logic but
  * share range sanitization, candidate summaries, and sorting rules.
  */
-import { clamp, round } from "../core/utils.js";
+import { clamp, round } from "../core/utils";
 export const CORE_METRIC_KEYS = ["meanSlope", "wiggle", "illusion"];
 /** Normalize user-provided center type sets. */
 export function sanitizeCenterTypes(values) {

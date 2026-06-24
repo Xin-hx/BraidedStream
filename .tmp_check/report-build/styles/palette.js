@@ -14,7 +14,12 @@ const CATEGORICAL = [
     "#9333ea",
     "#c2410c"
 ];
-export function layerColor(index, layerId) {
+export function layerColor(index, layer) {
+    const sourceColor = typeof layer === "object" ? normalizeColor(layer.fill_color) : null;
+    if (sourceColor) {
+        return sourceColor;
+    }
+    const layerId = typeof layer === "object" ? layer.id : layer;
     const stateKey = stateKeyFromLayerId(layerId);
     if (stateKey) {
         return stateColor(stateKey);
@@ -23,6 +28,10 @@ export function layerColor(index, layerId) {
         return stateColor(layerId.trim());
     }
     return CATEGORICAL[index % CATEGORICAL.length];
+}
+function normalizeColor(value) {
+    const trimmed = String(value ?? "").trim();
+    return trimmed !== "" ? trimmed : null;
 }
 export function stateLegendEntriesForLayers(layers) {
     const seen = new Set();

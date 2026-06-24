@@ -1,10 +1,26 @@
+/**
+ * PID contour boxplot chart — visualises the "deepest" (most-influential) layer
+ * across the PID-derived contour grid as shaded union/intersection envelopes.
+ *
+ * The chart shows three nested bands:
+ *   1. all-union       — every grid cell that exceeds the contour threshold.
+ *   2. central-union   — subset belonging to the top central-fraction layers.
+ *   3. central-intersection — cells where ALL top-central layers agree.
+ *
+ * The deepest layer's own low/high envelope is overlaid as a highlighted line.
+ */
 import * as d3 from "d3";
 import { computeContourPid } from "../core/ordering/pid";
 import { roiBounds } from "../interactions/roi";
 import type { LayerInput, PidUncertaintySource, PreparedDataset, ROI } from "../core/types";
 import { clamp } from "../core/utils";
 import { createAreaPath } from "./paths";
-import { angleAxisLabels, createChartFrame, formatTimeTick } from "./chartUtils";
+import {
+  createPlotContext,
+  renderChartTitle,
+  renderTimeAxis,
+  type PlotContext
+} from "./chartUtils";
 
 export interface ContourBoxplotRenderArgs {
   dataset: PreparedDataset;
@@ -23,31 +39,31 @@ interface Envelope {
   high: number[];
 }
 
+/** Shape description for a single contour envelope band. */
+interface ContourBand {
+  key: string;
+  label: string;
+  env: Envelope;
+  fill: string;
+  opacity: number;
+  stroke: string;
+}
+
 export class ContourBoxplotChart {
-  private readonly width: number;
-  private readonly height: number;
   private readonly margin = { top: 26, right: 18, bottom: 40, left: 52 };
-  private readonly innerWidth: number;
-  private readonly innerHeight: number;
-  private readonly root: d3.Selection<SVGGElement, unknown, null, undefined>;
+  private readonly ctx: PlotContext;
   private readonly plotGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly titleGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly axisX: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly axisY: d3.Selection<SVGGElement, unknown, null, undefined>;
 
   constructor(private readonly svg: SVGSVGElement) {
-    const frame = createChartFrame(svg, 1180, 190, this.margin);
-    const size = frame.size;
-    this.width = size.width;
-    this.height = size.height;
-    this.innerWidth = size.innerWidth;
-    this.innerHeight = size.innerHeight;
+    this.ctx = createPlotContext(svg, 1180, 190, this.margin);
 
-    this.root = frame.root;
-    this.plotGroup = this.root.append("g").attr("class", "contour-boxplot-layers");
-    this.titleGroup = this.root.append("g").attr("class", "contour-boxplot-title");
-    this.axisX = this.root.append("g").attr("class", "x-axis");
-    this.axisY = this.root.append("g").attr("class", "y-axis");
+    this.plotGroup = this.ctx.root.append("g").attr("class", "contour-boxplot-layers");
+    this.titleGroup = this.ctx.root.append("g").attr("class", "contour-boxplot-title");
+    this.axisX = this.ctx.root.append("g").attr("class", "x-axis");
+    this.axisY = this.ctx.root.append("g").attr("class", "y-axis");
   }
 
   clear(): void {
@@ -64,16 +80,21 @@ export class ContourBoxplotChart {
       return;
     }
 
+    const { innerWidth, innerHeight } = this.ctx;
+
+    // Clamp user-facing parameters to sane ranges.
     const yBins = Math.max(24, Math.round(args.yBins));
     const threshold = clamp(args.contourThreshold, 0.01, 0.99);
     const centralFraction = clamp(args.centralFraction, 0.05, 1);
     const opacity = clamp(args.opacity, 0.1, 1);
+
     const pid = computeContourPid(orderedLayers, {
       yBins,
       contourThreshold: threshold,
       centralFraction,
       uncertaintySource: args.uncertaintySource
     });
+
     const [left, right] = roiBounds(dataset.times.length, args.roi);
     const activeTimes = dataset.times.slice(left, right + 1);
     if (activeTimes.length === 0) {
@@ -81,9 +102,18 @@ export class ContourBoxplotChart {
       return;
     }
 
-    const xScale = d3.scaleLinear().domain([activeTimes[0], activeTimes[activeTimes.length - 1]]).range([0, this.innerWidth]);
-    const yScale = d3.scaleLinear().domain([pid.grid.zMin, pid.grid.zMax]).range([this.innerHeight, 0]);
-    const envelopes = [
+    const xScale = d3
+      .scaleLinear()
+      .domain([activeTimes[0], activeTimes[activeTimes.length - 1]])
+      .range([0, innerWidth]);
+
+    const yScale = d3
+      .scaleLinear()
+      .domain([pid.grid.zMin, pid.grid.zMax])
+      .range([innerHeight, 0]);
+
+    // Build the three envelope bands in visual z-order (back to front).
+    const bands: ContourBand[] = [
       {
         key: "all-union",
         label: "all union",
@@ -109,43 +139,57 @@ export class ContourBoxplotChart {
         stroke: "rgba(15, 118, 110, 0.72)"
       }
     ];
-    const deepest = envelopeFromMask(pid.deepestMask, pid.grid, dataset.times, left, right, threshold);
 
+    const deepestEnv = envelopeFromMask(pid.deepestMask, pid.grid, dataset.times, left, right, threshold);
+
+    // ── envelope bands ─────────────────────────────────────────────────
     this.plotGroup
-      .selectAll<SVGPathElement, (typeof envelopes)[number]>("path.contour-boxplot-band")
-      .data(envelopes.filter((item) => item.env.times.length > 1), (d) => d.key)
+      .selectAll<SVGPathElement, ContourBand>("path.contour-boxplot-band")
+      .data(
+        bands.filter((item) => item.env.times.length > 1),
+        (d) => d.key
+      )
       .join(
         (enter) => enter.append("path").attr("class", "contour-boxplot-band"),
         (update) => update,
         (exit) => exit.remove()
       )
-      .attr("d", (d) => createAreaPath(d.env.times, d.env.low, d.env.high, xScale, yScale, { smoothInterpolation: true }))
+      .attr("d", (d) =>
+        createAreaPath(d.env.times, d.env.low, d.env.high, xScale, yScale, {
+          smoothInterpolation: true
+        })
+      )
       .attr("fill", (d) => d.fill)
       .attr("fill-opacity", (d) => d.opacity)
       .attr("stroke", (d) => d.stroke)
       .attr("stroke-width", 1);
 
-    this.drawDeepestMember(deepest, xScale, yScale, opacity);
-    this.drawLegend(envelopes, pid.deepestLayerId, opacity);
-    this.drawTitle(pid.deepestLayerId, yBins, threshold, centralFraction, args.uncertaintySource);
+    // ── deepest-layer overlay ──────────────────────────────────────────
+    this.drawDeepestMember(deepestEnv, xScale, yScale, opacity);
 
-    this.axisX
-      .attr("transform", `translate(0,${this.innerHeight})`)
+    // ── annotation ─────────────────────────────────────────────────────
+    this.drawLegend(bands, pid.deepestLayerId, opacity);
+    renderChartTitle(
+      this.titleGroup,
+      `PID contour boxplot | source=${args.uncertaintySource} | top=${(centralFraction * 100).toFixed(0)}% | threshold=${threshold.toFixed(2)} | yBins=${yBins} | deepest=${pid.deepestLayerId ? pid.deepestLayerId.split("|")[0] : "N/A"}`,
+      { y: -8 }
+    );
+
+    // ── axes ───────────────────────────────────────────────────────────
+    renderTimeAxis(this.axisX, xScale, innerWidth, innerHeight, 170);
+    this.axisY
+      .attr("transform", `translate(0,0)`)
       .call(
         d3
-          .axisBottom(xScale)
-          .ticks(Math.max(3, Math.floor(this.innerWidth / 170)))
-          .tickFormat((value) => formatTimeTick(Number(value)))
+          .axisLeft(yScale)
+          .ticks(4)
+          .tickFormat((value) => formatContourValue(Number(value), pid.grid.valueTransform, args.uncertaintySource))
       );
-    angleAxisLabels(this.axisX);
-    this.axisY.call(
-      d3
-        .axisLeft(yScale)
-        .ticks(4)
-        .tickFormat((value) => formatContourValue(Number(value), pid.grid.valueTransform, args.uncertaintySource))
-    );
   }
 
+  // ── private drawing helpers ──────────────────────────────────────────────
+
+  /** Draw the deepest layer's low/high envelope as dashed Catmull-Rom curves. */
   private drawDeepestMember(
     env: Envelope,
     xScale: d3.ScaleLinear<number, number>,
@@ -157,6 +201,7 @@ export class ContourBoxplotChart {
       .x((_d, i) => xScale(env.times[i]))
       .y((d) => yScale(d))
       .curve(d3.curveCatmullRom.alpha(0.5));
+
     const data =
       env.times.length > 1
         ? [
@@ -164,6 +209,7 @@ export class ContourBoxplotChart {
             { key: "deepest-high", values: env.high }
           ]
         : [];
+
     this.plotGroup
       .selectAll<SVGPathElement, (typeof data)[number]>("path.contour-boxplot-deepest")
       .data(data, (d) => d.key)
@@ -179,13 +225,19 @@ export class ContourBoxplotChart {
       .attr("stroke-width", 1.7);
   }
 
+  /** Render colour legend below the chart area. */
   private drawLegend(
-    bands: Array<{ key: string; label: string; fill: string; opacity: number }>,
+    bands: ContourBand[],
     deepestLayerId: string | null,
     opacity: number
   ): void {
-    const data = [
-      ...bands.map((band) => ({ key: band.key, label: band.label, color: band.fill, opacity: band.opacity })),
+    const items = [
+      ...bands.map((band) => ({
+        key: band.key,
+        label: band.label,
+        color: band.fill,
+        opacity: band.opacity
+      })),
       {
         key: "deepest",
         label: `deepest ${deepestLayerId ? deepestLayerId.split("|")[0] : "N/A"}`,
@@ -193,9 +245,10 @@ export class ContourBoxplotChart {
         opacity: 0.9 * opacity
       }
     ];
+
     const legend = this.plotGroup
-      .selectAll<SVGGElement, (typeof data)[number]>("g.contour-boxplot-legend-item")
-      .data(data, (d) => d.key)
+      .selectAll<SVGGElement, (typeof items)[number]>("g.contour-boxplot-legend-item")
+      .data(items, (d) => d.key)
       .join(
         (enter) => {
           const g = enter.append("g").attr("class", "contour-boxplot-legend-item");
@@ -206,7 +259,7 @@ export class ContourBoxplotChart {
         (update) => update,
         (exit) => exit.remove()
       )
-      .attr("transform", (_d, i) => `translate(${i * 178},${this.innerHeight + 33})`);
+      .attr("transform", (_d, i) => `translate(${i * 178},${this.ctx.innerHeight + 33})`);
 
     legend
       .select("rect")
@@ -216,6 +269,7 @@ export class ContourBoxplotChart {
       .attr("fill", (d) => d.color)
       .attr("fill-opacity", (d) => d.opacity)
       .attr("stroke", "rgba(15, 23, 42, 0.2)");
+
     legend
       .select("text")
       .attr("x", 17)
@@ -224,28 +278,15 @@ export class ContourBoxplotChart {
       .attr("fill", "#475569")
       .text((d) => d.label);
   }
-
-  private drawTitle(
-    deepestLayerId: string | null,
-    yBins: number,
-    threshold: number,
-    centralFraction: number,
-    uncertaintySource: PidUncertaintySource
-  ): void {
-    const text = `PID contour boxplot | source=${uncertaintySource} | top=${(centralFraction * 100).toFixed(0)}% | threshold=${threshold.toFixed(2)} | yBins=${yBins} | deepest=${deepestLayerId ? deepestLayerId.split("|")[0] : "N/A"}`;
-    this.titleGroup
-      .selectAll<SVGTextElement, number>("text.title")
-      .data([0])
-      .join((enter) => enter.append("text").attr("class", "title"))
-      .attr("x", 0)
-      .attr("y", -8)
-      .attr("fill", "#0f172a")
-      .attr("font-size", 12)
-      .attr("font-weight", 700)
-      .text(text);
-  }
 }
 
+// ── free helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Convert a PID contour-grid mask into a low/high envelope time series.
+ * Only time columns where at least one y-bin exceeds `threshold` contribute
+ * a sample; gaps in the envelope correspond to regions where no bin qualifies.
+ */
 function envelopeFromMask(
   mask: Float32Array,
   grid: { xBins: number; yBins: number; zMin: number; zMax: number },
@@ -256,6 +297,7 @@ function envelopeFromMask(
 ): Envelope {
   const dz = grid.yBins <= 1 ? 1 : (grid.zMax - grid.zMin) / (grid.yBins - 1);
   const out: Envelope = { times: [], low: [], high: [] };
+
   for (let t = left; t <= right; t += 1) {
     let low: number | null = null;
     let high: number | null = null;
@@ -274,10 +316,19 @@ function envelopeFromMask(
       out.high.push(high);
     }
   }
+
   return out;
 }
 
-function formatContourValue(value: number, transform: "log1p" | "linear", uncertaintySource: PidUncertaintySource): string {
+/**
+ * Format contour z-axis values back to the original data domain, applying
+ * per-source shorthand (percentage vs. K/M suffixes).
+ */
+function formatContourValue(
+  value: number,
+  transform: "log1p" | "linear",
+  uncertaintySource: PidUncertaintySource
+): string {
   const raw = transform === "linear" ? value : Math.expm1(value);
   if (!Number.isFinite(raw)) {
     return "";

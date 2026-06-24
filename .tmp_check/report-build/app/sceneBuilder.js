@@ -1,15 +1,15 @@
-import { computeBaseline, computeOptimizingBaseline } from "../core/baseline/compute.js";
-import { computeBraidLayout } from "../core/NOT_IN_USE/braid.js";
-import { orderLayers } from "../core/ordering/display.js";
-import { optimizeLayerOrder } from "../core/ordering/sineStream.js";
-import { computeOptimizingOrder } from "./optimizingOrder.js";
-import { optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../optimizingConfig.js";
-import { clampRoiToParent, normalizeROI } from "../interactions/roi.js";
-import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack.js";
-import { emptyInvariantSummary } from "../core/validate.js";
-import { preprocessDataset } from "../data/transforms.js";
-import { toMultiscaleDiagnosticsSummary } from "../layout/diagnostics.js";
-import { computeMetrics } from "../layout/metrics.js";
+import { computeBaseline, computeOptimizingBaseline } from "../core/baseline/compute";
+import { computeBraidLayout } from "../core/NOT_IN_USE/braid";
+import { orderLayers } from "../core/ordering/display";
+import { optimizeLayerOrder } from "../core/ordering/sineStream";
+import { computeOptimizingOrder } from "./optimizingOrder";
+import { optimizingBaselineModeLabel, optimizingStageLabel, orderingScoringLabel, resolveOptimizingVariantConfig } from "../optimizingConfig";
+import { clampRoiToParent, normalizeROI } from "../interactions/roi";
+import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack";
+import { emptyInvariantSummary } from "../core/validate";
+import { preprocessDataset } from "../data/transforms";
+import { toMultiscaleDiagnosticsSummary } from "../layout/diagnostics";
+import { computeMetrics } from "../layout/metrics";
 export function buildScene(bundle, state) {
     const context = prepareDatasetWindowContext(bundle, state);
     const orderedLayers = orderLayers(context.dataset.layers, context.dataset.order);

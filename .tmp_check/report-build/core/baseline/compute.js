@@ -1,7 +1,7 @@
-import { validateTimeLengths } from "../validate.js";
-import { computeSineStreamBaseline } from "./sineStream.js";
-import { median } from "../utils.js";
-import { computeMultiscaleDistributedBaseline } from "./multiscale.js";
+import { validateTimeLengths } from "../validate";
+import { computeSineStreamBaseline } from "./sineStream";
+import { median } from "../utils";
+import { computeMultiscaleDistributedBaseline } from "./multiscale";
 export function sumLayerHeights(tLength, layers) {
     const totals = new Array(tLength).fill(0);
     for (const layer of layers) {

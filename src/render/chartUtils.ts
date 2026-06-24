@@ -1,13 +1,13 @@
 /**
- * Shared SVG chart helpers for render modules.
- *
- * Keep this file focused on rendering mechanics: dimensions, axes, extents,
- * and simple viewport geometry. Data and layout computation belong in core or
+ * Shared SVG chart helpers — dimensions, axes, extents, hover, and simple viewport
+ * geometry.  Rendering mechanics only; data / layout computation belong in core or
  * layout modules.
  */
 import * as d3 from "d3";
 import type { ROI, StackLayout } from "../core/types";
 import { clamp } from "../core/utils";
+
+// ── geometry interfaces ──────────────────────────────────────────────────────
 
 export interface ChartMargin {
   top: number;
@@ -37,8 +37,24 @@ export interface ChartFrame {
   root: d3.Selection<SVGGElement, unknown, null, undefined>;
 }
 
+/** Pre-computed plot context: frame-derived geometry plus convenience fields. */
+export interface PlotContext {
+  size: ChartSize;
+  plotArea: PlotArea;
+  root: d3.Selection<SVGGElement, unknown, null, undefined>;
+  innerWidth: number;
+  innerHeight: number;
+}
+
+// ── frame construction ────────────────────────────────────────────────────────
+
 /** Read SVG dimensions and derive the inner plotting rectangle. */
-export function readChartSize(svg: SVGSVGElement, fallbackWidth: number, fallbackHeight: number, margin: ChartMargin): ChartSize {
+export function readChartSize(
+  svg: SVGSVGElement,
+  fallbackWidth: number,
+  fallbackHeight: number,
+  margin: ChartMargin
+): ChartSize {
   const width = Number(svg.getAttribute("width") ?? String(fallbackWidth));
   const height = Number(svg.getAttribute("height") ?? String(fallbackHeight));
   return {
@@ -75,6 +91,28 @@ export function createChartFrame(
   };
 }
 
+/**
+ * Convenience factory for chart constructors.  Wraps createChartFrame and unpacks
+ * the most frequently used fields into a single PlotContext.
+ */
+export function createPlotContext(
+  svg: SVGSVGElement,
+  fallbackWidth: number,
+  fallbackHeight: number,
+  margin: ChartMargin
+): PlotContext {
+  const frame = createChartFrame(svg, fallbackWidth, fallbackHeight, margin);
+  return {
+    size: frame.size,
+    plotArea: frame.plotArea,
+    root: frame.root,
+    innerWidth: frame.size.innerWidth,
+    innerHeight: frame.size.innerHeight
+  };
+}
+
+// ── axes ──────────────────────────────────────────────────────────────────────
+
 /** Format UTC timestamps for compact axis ticks. */
 export function formatTimeTick(value: number): string {
   if (!Number.isFinite(value)) {
@@ -97,7 +135,78 @@ export function angleAxisLabels(
     .attr("transform", "rotate(-35)");
 }
 
-/** Extent of a full stack layout. */
+/**
+ * Render a standard time X axis.  Used by all chart views to keep tick formatting
+ * and label rotation consistent.
+ */
+export function renderTimeAxis(
+  axisGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
+  xScale: d3.ScaleLinear<number, number>,
+  innerWidth: number,
+  innerHeight: number,
+  /** Suggested tick density (ticks per 140px) */
+  density = 140
+): void {
+  axisGroup
+    .attr("transform", `translate(0,${innerHeight})`)
+    .call(
+      d3
+        .axisBottom(xScale)
+        .ticks(Math.max(4, Math.floor(innerWidth / density)))
+        .tickFormat((value) => formatTimeTick(Number(value)))
+    );
+  angleAxisLabels(axisGroup);
+}
+
+/**
+ * Render a standard value Y axis with the given tick count.
+ */
+export function renderValueAxis(
+  axisGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
+  yScale: d3.ScaleLinear<number, number>,
+  tickCount: number,
+  /** Optional custom tick formatter. */
+  tickFormat?: (value: number) => string
+): void {
+  const axis = d3.axisLeft(yScale).ticks(tickCount);
+  if (tickFormat) {
+    axis.tickFormat((value) => tickFormat(Number(value)));
+  }
+  axisGroup.call(axis);
+}
+
+// ── title ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Render or update a single-line chart title.  Uses D3 data-join so later calls
+ * seamlessly update text without leaking elements.
+ */
+export function renderChartTitle(
+  titleGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
+  text: string,
+  options?: {
+    x?: number;
+    y?: number;
+    fill?: string;
+    fontSize?: number;
+    fontWeight?: number;
+  }
+): void {
+  titleGroup
+    .selectAll<SVGTextElement, number>("text.chart-title")
+    .data([0])
+    .join((enter) => enter.append("text").attr("class", "chart-title"))
+    .attr("x", options?.x ?? 0)
+    .attr("y", options?.y ?? -6)
+    .attr("fill", options?.fill ?? "#0f172a")
+    .attr("font-size", options?.fontSize ?? 12)
+    .attr("font-weight", options?.fontWeight ?? 700)
+    .text(text);
+}
+
+// ── extent helpers ────────────────────────────────────────────────────────────
+
+/** Full extent of a stack layout over all time indices. */
 export function layoutExtent(layout: StackLayout): [number, number] {
   return layoutExtentForIndices(
     layout,
@@ -130,6 +239,8 @@ export function layoutExtentForIndices(layout: StackLayout, indices: number[]): 
   return [minValue, maxValue];
 }
 
+// ── ROI viewport ──────────────────────────────────────────────────────────────
+
 /** Convert ROI endpoints to a clamped x-pixel interval. */
 export function roiXRange(
   roi: ROI,
@@ -144,6 +255,8 @@ export function roiXRange(
     clamp(Math.max(left, right), 0, innerWidth)
   ];
 }
+
+// ── crosshair ─────────────────────────────────────────────────────────────────
 
 /** Draw or clear a vertical crosshair line. */
 export function drawCrosshair(
@@ -167,4 +280,70 @@ export function drawCrosshair(
     .attr("stroke", stroke)
     .attr("stroke-opacity", strokeOpacity)
     .attr("stroke-dasharray", dashArray);
+}
+
+// ── layer hover (merged from layerHoverHighlight.ts) ──────────────────────────
+
+export interface LayerHoverDatum {
+  id: string;
+  fillOpacity: number;
+  stroke: string;
+  strokeOpacity: number;
+  strokeWidth: number;
+}
+
+export interface LayerHoverHighlightOptions {
+  dimFillOpacity: number;
+  dimStrokeOpacity: number;
+  hoverFillBoost: number;
+  hoverStroke: string;
+  hoverStrokeOpacity: number;
+  hoverStrokeWidthFactor: number;
+}
+
+/**
+ * Dim all layers except the hovered one, then boost the hovered layer and raise
+ * it above siblings so its stroke is fully visible.
+ */
+export function applyLayerHoverHighlight<T extends LayerHoverDatum>(
+  selection: d3.Selection<SVGPathElement, T, SVGGElement, unknown>,
+  layerId: string | null,
+  options: LayerHoverHighlightOptions
+): void {
+  let hasHoveredDatum = false;
+  if (layerId !== null) {
+    selection.each((d) => {
+      if (d.id === layerId) {
+        hasHoveredDatum = true;
+      }
+    });
+  }
+  const hasHover = layerId !== null && hasHoveredDatum;
+  selection
+    .attr("fill-opacity", (d) =>
+      hasHover
+        ? d.id === layerId
+          ? Math.min(1, d.fillOpacity + options.hoverFillBoost)
+          : options.dimFillOpacity
+        : d.fillOpacity
+    )
+    .attr("stroke", (d) => (hasHover && d.id === layerId ? options.hoverStroke : d.stroke))
+    .attr("stroke-opacity", (d) =>
+      hasHover
+        ? d.id === layerId
+          ? options.hoverStrokeOpacity
+          : options.dimStrokeOpacity
+        : d.strokeOpacity
+    )
+    .attr("stroke-width", (d) =>
+      hasHover && d.id === layerId
+        ? Math.max(d.strokeWidth * options.hoverStrokeWidthFactor, d.strokeWidth + 0.8)
+        : d.strokeWidth
+    )
+    .classed("is-hover-muted", (d) => hasHover && d.id !== layerId)
+    .classed("is-hover-focused", (d) => hasHover && d.id === layerId);
+
+  if (hasHover) {
+    selection.filter((d) => d.id === layerId).raise();
+  }
 }

@@ -2,15 +2,24 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import WorkbenchPage from "./WorkbenchPage.vue";
 import MultiscaleLabPage from "./views/MultiscaleLabPage.vue";
+import TwoLayerMultiscalePage from "./views/TwoLayerMultiscalePage.vue";
 
-const SUPPORTED_PATHS = new Set(["/", "/multiscale-lab"]);
+type AppPath = "/" | "/multiscale-lab" | "/two-layer-multiscale";
 
-const currentPath = ref(normalizePath(typeof window !== "undefined" ? window.location.pathname : "/"));
+const SUPPORTED_PATHS = new Set<AppPath>(["/", "/multiscale-lab", "/two-layer-multiscale"]);
 
-const currentPage = computed(() => (currentPath.value === "/multiscale-lab" ? "lab" : "workbench"));
+const currentPath = ref<AppPath>(normalizePath(typeof window !== "undefined" ? window.location.pathname : "/"));
 
-function normalizePath(pathname: string): "/" | "/multiscale-lab" {
-  return SUPPORTED_PATHS.has(pathname) && pathname === "/multiscale-lab" ? "/multiscale-lab" : "/";
+const currentPage = computed(() =>
+  currentPath.value === "/multiscale-lab"
+    ? "lab"
+    : currentPath.value === "/two-layer-multiscale"
+      ? "twoLayer"
+      : "workbench"
+);
+
+function normalizePath(pathname: string): AppPath {
+  return SUPPORTED_PATHS.has(pathname as AppPath) ? (pathname as AppPath) : "/";
 }
 
 function syncFromLocation(): void {
@@ -21,7 +30,7 @@ function syncFromLocation(): void {
   currentPath.value = normalized;
 }
 
-function onNavigate(next: "/" | "/multiscale-lab", event: MouseEvent): void {
+function onNavigate(next: AppPath, event: MouseEvent): void {
   event.preventDefault();
   if (currentPath.value === next) {
     return;
@@ -52,9 +61,17 @@ onBeforeUnmount(() => {
       >
         Multiscale Lab
       </a>
+      <a
+        href="/two-layer-multiscale"
+        :class="{ 'is-active': currentPage === 'twoLayer' }"
+        @click="onNavigate('/two-layer-multiscale', $event)"
+      >
+        Two-layer Demo
+      </a>
     </nav>
 
     <WorkbenchPage v-if="currentPage === 'workbench'" />
-    <MultiscaleLabPage v-else />
+    <MultiscaleLabPage v-else-if="currentPage === 'lab'" />
+    <TwoLayerMultiscalePage v-else />
   </div>
 </template>

@@ -1,13 +1,13 @@
 /**
  * PID ordering metric bundle assembly for comparison panels.
  */
-import { computeBaseline } from "../core/baseline/compute.js";
-import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale.js";
-import { buildCenterOutOrder, normalizeOrderForComparison, orderLayers, rankMap } from "../core/ordering/display.js";
-import { computePidOrdering } from "../core/ordering/pid.js";
-import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack.js";
-import { toMultiscaleDiagnosticsSummary } from "./diagnostics.js";
-import { computeMetrics } from "./metrics.js";
+import { computeBaseline } from "../core/baseline/compute";
+import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale";
+import { buildCenterOutOrder, normalizeOrderForComparison, orderLayers, rankMap } from "../core/ordering/display";
+import { computePidOrdering } from "../core/ordering/pid";
+import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack";
+import { toMultiscaleDiagnosticsSummary } from "./diagnostics";
+import { computeMetrics } from "./metrics";
 export function computePidOrderingMetrics(input) {
     const layerIds = input.dataset.layers.map((layer) => layer.id);
     const sineBaseOrder = normalizeOrderForComparison(input.sineOrder, layerIds, input.dataset.order);

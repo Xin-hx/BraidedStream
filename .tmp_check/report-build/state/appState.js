@@ -1,4 +1,4 @@
-import { FIXED_SEED } from "../core/utils.js";
+import { FIXED_SEED } from "../core/utils";
 export function createInitialState() {
     return {
         datasetKind: "covid",
@@ -53,6 +53,8 @@ export function createInitialState() {
         yZoomInset: 1.1,
         covidUncertaintyBand: "95",
         covidHorizonFilter: "h1",
+        generatorLayerCount: 15,
+        generatorTimeCount: 30,
         optimization: {
             spacingBudgetPx: 320,
             spacingUncertaintyWeight: 1.6,

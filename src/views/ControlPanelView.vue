@@ -8,12 +8,19 @@ interface SpaghettiStateOption {
   total: number;
 }
 
-defineProps<{
+withDefaults(defineProps<{
   state: AppState;
   availableStateOptions: SpaghettiStateOption[];
   defaultSpaghettiStateId: string | null;
   effectiveSpaghettiStateIds: string[];
-}>();
+  showDatasetControls?: boolean;
+  showActionControls?: boolean;
+  showCompareToggle?: boolean;
+}>(), {
+  showDatasetControls: true,
+  showActionControls: true,
+  showCompareToggle: true
+});
 
 const emit = defineEmits<{
   (e: "dataset-change"): void;
@@ -40,7 +47,7 @@ function onSpaghettiSelectionChange(event: Event): void {
 
 <template>
   <section class="controls">
-    <div class="control-group control-group--global">
+    <div v-if="showDatasetControls" class="control-group control-group--global">
       <div class="control-group__title">Global / Dataset</div>
       <div class="control-group__items">
         <label>
@@ -186,7 +193,7 @@ function onSpaghettiSelectionChange(event: Event): void {
       </div>
     </div>
 
-    <div class="control-group control-group--actions">
+    <div v-if="showActionControls" class="control-group control-group--actions">
       <div class="control-group__title">ROI / Export</div>
       <div class="control-group__items">
         <button type="button" @click="emit('clear-roi')">Reset Windows</button>
@@ -196,7 +203,12 @@ function onSpaghettiSelectionChange(event: Event): void {
       </div>
     </div>
 
-    <button v-if="state.enhanceTab === 'optimize'" type="button" class="metrics-toggle" @click="emit('toggle-compare')">
+    <button
+      v-if="showCompareToggle && state.enhanceTab === 'optimize'"
+      type="button"
+      class="metrics-toggle"
+      @click="emit('toggle-compare')"
+    >
       {{ state.compareExpanded ? "Close Compare" : "Compare" }}
     </button>
   </section>

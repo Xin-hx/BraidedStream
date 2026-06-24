@@ -2,13 +2,13 @@
  * Inset renderer for before/after/diff/split layout comparisons.
  */
 import * as d3 from "d3";
-import { roiBounds } from "../interactions/roi.js";
-import { clamp01, percentile, range } from "../core/utils.js";
-import { createAreaPath } from "./paths.js";
-import { angleAxisLabels, createChartFrame, drawCrosshair, formatTimeTick, layoutExtentForIndices } from "./chartUtils.js";
-import { diffColor, layerColor } from "../styles/palette.js";
-import { boundaryUncertaintyAt } from "../core/validate.js";
-import { applyLayerHoverHighlight as applyPathLayerHoverHighlight } from "./layerHoverHighlight.js";
+import { roiBounds } from "../interactions/roi";
+import { clamp01, percentile, range } from "../core/utils";
+import { createAreaPath } from "./paths";
+import { angleAxisLabels, createChartFrame, drawCrosshair, formatTimeTick, layoutExtentForIndices } from "./chartUtils";
+import { diffColor, layerColor } from "../styles/palette";
+import { boundaryUncertaintyAt } from "../core/validate";
+import { applyLayerHoverHighlight as applyPathLayerHoverHighlight } from "./layerHoverHighlight";
 export class InsetChart {
     constructor(svg) {
         this.svg = svg;
@@ -116,7 +116,7 @@ export class InsetChart {
                 fixedSeed,
                 uncertainty: layer.unc?.slice(left, right + 1)
             }),
-            color: layerColor(k, layer.id),
+            color: layerColor(k, layer),
             fillOpacity: beforeFillOpacity,
             stroke: "#1e293b",
             strokeOpacity: beforeStrokeOpacity,
@@ -134,7 +134,7 @@ export class InsetChart {
                 fixedSeed,
                 uncertainty: layer.unc?.slice(left, right + 1)
             }),
-            color: layerColor(k, layer.id),
+            color: layerColor(k, layer),
             fillOpacity: afterFillOpacity,
             stroke: "#f8fafc",
             strokeOpacity: 1,

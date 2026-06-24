@@ -5,9 +5,9 @@
  * groups below build the hierarchy, solve optimal leaf ordering, and evaluate
  * pairwise distances.
  */
-import { roiBounds } from "../../interactions/roi.js";
-import { FIXED_SEED, median, seededShuffleIndices } from "../utils.js";
-import { layerUncertaintyAt } from "../validate.js";
+import { roiBounds } from "../../interactions/roi";
+import { FIXED_SEED, median, seededShuffleIndices } from "../utils";
+import { layerUncertaintyAt } from "../validate";
 const ORIENTATION_ENUM = [
     [0, 0, 1, 1],
     [0, 1, 1, 0],

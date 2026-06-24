@@ -1,13 +1,13 @@
-import { computeBaseline } from "../core/baseline/compute.js";
-import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale.js";
+import { computeBaseline } from "../core/baseline/compute";
+import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale";
 /**
  * Grid search for multiscale baseline parameters under a fixed layer order.
  */
-import { optimizeLayerOrder } from "../core/ordering/sineStream.js";
-import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack.js";
-import { emptyInvariantSummary } from "../core/validate.js";
-import { computeMetrics } from "./metrics.js";
-import { discreteValues as discreteSearchValues, finiteNumber, passReasons, regressionReasons, runParameterGridSearch, sanitizeCenterTypes, sanitizeRange as sanitizeSearchRange, scopeSummaryFromMetricRows, sortKeyFromParams } from "./searchUtils.js";
+import { optimizeLayerOrder } from "../core/ordering/sineStream";
+import { computeStackedBoundaries, stackToBraidLayout } from "../core/stack";
+import { emptyInvariantSummary } from "../core/validate";
+import { computeMetrics } from "./metrics";
+import { discreteValues as discreteSearchValues, finiteNumber, passReasons, regressionReasons, runParameterGridSearch, sanitizeCenterTypes, sanitizeRange as sanitizeSearchRange, scopeSummaryFromMetricRows, sortKeyFromParams } from "./searchUtils";
 export function buildFixedOrder(dataset, optimization, shuffleSeed) {
     const optimized = optimizeLayerOrder(dataset.layers, null, {
         clusterAutoCutScale: optimization.clusterAutoCutScale,

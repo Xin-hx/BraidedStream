@@ -1,4 +1,4 @@
-import { EPSILON } from "./utils.js";
+import { EPSILON } from "./utils";
 /**
  * Assert that all per-time layer series match the dataset timeline length. 时间序列校验，每一层长度一致，每个时间点都有值
  * Series normalization is handled in data ingestion/preprocessing. 缺失值补0在数据预处理阶段完成

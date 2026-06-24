@@ -1,8 +1,8 @@
-import { clamp, normalize01, sumAbs } from "../utils.js";
-import { diffSeries, maxAbsStep, meanAbsStep, meanCurvature, movingAverage, removeMean } from "../../data/series.js";
-import { validateTimeLengths } from "../validate.js";
-import { computeCenteredBaseline, sumLayerHeights } from "./compute.js";
-import { computeSineStreamBaseline } from "./sineStream.js";
+import { clamp, normalize01, sumAbs } from "../utils";
+import { diffSeries, maxAbsStep, meanAbsStep, meanCurvature, movingAverage, removeMean } from "../../data/series";
+import { validateTimeLengths } from "../validate";
+import { computeCenteredBaseline, sumLayerHeights } from "./compute";
+import { computeSineStreamBaseline } from "./sineStream";
 /** Redistribute SineStream centerline derivative bursts through layer-slope multiscale wave bases. */
 export function computeMultiscaleDistributedBaseline(times, layers, strength = 0.45, hooks = {}, energyThreshold = 0.08) {
     return computeMultiscaleBaselineWithAnchor("sine", times, layers, strength, hooks, energyThreshold);

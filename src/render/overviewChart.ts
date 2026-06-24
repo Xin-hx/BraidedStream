@@ -1,9 +1,15 @@
 /**
- * Compact overview renderer and primary ROI brush.
+ * Compact overview renderer showing the total-thickness silhouette and the
+ * primary ROI brush for timeline navigation.
  */
 import * as d3 from "d3";
 import type { PreparedDataset, ROI } from "../core/types";
-import { angleAxisLabels, createChartFrame, formatTimeTick, type PlotArea } from "./chartUtils";
+import {
+  createPlotContext,
+  renderTimeAxis,
+  type PlotArea,
+  type PlotContext
+} from "./chartUtils";
 import { createRoiBrush, type RoiBrushController } from "../interactions/brush";
 
 export interface OverviewRenderArgs {
@@ -18,64 +24,53 @@ export interface OverviewRenderResult {
 }
 
 export class OverviewChart {
-  private readonly width: number;
-  private readonly height: number;
   private readonly margin = { top: 10, right: 12, bottom: 34, left: 52 };
-  private readonly innerWidth: number;
-  private readonly innerHeight: number;
-  private readonly plotArea: PlotArea;
-  private readonly root: d3.Selection<SVGGElement, unknown, null, undefined>;
+  private readonly ctx: PlotContext;
   private readonly trendGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly brushGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly axisX: d3.Selection<SVGGElement, unknown, null, undefined>;
   private readonly roiBrush: RoiBrushController;
+  private lastOnRoiChange: ((roi: ROI | null) => void) | null = null;
 
   constructor(private readonly svg: SVGSVGElement) {
-    const frame = createChartFrame(svg, 1180, 118, this.margin);
-    const size = frame.size;
-    this.width = size.width;
-    this.height = size.height;
-    this.innerWidth = size.innerWidth;
-    this.innerHeight = size.innerHeight;
-    this.plotArea = frame.plotArea;
+    this.ctx = createPlotContext(svg, 1180, 118, this.margin);
 
-    this.root = frame.root;
-    this.trendGroup = this.root.append("g").attr("class", "overview-trend");
-    this.brushGroup = this.root.append("g").attr("class", "overview-brush");
-    this.axisX = this.root.append("g").attr("class", "x-axis");
+    this.trendGroup = this.ctx.root.append("g").attr("class", "overview-trend");
+    this.brushGroup = this.ctx.root.append("g").attr("class", "overview-brush");
+    this.axisX = this.ctx.root.append("g").attr("class", "x-axis");
+
     this.roiBrush = createRoiBrush(
       this.brushGroup,
       [
         [0, 0],
-        [this.innerWidth, this.innerHeight]
+        [this.ctx.innerWidth, this.ctx.innerHeight]
       ],
-      (roi) => {
-        this.lastOnRoiChange?.(roi);
-      },
+      (roi) => this.lastOnRoiChange?.(roi),
       "brush end"
     );
   }
 
-  private lastOnRoiChange: ((roi: ROI | null) => void) | null = null;
-
   render(args: OverviewRenderArgs): OverviewRenderResult {
     const { dataset, roi, onRoiChange } = args;
+    const { innerWidth, innerHeight } = this.ctx;
+
     const xScale = d3
       .scaleLinear()
       .domain([dataset.times[0], dataset.times[dataset.times.length - 1]])
-      .range([0, this.innerWidth]);
+      .range([0, innerWidth]);
 
+    // Aggregate all layer heights into a single silhouette to show global
+    // thickness trends without per-layer detail.
     const totals = dataset.times.map((_, t) => d3.sum(dataset.layers, (layer) => layer.height[t]) ?? 0);
     const yMax = d3.max(totals) ?? 1;
-    const yScale = d3.scaleLinear().domain([0, yMax]).range([this.innerHeight, 0]);
+    const yScale = d3.scaleLinear().domain([0, yMax]).range([innerHeight, 0]);
 
     const area = d3
       .area<number>()
       .x((_, i) => xScale(dataset.times[i]))
-      .y0(this.innerHeight)
+      .y0(innerHeight)
       .y1((v) => yScale(v))
-      // Keep overview aligned with raw sampling cadence.
-      .curve(d3.curveLinear);
+      .curve(d3.curveLinear); // linear preserves raw-sample alignment
 
     this.trendGroup
       .selectAll<SVGPathElement, number[]>("path.overview-area")
@@ -86,19 +81,12 @@ export class OverviewChart {
       .attr("stroke", "#0f766e")
       .attr("stroke-width", 1);
 
-    this.axisX
-      .attr("transform", `translate(0,${this.innerHeight})`)
-      .call(
-        d3
-          .axisBottom(xScale)
-          .ticks(Math.max(4, Math.floor(this.innerWidth / 140)))
-          .tickFormat((value) => formatTimeTick(Number(value)))
-      );
-    angleAxisLabels(this.axisX);
+    renderTimeAxis(this.axisX, xScale, innerWidth, innerHeight);
 
     this.lastOnRoiChange = onRoiChange;
     this.roiBrush.updateContext(dataset.times, xScale);
     this.roiBrush.sync(roi);
-    return { xScale, plotArea: this.plotArea };
+
+    return { xScale, plotArea: this.ctx.plotArea };
   }
 }

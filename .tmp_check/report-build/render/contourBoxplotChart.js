@@ -1,9 +1,9 @@
 import * as d3 from "d3";
-import { computeContourPid } from "../core/ordering/pid.js";
-import { roiBounds } from "../interactions/roi.js";
-import { clamp } from "../core/utils.js";
-import { createAreaPath } from "./paths.js";
-import { angleAxisLabels, createChartFrame, formatTimeTick } from "./chartUtils.js";
+import { computeContourPid } from "../core/ordering/pid";
+import { roiBounds } from "../interactions/roi";
+import { clamp } from "../core/utils";
+import { createAreaPath } from "./paths";
+import { angleAxisLabels, createChartFrame, formatTimeTick } from "./chartUtils";
 export class ContourBoxplotChart {
     constructor(svg) {
         this.svg = svg;
