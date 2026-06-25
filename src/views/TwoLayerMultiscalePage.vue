@@ -6,6 +6,14 @@ import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscal
 import { computeStackedBoundaries } from "../core/stack";
 import type { BaselineCenterType, LayerInput, StackLayout } from "../core/types";
 import { clamp } from "../core/utils";
+import {
+  solveRecursiveScour,
+  layoutScourTree,
+  DEFAULT_SCOUR_CONFIG,
+  type ScourConfig,
+  type ScourDebug,
+  type ScourLayout
+} from "../core/temp/index";
 
 interface DragTarget {
   layer: "x" | "y";
@@ -42,6 +50,9 @@ const baselineControls = reactive({
   multiscaleEnergyThreshold: 0.04
 });
 
+// ── Recursive Scour parameters ───────────────────────────────────────────────
+const scourConfig = reactive<ScourConfig>({ ...DEFAULT_SCOUR_CONFIG });
+
 const editor = {
   width: 760,
   height: 270,
@@ -63,7 +74,7 @@ const chart = {
 };
 
 const derivativeChart = {
-  width: 1120,
+  width: 1360,
   height: 170,
   left: 44,
   right: 18,
@@ -84,6 +95,31 @@ const layers = computed<LayerInput[]>(() => [
   }
 ]);
 
+// ── compute height matrix [n][T] for scour solver ─────────────────────────────
+const scourHeights = computed(() => [
+  thickness.x.slice(),
+  thickness.y.slice()
+]);
+
+const scourResult = computed(() => {
+  const config: ScourConfig = { ...scourConfig };
+  const { tree, debug } = solveRecursiveScour(scourHeights.value, config);
+  return { tree, debug };
+});
+
+const scourLayout = computed<ScourLayout>(() => {
+  const { tree } = scourResult.value;
+  return layoutScourTree(scourHeights.value, tree);
+});
+
+// For rendering: convert ScourLayout to a StackLayout-compatible shape.
+const scourStackLayout = computed<StackLayout>(() => ({
+  baseline: scourLayout.value.centerline,
+  yBottom: scourLayout.value.yBottom,
+  yTop: scourLayout.value.yTop
+}));
+
+// ── existing baselines ────────────────────────────────────────────────────────
 const centeredBaseline = computed(() => computeCenteredBaseline(timeCount, layers.value));
 const l2Hooks = computed(() => ({
   wiggleWeightL2: Math.max(0, baselineControls.l2WiggleWeight),
@@ -115,10 +151,13 @@ const centeredCenterline = computed(() => centerlineFromLayout(centeredLayout.va
 const l2Centerline = computed(() => centerlineFromLayout(l2Layout.value));
 const sineCenterline = computed(() => centerlineFromLayout(sineLayout.value));
 const multiscaleCenterline = computed(() => centerlineFromLayout(multiscaleLayout.value));
+const scourCenterline = computed(() => centerlineFromScourLayout(scourLayout.value));
+
 const centeredDerivative = computed(() => derivative(centeredCenterline.value));
 const l2Derivative = computed(() => derivative(l2Centerline.value));
 const sineDerivative = computed(() => derivative(sineCenterline.value));
 const multiscaleDerivative = computed(() => derivative(multiscaleCenterline.value));
+const scourDerivative = computed(() => derivative(scourCenterline.value));
 
 const focusStep = computed(() => {
   const values = sineDerivative.value;
@@ -144,10 +183,13 @@ const sharedYExtent = computed(() => {
     ...sineLayout.value.yTop.flat(),
     ...multiscaleLayout.value.yBottom.flat(),
     ...multiscaleLayout.value.yTop.flat(),
+    ...scourStackLayout.value.yBottom.flat(),
+    ...scourStackLayout.value.yTop.flat(),
     ...centeredCenterline.value,
     ...l2Centerline.value,
     ...sineCenterline.value,
-    ...multiscaleCenterline.value
+    ...multiscaleCenterline.value,
+    ...scourCenterline.value
   ];
   let minValue = Math.min(...values);
   let maxValue = Math.max(...values);
@@ -167,6 +209,9 @@ const sinePaths = computed(() => layerPaths(sineLayout.value, streamGeometry(cha
 const multiscalePaths = computed(() =>
   layerPaths(multiscaleLayout.value, streamGeometry(chart.width, chart.height, sharedYExtent.value))
 );
+const scourPaths = computed(() =>
+  layerPaths(scourStackLayout.value, streamGeometry(chart.width, chart.height, sharedYExtent.value))
+);
 
 const centeredCenterPath = computed(() =>
   linePath(centeredCenterline.value, streamGeometry(chart.width, chart.height, sharedYExtent.value))
@@ -179,6 +224,9 @@ const sineCenterPath = computed(() =>
 );
 const multiscaleCenterPath = computed(() =>
   linePath(multiscaleCenterline.value, streamGeometry(chart.width, chart.height, sharedYExtent.value))
+);
+const scourCenterPath = computed(() =>
+  linePath(scourCenterline.value, streamGeometry(chart.width, chart.height, sharedYExtent.value))
 );
 
 const editorGeometry = computed(() => {
@@ -209,7 +257,8 @@ const derivativeExtent = computed(() => {
     ...centeredDerivative.value.map(Math.abs),
     ...l2Derivative.value.map(Math.abs),
     ...sineDerivative.value.map(Math.abs),
-    ...multiscaleDerivative.value.map(Math.abs)
+    ...multiscaleDerivative.value.map(Math.abs),
+    ...scourDerivative.value.map(Math.abs)
   );
   return { min: -maxValue * 1.15, max: maxValue * 1.15 };
 });
@@ -218,6 +267,7 @@ const centeredDerivativePath = computed(() => derivativeLinePath(centeredDerivat
 const l2DerivativePath = computed(() => derivativeLinePath(l2Derivative.value));
 const sineDerivativePath = computed(() => derivativeLinePath(sineDerivative.value));
 const multiscaleDerivativePath = computed(() => derivativeLinePath(multiscaleDerivative.value));
+const scourDerivativePath = computed(() => derivativeLinePath(scourDerivative.value));
 
 const comparisons = computed(() => [
   {
@@ -247,21 +297,55 @@ const comparisons = computed(() => [
     note: "SineStream anchor plus multiscale redistribution",
     paths: multiscalePaths.value,
     centerPath: multiscaleCenterPath.value
+  },
+  {
+    key: "scour",
+    title: "Recursive Scour",
+    note: scourNote.value,
+    paths: scourPaths.value,
+    centerPath: scourCenterPath.value
   }
 ]);
+
+const scourNote = computed(() => {
+  const d = scourResult.value.debug;
+  if (d.treeType === "split") {
+    return `split: cost=${d.totalCost.toFixed(1)} < chain=${d.chainCost?.toFixed(1) ?? "N/A"}`;
+  }
+  return `chain: cost=${d.totalCost.toFixed(1)}`;
+});
+
+const scourDebugText = computed(() => {
+  const d = scourResult.value.debug;
+  return [
+    `type: ${d.treeType}`,
+    `cost: ${d.totalCost.toFixed(2)}`,
+    `chainCost: ${d.chainCost?.toFixed(2) ?? "N/A"}`,
+    d.splitCost !== null ? `splitCost: ${d.splitCost.toFixed(2)}` : "",
+    d.splitPenalty !== null ? `splitPenalty: ${d.splitPenalty.toFixed(4)}` : "",
+    d.selectedSplit ?? "",
+    `depth: ${d.recursionDepth}`,
+    "",
+    d.treeStructure
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+});
 
 const baselineMetrics = computed(() => [
   metricRow("Centered", centeredDerivative.value, "#64748b"),
   metricRow("L2 norm", l2Derivative.value, "#2563eb"),
   metricRow("SineStream", sineDerivative.value, "#7c3aed"),
-  metricRow("Multiscale", multiscaleDerivative.value, "#059669")
+  metricRow("Multiscale", multiscaleDerivative.value, "#059669"),
+  metricRow("Scour", scourDerivative.value, "#d97706")
 ]);
 
 const derivativeLines = computed(() => [
   { label: "Centered", path: centeredDerivativePath.value, color: "#64748b" },
   { label: "L2 norm", path: l2DerivativePath.value, color: "#2563eb" },
   { label: "SineStream", path: sineDerivativePath.value, color: "#7c3aed" },
-  { label: "Multiscale", path: multiscaleDerivativePath.value, color: "#059669" }
+  { label: "Multiscale", path: multiscaleDerivativePath.value, color: "#059669" },
+  { label: "Scour", path: scourDerivativePath.value, color: "#d97706" }
 ]);
 
 const multiscaleNotes = computed(() => ({
@@ -333,6 +417,11 @@ function centerlineFromLayout(layout: StackLayout): number[] {
   }
   const last = layout.yTop.length - 1;
   return layout.baseline.map((value, index) => 0.5 * (value + layout.yTop[last][index]));
+}
+
+/** The scour interface line — a flat horizontal line after the global shift. */
+function centerlineFromScourLayout(layout: ScourLayout): number[] {
+  return layout.centerline.slice();
 }
 
 function derivative(values: number[]): number[] {
@@ -440,7 +529,7 @@ function fmtShort(value: number): string {
 <template>
   <div class="two-layer-page">
     <header class="two-layer-header">
-      <h1>Two-layer SineStream Centerline Demo</h1>
+      <h1>Two-layer Baseline + Recursive Scour Demo</h1>
       <div class="two-layer-actions" aria-label="Preset cases">
         <button type="button" @click="resetCase('burst')">Burst</button>
         <button type="button" @click="resetCase('exchange')">Exchange</button>
@@ -522,6 +611,61 @@ function fmtShort(value: number): string {
       </div>
     </section>
 
+    <!-- Scour parameters -->
+    <section class="two-layer-metric-strip scour-params" aria-label="Scour parameters">
+      <div class="metric-pill">
+        <span>λ turn</span>
+        <strong><input v-model.number="scourConfig.lambdaTurn" type="number" min="0" max="2" step="0.05" /></strong>
+      </div>
+      <div class="metric-pill">
+        <span>ρ split</span>
+        <strong><input v-model.number="scourConfig.rhoSplit" type="number" min="0" max="1" step="0.01" /></strong>
+      </div>
+      <div class="metric-pill">
+        <span>η height</span>
+        <strong><input v-model.number="scourConfig.etaHeight" type="number" min="0" max="0.1" step="0.001" /></strong>
+      </div>
+      <div class="metric-pill">
+        <span>β balance</span>
+        <strong><input v-model.number="scourConfig.betaBalance" type="number" min="0" max="2" step="0.02" /></strong>
+      </div>
+      <div class="metric-pill">
+        <span>max depth</span>
+        <strong><input v-model.number="scourConfig.maxDepth" type="number" min="1" max="6" step="1" /></strong>
+      </div>
+      <div class="metric-pill">
+        <span>interface mode</span>
+        <strong>
+          <select v-model="scourConfig.movingInterfaceMode">
+            <option value="optimized">optimized</option>
+            <option value="symmetric">symmetric</option>
+            <option value="fixed">fixed</option>
+          </select>
+        </strong>
+      </div>
+      <div class="metric-pill">
+        <span>interface anchor</span>
+        <strong><input v-model.number="scourConfig.movingInterfaceAnchorWeight" type="number" min="0" step="1" /></strong>
+      </div>
+      <div class="metric-pill">
+        <span>interface λ</span>
+        <strong><input v-model.number="scourConfig.movingInterfaceLambda" type="number" min="0" step="0.05" /></strong>
+      </div>
+      <div class="metric-pill">
+        <span>interface weight</span>
+        <strong><input v-model.number="scourConfig.movingInterfaceWeight" type="number" min="0" step="0.05" /></strong>
+      </div>
+      <div class="metric-pill">
+        <span>search</span>
+        <strong>
+          <select v-model="scourConfig.searchMode">
+            <option value="greedy">greedy</option>
+            <option value="exact">exact</option>
+          </select>
+        </strong>
+      </div>
+    </section>
+
     <section class="two-layer-metric-strip" aria-label="Baseline metrics">
       <div v-for="item in baselineMetrics" :key="item.label" class="metric-pill">
         <span><i class="metric-line" :style="{ backgroundColor: item.color }"></i>{{ item.label }}</span>
@@ -537,7 +681,7 @@ function fmtShort(value: number): string {
       </div>
     </section>
 
-    <section class="two-layer-compare" aria-label="SineStream and multiscale comparison">
+    <section class="two-layer-compare" aria-label="Baseline and scour comparison">
       <div v-for="item in comparisons" :key="item.key" class="two-layer-chart">
         <h2>{{ item.title }}</h2>
         <div class="baseline-controls" :aria-label="`${item.title} parameters`">
@@ -565,7 +709,7 @@ function fmtShort(value: number): string {
             </label>
           </template>
 
-          <template v-else>
+          <template v-else-if="item.key === 'multiscale'">
             <label>
               center type
               <select v-model="baselineControls.multiscaleCenterType">
@@ -588,6 +732,12 @@ function fmtShort(value: number): string {
                 step="0.01"
               />
             </label>
+          </template>
+
+          <template v-else-if="item.key === 'scour'">
+            <div class="scour-debug" aria-label="Scour debug output">
+              <pre>{{ scourDebugText }}</pre>
+            </div>
           </template>
         </div>
         <svg :viewBox="`0 0 ${chart.width} ${chart.height}`" role="img" :aria-label="`${item.title} layout`">
@@ -659,8 +809,8 @@ function fmtShort(value: number): string {
           </text>
         </g>
         <g v-for="(item, index) in derivativeLines" :key="`legend-${item.label}`">
-          <line :x1="52 + index * 128" :x2="82 + index * 128" y1="22" y2="22" :stroke="item.color" stroke-width="3" />
-          <text :x="88 + index * 128" y="26" :fill="item.color" font-size="12">{{ item.label }}</text>
+          <line :x1="52 + index * 120" :x2="82 + index * 120" y1="22" y2="22" :stroke="item.color" stroke-width="3" />
+          <text :x="88 + index * 120" y="26" :fill="item.color" font-size="12">{{ item.label }}</text>
         </g>
       </svg>
     </section>
@@ -814,6 +964,17 @@ function fmtShort(value: number): string {
   font-size: 0.84rem;
 }
 
+/* Scour parameter inputs */
+.metric-pill input,
+.metric-pill select {
+  width: 100%;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 0.82rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+
 .metric-line {
   display: inline-block;
   width: 18px;
@@ -824,7 +985,7 @@ function fmtShort(value: number): string {
 
 .two-layer-compare {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -870,19 +1031,34 @@ function fmtShort(value: number): string {
   font-weight: 700;
 }
 
+/* Scour debug panel */
+.scour-debug pre {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: #334155;
+  background: #f1f5f9;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 110px;
+  overflow-y: auto;
+}
+
 .two-layer-derivative {
   padding: 10px;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1300px) {
   .two-layer-compare {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 860px) {
   .two-layer-compare {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .two-layer-metric-strip {
@@ -891,6 +1067,9 @@ function fmtShort(value: number): string {
 }
 
 @media (max-width: 560px) {
+  .two-layer-compare {
+    grid-template-columns: 1fr;
+  }
   .baseline-controls label,
   .two-layer-metric-strip {
     grid-template-columns: 1fr;

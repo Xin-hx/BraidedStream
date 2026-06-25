@@ -267,6 +267,7 @@ function buildCurrentVariantConfig(): OptimizingVariantConfig {
     baselineUncertaintyWeight: state.optimization.baselineUncertaintyWeight ?? 0.45,
     multiscaleEnergyThreshold: state.optimization.multiscaleEnergyThreshold ?? 0.08,
     baselineHooks: baselineHooksFromState(),
+    scour: scourConfigFromState(),
     orderRoi: state.ROI,
     sineOrder: sineOrderConfigFromState()
   };
@@ -282,8 +283,43 @@ function buildCompareVariantConfig(): OptimizingVariantConfig {
     baselineUncertaintyWeight: state.compare.baselineUncertaintyWeight,
     multiscaleEnergyThreshold: state.compare.multiscaleEnergyThreshold,
     baselineHooks: baselineHooksFromCompare(),
+    scour: scourConfigFromCompare(),
     orderRoi: state.ROI,
     sineOrder: sineOrderConfigFromCompare()
+  };
+}
+
+function scourConfigFromState(): OptimizingVariantConfig["scour"] {
+  return {
+    lambdaTurn: state.optimization.scourLambdaTurn ?? 0.2,
+    rhoSplit: state.optimization.scourRhoSplit ?? 0.05,
+    etaHeight: state.optimization.scourEtaHeight ?? 0.01,
+    betaBalance: state.optimization.scourBetaBalance ?? 0.1,
+    maxDepth: Math.round(state.optimization.scourMaxDepth ?? 4),
+    minGroupSize: Math.round(state.optimization.scourMinGroupSize ?? 1),
+    searchMode: "greedy",
+    seed: state.fixedSeed,
+    movingInterfaceLambda: state.optimization.scourMovingInterfaceLambda ?? 0.2,
+    movingInterfaceAnchorWeight: state.optimization.scourMovingInterfaceAnchorWeight ?? 0,
+    movingInterfaceWeight: state.optimization.scourMovingInterfaceWeight ?? 0.25,
+    movingInterfaceMode: state.optimization.scourMovingInterfaceMode ?? "optimized"
+  };
+}
+
+function scourConfigFromCompare(): OptimizingVariantConfig["scour"] {
+  return {
+    lambdaTurn: state.compare.scourLambdaTurn,
+    rhoSplit: state.compare.scourRhoSplit,
+    etaHeight: state.compare.scourEtaHeight,
+    betaBalance: state.compare.scourBetaBalance,
+    maxDepth: Math.round(state.compare.scourMaxDepth),
+    minGroupSize: Math.round(state.compare.scourMinGroupSize),
+    searchMode: "greedy",
+    seed: state.fixedSeed,
+    movingInterfaceLambda: state.compare.scourMovingInterfaceLambda,
+    movingInterfaceAnchorWeight: state.compare.scourMovingInterfaceAnchorWeight,
+    movingInterfaceWeight: state.compare.scourMovingInterfaceWeight,
+    movingInterfaceMode: state.compare.scourMovingInterfaceMode
   };
 }
 
@@ -536,6 +572,60 @@ function sanitizeState(): void {
     0,
     1
   );
+  state.optimization.scourLambdaTurn = finiteAtLeast(
+    state.optimization.scourLambdaTurn ?? defaultState.optimization.scourLambdaTurn ?? 0.2,
+    defaultState.optimization.scourLambdaTurn ?? 0.2,
+    0
+  );
+  state.optimization.scourRhoSplit = finiteAtLeast(
+    state.optimization.scourRhoSplit ?? defaultState.optimization.scourRhoSplit ?? 0.05,
+    defaultState.optimization.scourRhoSplit ?? 0.05,
+    0
+  );
+  state.optimization.scourEtaHeight = finiteAtLeast(
+    state.optimization.scourEtaHeight ?? defaultState.optimization.scourEtaHeight ?? 0.01,
+    defaultState.optimization.scourEtaHeight ?? 0.01,
+    0
+  );
+  state.optimization.scourBetaBalance = finiteAtLeast(
+    state.optimization.scourBetaBalance ?? defaultState.optimization.scourBetaBalance ?? 0.1,
+    defaultState.optimization.scourBetaBalance ?? 0.1,
+    0
+  );
+  state.optimization.scourMaxDepth = Math.max(
+    1,
+    Math.min(
+      8,
+      Math.round(finiteAtLeast(state.optimization.scourMaxDepth ?? defaultState.optimization.scourMaxDepth ?? 4, 4, 1))
+    )
+  );
+  state.optimization.scourMinGroupSize = Math.max(
+    1,
+    Math.min(
+      12,
+      Math.round(
+        finiteAtLeast(state.optimization.scourMinGroupSize ?? defaultState.optimization.scourMinGroupSize ?? 1, 1, 1)
+      )
+    )
+  );
+  state.optimization.scourMovingInterfaceLambda = finiteAtLeast(
+    state.optimization.scourMovingInterfaceLambda ?? defaultState.optimization.scourMovingInterfaceLambda ?? 0.2,
+    defaultState.optimization.scourMovingInterfaceLambda ?? 0.2,
+    0
+  );
+  state.optimization.scourMovingInterfaceAnchorWeight = finiteAtLeast(
+    state.optimization.scourMovingInterfaceAnchorWeight ?? defaultState.optimization.scourMovingInterfaceAnchorWeight ?? 0,
+    defaultState.optimization.scourMovingInterfaceAnchorWeight ?? 0,
+    0
+  );
+  state.optimization.scourMovingInterfaceWeight = finiteAtLeast(
+    state.optimization.scourMovingInterfaceWeight ?? defaultState.optimization.scourMovingInterfaceWeight ?? 0.25,
+    defaultState.optimization.scourMovingInterfaceWeight ?? 0.25,
+    0
+  );
+  if (!["symmetric", "optimized", "fixed"].includes(state.optimization.scourMovingInterfaceMode ?? "")) {
+    state.optimization.scourMovingInterfaceMode = defaultState.optimization.scourMovingInterfaceMode ?? "optimized";
+  }
   state.pidTimeAlpha = finiteBetween(state.pidTimeAlpha, defaultState.pidTimeAlpha, 0, 1);
   state.contourBoxplotYBins = Math.max(
     24,
@@ -571,6 +661,52 @@ function sanitizeState(): void {
     0,
     1
   );
+  state.compare.scourLambdaTurn = finiteAtLeast(
+    state.compare.scourLambdaTurn,
+    defaultState.compare.scourLambdaTurn,
+    0
+  );
+  state.compare.scourRhoSplit = finiteAtLeast(
+    state.compare.scourRhoSplit,
+    defaultState.compare.scourRhoSplit,
+    0
+  );
+  state.compare.scourEtaHeight = finiteAtLeast(
+    state.compare.scourEtaHeight,
+    defaultState.compare.scourEtaHeight,
+    0
+  );
+  state.compare.scourBetaBalance = finiteAtLeast(
+    state.compare.scourBetaBalance,
+    defaultState.compare.scourBetaBalance,
+    0
+  );
+  state.compare.scourMaxDepth = Math.max(
+    1,
+    Math.min(8, Math.round(finiteAtLeast(state.compare.scourMaxDepth, defaultState.compare.scourMaxDepth, 1)))
+  );
+  state.compare.scourMinGroupSize = Math.max(
+    1,
+    Math.min(12, Math.round(finiteAtLeast(state.compare.scourMinGroupSize, defaultState.compare.scourMinGroupSize, 1)))
+  );
+  state.compare.scourMovingInterfaceLambda = finiteAtLeast(
+    state.compare.scourMovingInterfaceLambda,
+    defaultState.compare.scourMovingInterfaceLambda,
+    0
+  );
+  state.compare.scourMovingInterfaceAnchorWeight = finiteAtLeast(
+    state.compare.scourMovingInterfaceAnchorWeight,
+    defaultState.compare.scourMovingInterfaceAnchorWeight,
+    0
+  );
+  state.compare.scourMovingInterfaceWeight = finiteAtLeast(
+    state.compare.scourMovingInterfaceWeight,
+    defaultState.compare.scourMovingInterfaceWeight,
+    0
+  );
+  if (!["symmetric", "optimized", "fixed"].includes(state.compare.scourMovingInterfaceMode)) {
+    state.compare.scourMovingInterfaceMode = defaultState.compare.scourMovingInterfaceMode;
+  }
   state.compare.wiggleWeightL1 = finiteAtLeast(state.compare.wiggleWeightL1, defaultState.compare.wiggleWeightL1, 0);
   state.compare.wiggleWeightL2 = finiteAtLeast(state.compare.wiggleWeightL2, defaultState.compare.wiggleWeightL2, 0);
   state.compare.centerAnchorWeight = finiteAtLeast(

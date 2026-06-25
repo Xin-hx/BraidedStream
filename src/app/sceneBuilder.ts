@@ -3,7 +3,7 @@ import { computeBraidLayout } from "../core/NOT_IN_USE/braid";
 import type { DatasetBundle } from "../data/datasets";
 import { orderLayers } from "../core/ordering/display";
 import { optimizeLayerOrder, type OrderOptimizationResult } from "../core/ordering/sineStream";
-import { computeOptimizingOrder } from "./optimizingOrder";
+import { computeOptimizingOrder, type OptimizingOrderResult } from "./optimizingOrder";
 import {
   optimizingBaselineModeLabel,
   optimizingStageLabel,
@@ -30,6 +30,11 @@ import { preprocessDataset } from "../data/transforms";
 import { toMultiscaleDiagnosticsSummary } from "../layout/diagnostics";
 import { computeMetrics, type MetricResult } from "../layout/metrics";
 import type { AppState } from "../state/appState";
+import {
+  layoutScourTree,
+  solveRecursiveScour,
+  type ScourConfig
+} from "../core/temp";
 
 export interface SceneBuildResult {
   dataset: PreparedDataset;
@@ -108,6 +113,11 @@ export function buildOptimizingVariantScene(
   const resolvedConfig = resolveOptimizingVariantConfig(config);
   const orderResult = computeOptimizingOrder(context.dataset, resolvedConfig);
   const orderedLayers = orderLayers(context.dataset.layers, orderResult.displayOrder);
+
+  if (resolvedConfig.baselineMode === "scour") {
+    return buildScourVariantScene(context, config, resolvedConfig, orderResult, orderedLayers);
+  }
+
   const baselineResult = computeOptimizingBaseline(
     context.dataset.times,
     orderedLayers,
@@ -150,6 +160,103 @@ export function buildOptimizingVariantScene(
     usesPid,
     pidUncertaintySource: usesPid ? resolvedConfig.pidUncertaintySource : null
   };
+}
+
+function buildScourVariantScene(
+  context: DatasetWindowContext,
+  config: OptimizingVariantConfig,
+  resolvedConfig: OptimizingVariantConfig,
+  orderResult: OptimizingOrderResult,
+  orderedLayers: LayerInput[]
+): SceneBuildResult {
+  const heights = orderedLayers.map((layer) =>
+    layer.height.map((value) => (Number.isFinite(value) ? Math.max(0, value) : 0))
+  );
+  const scourConfig: ScourConfig = {
+    ...resolvedConfig.scour,
+    searchMode: orderedLayers.length <= 12 ? "exact" : "greedy",
+    seed: resolvedConfig.sineOrder.fixedSeed
+  };
+  const { tree, debug } = solveRecursiveScour(heights, scourConfig);
+  const rawLayout = layoutScourTree(heights, tree);
+  const renderOrder = normalizeScourRenderOrder(rawLayout.order, orderedLayers.length);
+  const scourOrderedLayers = renderOrder.map((index) => orderedLayers[index]);
+  const layoutStack: StackLayout = {
+    baseline: rawLayout.centerline.slice(),
+    yBottom: renderOrder.map((index) => cloneSeries(rawLayout.yBottom[index], context.dataset.times.length)),
+    yTop: renderOrder.map((index) => cloneSeries(rawLayout.yTop[index], context.dataset.times.length))
+  };
+  const layout = stackToBraidLayout(layoutStack);
+  const invariant = emptyInvariantSummary();
+  const metrics = computeMetrics(context.dataset, layoutStack, layout, context.insetRoi, invariant, scourOrderedLayers, {
+    includeGlobalRows: true
+  });
+  const diagnosticsNotes = [
+    `stage: ${optimizingStageLabel(config.optimizingStage)}`,
+    `ordering scoring: ${orderingScoringLabel(resolvedConfig.orderingScoringMode)}`,
+    `baseline: ${optimizingBaselineModeLabel(resolvedConfig.baselineMode)}`,
+    ...orderResult.notes,
+    `scour search: ${scourConfig.searchMode}, maxDepth=${scourConfig.maxDepth}, rho=${scourConfig.rhoSplit.toFixed(3)}`,
+    `scour moving interface: mode=${scourConfig.movingInterfaceMode}, lambda=${scourConfig.movingInterfaceLambda.toFixed(3)}, anchor=${scourConfig.movingInterfaceAnchorWeight.toFixed(3)}, weight=${scourConfig.movingInterfaceWeight.toFixed(3)}, nodes=${rawLayout.nodeWiseMovingInterfaces.length}`,
+    `scour cost: total=${debug.totalCost.toFixed(3)}, chain=${debug.chainCost?.toFixed(3) ?? "N/A"}, depth=${debug.recursionDepth}`,
+    debug.selectedSplit ? `scour root split: ${debug.selectedSplit}` : "",
+    summarizeScourTree(debug.treeStructure)
+  ].filter((text) => text.length > 0);
+  const usesPid = isPidOrderingMode(resolvedConfig.orderingScoringMode);
+
+  return {
+    dataset: context.dataset,
+    orderedLayers: scourOrderedLayers,
+    baseLayout: layoutStack,
+    braidedLayout: layout,
+    roi: context.activeRoi,
+    insetRoi: context.insetRoi,
+    metrics,
+    notes: context.preprocessedNotes,
+    diagnosticsNotes,
+    usesPid,
+    pidUncertaintySource: usesPid ? resolvedConfig.pidUncertaintySource : null
+  };
+}
+
+function normalizeScourRenderOrder(order: number[], layerCount: number): number[] {
+  const seen = new Set<number>();
+  const normalized: number[] = [];
+
+  for (const index of order) {
+    if (!Number.isInteger(index) || index < 0 || index >= layerCount || seen.has(index)) {
+      continue;
+    }
+    seen.add(index);
+    normalized.push(index);
+  }
+
+  for (let index = 0; index < layerCount; index += 1) {
+    if (!seen.has(index)) {
+      normalized.push(index);
+    }
+  }
+
+  return normalized;
+}
+
+function cloneSeries(series: number[] | undefined, length: number): number[] {
+  if (!series) {
+    return new Array<number>(length).fill(0);
+  }
+  return Array.from({ length }, (_value, index) => series[index] ?? 0);
+}
+
+function summarizeScourTree(treeStructure: string): string {
+  const lines = treeStructure
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return "";
+  }
+  const visible = lines.slice(0, 6).join(" / ");
+  return lines.length > 6 ? `scour tree: ${visible} / ...` : `scour tree: ${visible}`;
 }
 
 export function buildBraidedEnhanceScene(

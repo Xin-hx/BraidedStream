@@ -3,7 +3,7 @@
  */
 
 export type BaselineMode = "sineStream" | "center" | "zero" | "l1" | "l2";
-export type OptimizingBaselineMode = BaselineMode | "multiscale";
+export type OptimizingBaselineMode = BaselineMode | "multiscale" | "scour";
 export type GapMode = "none" | "uncGap" | "fixedGap";
 export type SmoothKernel = "cubic";
 export type DatasetKind = "synthetic" | "covid" | "sineBank" | "dataGenerator";
@@ -11,7 +11,7 @@ export type InsetViewMode = "before" | "after" | "diff" | "split";
 export type EnhanceTab = "optimize" | "braided" | "spaghetti";
 export type PidUncertaintySource = "value" | "poportion";
 export type PidTimeOrderMode = "layer_pid_centrality" | "layer_pid_time_weighted";
-export type OptimizingStage = "plainStream" | "stackedGeometry" | "sineStream" | "tpidMultiscale" | "custom";
+export type OptimizingStage = "plainStream" | "stackedGeometry" | "sineStream" | "tpidMultiscale" | "scour" | "custom";
 export type OrderingScoringMode = "input" | "insideOut" | "sineStream" | "intervalInclusion" | "pidMean" | "pidTimeWeighted";
 export type BaselineCenterType = "median" | "mean" | "geometric" | "harmonic";
 export type OrderWeightType = "max" | "arithmetic" | "geometric" | "harmonic" | "median";
@@ -58,6 +58,26 @@ export interface LayoutOptimizationConfig {
   baselineUncertaintyWeight?: number;
   /** Minimum normalized Haar-band energy included by multiscale baseline optimization */
   multiscaleEnergyThreshold?: number;
+  /** Recursive Scour: chain turning-energy weight. */
+  scourLambdaTurn?: number;
+  /** Recursive Scour: fixed split penalty. */
+  scourRhoSplit?: number;
+  /** Recursive Scour: split height-penalty weight. */
+  scourEtaHeight?: number;
+  /** Recursive Scour: split balance-penalty weight. */
+  scourBetaBalance?: number;
+  /** Recursive Scour: maximum binary-tree depth. */
+  scourMaxDepth?: number;
+  /** Recursive Scour: groups with this many layers or fewer remain terminal. */
+  scourMinGroupSize?: number;
+  /** Recursive Scour: moving-interface second-difference weight. */
+  scourMovingInterfaceLambda?: number;
+  /** Recursive Scour: local-zero anchor weight for moving interfaces. */
+  scourMovingInterfaceAnchorWeight?: number;
+  /** Recursive Scour: moving-interface energy weight in split decisions. */
+  scourMovingInterfaceWeight?: number;
+  /** Recursive Scour: moving-interface solver mode. */
+  scourMovingInterfaceMode?: "symmetric" | "optimized" | "fixed";
   /** Seed used by SineStream pre-shuffle in hierarchical ordering */
   shuffleSeed?: number;
 }

@@ -4,6 +4,7 @@ import type { OptimizingBaselineMode, OptimizingStage, OrderingScoringMode } fro
 
 import type { OrderWeightType, PidUncertaintySource, ROI } from "./core/types";
 import type { BaselineParameters } from "./core/baseline/types";
+import type { ScourConfig } from "./core/temp";
 
 export interface SineStreamOrderConfig {
   clusterAutoCutScale: number;
@@ -27,6 +28,7 @@ export interface OptimizingVariantConfig {
   baselineUncertaintyWeight: number;
   multiscaleEnergyThreshold: number;
   baselineHooks: BaselineParameters;
+  scour: ScourConfig;
   orderRoi: ROI | null;
   sineOrder: SineStreamOrderConfig;
 }
@@ -60,6 +62,13 @@ export function resolveOptimizingVariantConfig(config: OptimizingVariantConfig):
       ...config,
       orderingScoringMode: "pidTimeWeighted",
       baselineMode: "multiscale"
+    };
+  }
+  if (config.optimizingStage === "scour") {
+    return {
+      ...config,
+      orderingScoringMode: "input",
+      baselineMode: "scour"
     };
   }
   return config;
@@ -99,6 +108,9 @@ export function optimizingStageLabel(stage: OptimizingStage): string {
   if (stage === "tpidMultiscale") {
     return "TPID + multiscale";
   }
+  if (stage === "scour") {
+    return "Recursive Scour";
+  }
   return "Custom";
 }
 
@@ -117,6 +129,9 @@ export function optimizingBaselineModeLabel(mode: OptimizingBaselineMode): strin
   }
   if (mode === "sineStream") {
     return "SineStream";
+  }
+  if (mode === "scour") {
+    return "Recursive Scour";
   }
   return "Multiscale";
 }

@@ -263,6 +263,128 @@ const orderMaxSwapPasses = computed<number>({
   }
 });
 
+const scourLambdaTurn = computed<number>({
+  get: () => (isCompare.value ? props.state.compare.scourLambdaTurn : props.state.optimization.scourLambdaTurn ?? 0.2),
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourLambdaTurn = value;
+    } else {
+      props.state.optimization.scourLambdaTurn = value;
+    }
+  }
+});
+
+const scourRhoSplit = computed<number>({
+  get: () => (isCompare.value ? props.state.compare.scourRhoSplit : props.state.optimization.scourRhoSplit ?? 0.05),
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourRhoSplit = value;
+    } else {
+      props.state.optimization.scourRhoSplit = value;
+    }
+  }
+});
+
+const scourEtaHeight = computed<number>({
+  get: () => (isCompare.value ? props.state.compare.scourEtaHeight : props.state.optimization.scourEtaHeight ?? 0.01),
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourEtaHeight = value;
+    } else {
+      props.state.optimization.scourEtaHeight = value;
+    }
+  }
+});
+
+const scourBetaBalance = computed<number>({
+  get: () => (isCompare.value ? props.state.compare.scourBetaBalance : props.state.optimization.scourBetaBalance ?? 0.1),
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourBetaBalance = value;
+    } else {
+      props.state.optimization.scourBetaBalance = value;
+    }
+  }
+});
+
+const scourMaxDepth = computed<number>({
+  get: () => (isCompare.value ? props.state.compare.scourMaxDepth : props.state.optimization.scourMaxDepth ?? 4),
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourMaxDepth = value;
+    } else {
+      props.state.optimization.scourMaxDepth = value;
+    }
+  }
+});
+
+const scourMinGroupSize = computed<number>({
+  get: () => (isCompare.value ? props.state.compare.scourMinGroupSize : props.state.optimization.scourMinGroupSize ?? 1),
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourMinGroupSize = value;
+    } else {
+      props.state.optimization.scourMinGroupSize = value;
+    }
+  }
+});
+
+const scourMovingInterfaceLambda = computed<number>({
+  get: () =>
+    isCompare.value
+      ? props.state.compare.scourMovingInterfaceLambda
+      : props.state.optimization.scourMovingInterfaceLambda ?? 0.2,
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourMovingInterfaceLambda = value;
+    } else {
+      props.state.optimization.scourMovingInterfaceLambda = value;
+    }
+  }
+});
+
+const scourMovingInterfaceAnchorWeight = computed<number>({
+  get: () =>
+    isCompare.value
+      ? props.state.compare.scourMovingInterfaceAnchorWeight
+      : props.state.optimization.scourMovingInterfaceAnchorWeight ?? 0,
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourMovingInterfaceAnchorWeight = value;
+    } else {
+      props.state.optimization.scourMovingInterfaceAnchorWeight = value;
+    }
+  }
+});
+
+const scourMovingInterfaceWeight = computed<number>({
+  get: () =>
+    isCompare.value
+      ? props.state.compare.scourMovingInterfaceWeight
+      : props.state.optimization.scourMovingInterfaceWeight ?? 0.25,
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourMovingInterfaceWeight = value;
+    } else {
+      props.state.optimization.scourMovingInterfaceWeight = value;
+    }
+  }
+});
+
+const scourMovingInterfaceMode = computed<"symmetric" | "optimized" | "fixed">({
+  get: () =>
+    isCompare.value
+      ? props.state.compare.scourMovingInterfaceMode
+      : props.state.optimization.scourMovingInterfaceMode ?? "optimized",
+  set: (value) => {
+    if (isCompare.value) {
+      props.state.compare.scourMovingInterfaceMode = value;
+    } else {
+      props.state.optimization.scourMovingInterfaceMode = value;
+    }
+  }
+});
+
 const isCustomStage = computed(() => optimizingStage.value === "custom");
 const effectiveOrderingMode = computed<OrderingScoringMode>(() => {
   if (optimizingStage.value === "plainStream") {
@@ -276,6 +398,9 @@ const effectiveOrderingMode = computed<OrderingScoringMode>(() => {
   }
   if (optimizingStage.value === "tpidMultiscale") {
     return "pidTimeWeighted";
+  }
+  if (optimizingStage.value === "scour") {
+    return "input";
   }
   return orderingScoringMode.value;
 });
@@ -292,6 +417,9 @@ const effectiveBaselineMode = computed<OptimizingBaselineMode>(() => {
   if (optimizingStage.value === "tpidMultiscale") {
     return "multiscale";
   }
+  if (optimizingStage.value === "scour") {
+    return "scour";
+  }
   return baselineMode.value;
 });
 const showPidControls = computed(() =>
@@ -301,6 +429,7 @@ const showPidAlpha = computed(() => effectiveOrderingMode.value === "pidTimeWeig
 const showSineOrderingControls = computed(() => effectiveOrderingMode.value === "sineStream");
 const showBaselineCenter = computed(() => ["sineStream", "multiscale"].includes(effectiveBaselineMode.value));
 const showMultiscaleControls = computed(() => effectiveBaselineMode.value === "multiscale");
+const showScourControls = computed(() => effectiveBaselineMode.value === "scour");
 const showL1Controls = computed(() => effectiveBaselineMode.value === "l1");
 const showL2Controls = computed(() => effectiveBaselineMode.value === "l2");
 const effectiveOrderingLabel = computed(() => orderingScoringLabel(effectiveOrderingMode.value));
@@ -322,6 +451,7 @@ function onControlsChange(): void {
           <option value="stackedGeometry">Stacked Graphs - Geometry</option>
           <option value="sineStream">SineStream</option>
           <option value="tpidMultiscale">TPID + Multiscale</option>
+          <option value="scour">Recursive Scour</option>
           <option value="custom">Custom</option>
         </select>
       </label>
@@ -477,6 +607,7 @@ function onControlsChange(): void {
           <option value="l2">L2</option>
           <option value="sineStream">SineStream</option>
           <option value="multiscale">Multiscale</option>
+          <option value="scour">Recursive Scour</option>
         </select>
       </label>
 
@@ -488,6 +619,60 @@ function onControlsChange(): void {
       <label v-if="showMultiscaleControls">
         energyThreshold
         <input v-model.number="multiscaleEnergyThreshold" type="number" step="0.01" min="0" max="1" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showScourControls">
+        lambdaTurn
+        <input v-model.number="scourLambdaTurn" type="number" step="0.05" min="0" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showScourControls">
+        rhoSplit
+        <input v-model.number="scourRhoSplit" type="number" step="0.01" min="0" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showScourControls">
+        etaHeight
+        <input v-model.number="scourEtaHeight" type="number" step="0.001" min="0" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showScourControls">
+        betaBalance
+        <input v-model.number="scourBetaBalance" type="number" step="0.02" min="0" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showScourControls">
+        maxDepth
+        <input v-model.number="scourMaxDepth" type="number" step="1" min="1" max="8" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showScourControls">
+        minGroupSize
+        <input v-model.number="scourMinGroupSize" type="number" step="1" min="1" max="12" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showScourControls">
+        interfaceMode
+        <select v-model="scourMovingInterfaceMode" @change="onControlsChange">
+          <option value="optimized">optimized</option>
+          <option value="symmetric">symmetric</option>
+          <option value="fixed">fixed</option>
+        </select>
+      </label>
+
+      <label v-if="showScourControls">
+        interfaceLambda
+        <input v-model.number="scourMovingInterfaceLambda" type="number" step="0.05" min="0" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showScourControls">
+        interfaceAnchor
+        <input v-model.number="scourMovingInterfaceAnchorWeight" type="number" step="1" min="0" @change="onControlsChange" />
+      </label>
+
+      <label v-if="showScourControls">
+        interfaceWeight
+        <input v-model.number="scourMovingInterfaceWeight" type="number" step="0.05" min="0" @change="onControlsChange" />
       </label>
 
       <label v-if="showBaselineCenter">

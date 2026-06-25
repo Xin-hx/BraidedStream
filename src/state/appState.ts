@@ -41,6 +41,16 @@ export interface OptimizingCompareState {
   clusterBoundaryPenalty: number;
   orderSimilaritySigma: number;
   orderMaxSwapPasses: number;
+  scourLambdaTurn: number;
+  scourRhoSplit: number;
+  scourEtaHeight: number;
+  scourBetaBalance: number;
+  scourMaxDepth: number;
+  scourMinGroupSize: number;
+  scourMovingInterfaceLambda: number;
+  scourMovingInterfaceAnchorWeight: number;
+  scourMovingInterfaceWeight: number;
+  scourMovingInterfaceMode: "symmetric" | "optimized" | "fixed";
 }
 
 export interface AppState {
@@ -111,7 +121,17 @@ export function createInitialState(): AppState {
       clusterAutoCutScale: 1,
       clusterBoundaryPenalty: 0.5,
       orderSimilaritySigma: 0.75,
-      orderMaxSwapPasses: 20
+      orderMaxSwapPasses: 20,
+      scourLambdaTurn: 0.2,
+      scourRhoSplit: 0.05,
+      scourEtaHeight: 0.01,
+      scourBetaBalance: 0.1,
+      scourMaxDepth: 4,
+      scourMinGroupSize: 1,
+      scourMovingInterfaceLambda: 0.2,
+      scourMovingInterfaceAnchorWeight: 0,
+      scourMovingInterfaceWeight: 0.25,
+      scourMovingInterfaceMode: "optimized"
     },
     optimizingBaselineMode: "multiscale",
     pidTimeAlpha: 0.8,
@@ -161,7 +181,17 @@ export function createInitialState(): AppState {
       orderLengthWeightThreshold: 9,
       orderUncertaintyWeight: 0.35,
       baselineUncertaintyWeight: 0.45,
-      multiscaleEnergyThreshold: 0.08
+      multiscaleEnergyThreshold: 0.08,
+      scourLambdaTurn: 0.2,
+      scourRhoSplit: 0.05,
+      scourEtaHeight: 0.01,
+      scourBetaBalance: 0.1,
+      scourMaxDepth: 4,
+      scourMinGroupSize: 1,
+      scourMovingInterfaceLambda: 0.2,
+      scourMovingInterfaceAnchorWeight: 0,
+      scourMovingInterfaceWeight: 0.25,
+      scourMovingInterfaceMode: "optimized"
     },
     enableUncertaintyGap: true,
     // Keep the knob for future extension, but current release keeps jagged disabled.
