@@ -12,7 +12,6 @@ const props = defineProps<{
   scene: SceneBuildResult | null;
   state: AppState;
   forcedViewMode?: InsetViewMode | null;
-  forcedUncertaintyGap?: boolean | null;
   enableLayerHoverHighlight?: boolean | null;
 }>();
 
@@ -47,7 +46,6 @@ watch(
   () => [
     props.scene,
     props.state.insetViewMode,
-    props.state.enableUncertaintyGap,
     props.state.enableJaggedEdge,
     props.state.insetJaggedAmplitude,
     props.state.insetJaggedFrequency,
@@ -57,7 +55,6 @@ watch(
     props.state.contourBoxplotCentralFraction,
     props.state.contourBoxplotOpacity,
     props.forcedViewMode,
-    props.forcedUncertaintyGap,
     props.enableLayerHoverHighlight
   ],
   () => {
@@ -77,11 +74,10 @@ function renderChart(): void {
     dataset: props.scene.dataset,
     orderedLayers: props.scene.orderedLayers,
     before: props.scene.baseLayout,
-    after: props.scene.braidedLayout,
+    after: props.scene.afterLayout,
     roi: props.scene.insetRoi,
     viewMode: props.forcedViewMode ?? props.state.insetViewMode,
     yZoom: props.state.yZoomInset,
-    enableUncertaintyGap: props.forcedUncertaintyGap ?? props.state.enableUncertaintyGap,
     enableJaggedEdge: props.state.enableJaggedEdge,
     jaggedAmplitude: props.state.insetJaggedAmplitude,
     jaggedFrequency: props.state.insetJaggedFrequency,
@@ -168,7 +164,7 @@ function currentHoverLayout(): StackLayout {
     return { baseline: [], yBottom: [], yTop: [] };
   }
   const mode = props.forcedViewMode ?? props.state.insetViewMode;
-  return mode === "before" ? props.scene.baseLayout : props.scene.braidedLayout;
+  return mode === "before" ? props.scene.baseLayout : props.scene.afterLayout;
 }
 </script>
 

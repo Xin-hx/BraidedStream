@@ -1,12 +1,9 @@
 /**
  * Layout quality metrics used by UI panels and search routines.
  */
-import { computePidOrdering } from "../core/ordering/pid";
 import type {
-  BraidLayout,
   InvariantSummary,
   LayerInput,
-  PidUncertaintySource,
   PreparedDataset,
   ROI,
   StackLayout
@@ -58,59 +55,87 @@ export interface MultiscaleDiagnosticsSummary {
 }
 
 export interface MetricsComputeOptions {
-  semantic?: MetricsSemanticOptions;
-  multiscale?: MultiscaleDiagnosticsSummary | null;
   includeGlobalRows?: boolean;
-  orderedLayersBefore?: LayerInput[];
-  orderedLayersAfter?: LayerInput[];
+  multiscale?: MultiscaleDiagnosticsSummary | null;
 }
 
-interface MetricsSemanticOptions {
-  enableTpidCenterAlignment?: boolean;
-  pidUncertaintySource?: PidUncertaintySource;
-  baselineShiftBeforeAbs?: number[];
-  baselineShiftAfterAbs?: number[];
-  uncertaintySaliency?: number[];
+// ---- Multiscale diagnostics adapter (was diagnostics.ts) ----
+
+interface MultiscaleDiagnosticsLike {
+  method: string;
+  verifiedMultiscale: boolean;
+  fallbackUsed: boolean;
+  effectiveScaleCount: number;
+  selectedScaleCount?: number;
+  energyThreshold: number;
+  scaleBands: Array<{ scale: number; ratio: number }>;
+  scaleCoefficients?: Array<{ scale: number; coefficient: number }>;
+  objectiveBefore?: number;
+  objectiveAfter?: number;
+  meanSlopeBefore?: number;
+  meanSlopeAfter?: number;
+  maxSlopeBefore?: number;
+  maxSlopeAfter?: number;
+  curvatureBefore?: number;
+  curvatureAfter?: number;
+  burstBefore?: number;
+  burstAfter?: number;
+  derivativeConcentrationBefore?: number;
+  derivativeConcentrationAfter?: number;
+  centerlineSlopeCoverageBefore?: number;
+  centerlineSlopeCoverageAfter?: number;
+  globalMeanSlopeGuardrailPassed?: boolean;
 }
+
+export function toMultiscaleDiagnosticsSummary(
+  diagnostics: MultiscaleDiagnosticsLike
+): MultiscaleDiagnosticsSummary {
+  return {
+    method: diagnostics.method,
+    verified: diagnostics.verifiedMultiscale,
+    fallbackUsed: diagnostics.fallbackUsed,
+    effectiveScaleCount: diagnostics.effectiveScaleCount,
+    selectedScaleCount: diagnostics.selectedScaleCount,
+    threshold: diagnostics.energyThreshold,
+    scaleBands: diagnostics.scaleBands.map((band) => ({ scale: band.scale, ratio: band.ratio })),
+    scaleCoefficients: diagnostics.scaleCoefficients,
+    objectiveBefore: diagnostics.objectiveBefore,
+    objectiveAfter: diagnostics.objectiveAfter,
+    meanSlopeBefore: diagnostics.meanSlopeBefore,
+    meanSlopeAfter: diagnostics.meanSlopeAfter,
+    maxSlopeBefore: diagnostics.maxSlopeBefore,
+    maxSlopeAfter: diagnostics.maxSlopeAfter,
+    curvatureBefore: diagnostics.curvatureBefore,
+    curvatureAfter: diagnostics.curvatureAfter,
+    burstBefore: diagnostics.burstBefore,
+    burstAfter: diagnostics.burstAfter,
+    derivativeConcentrationBefore: diagnostics.derivativeConcentrationBefore,
+    derivativeConcentrationAfter: diagnostics.derivativeConcentrationAfter,
+    centerlineSlopeCoverageBefore: diagnostics.centerlineSlopeCoverageBefore,
+    centerlineSlopeCoverageAfter: diagnostics.centerlineSlopeCoverageAfter,
+    globalMeanSlopeGuardrailPassed: diagnostics.globalMeanSlopeGuardrailPassed
+  };
+}
+
+// ---- Core metrics computation ----
 
 export function computeMetrics(
   dataset: PreparedDataset,
   beforeLayout: StackLayout,
-  afterLayout: BraidLayout,
+  afterLayout: StackLayout,
   roi: ROI | null,
   invariant: InvariantSummary,
-  orderedLayersForAfter?: LayerInput[],
+  layers: LayerInput[],
   options: MetricsComputeOptions = {}
 ): MetricResult {
   const idx = computeIndices(dataset.times.length, roi);
   const idxGlobal = range(0, dataset.times.length);
   const centersBefore = centers(beforeLayout);
   const centersAfter = centers(afterLayout);
-  const afterLayers = options.orderedLayersAfter ?? orderedLayersForAfter ?? dataset.layers;
-  const beforeLayers = options.orderedLayersBefore ?? afterLayers;
-  const semantic = options.semantic ?? {};
-  const rows = buildRowsForIndices(
-    idx,
-    beforeLayout,
-    afterLayout,
-    centersBefore,
-    centersAfter,
-    beforeLayers,
-    afterLayers,
-    semantic
-  );
+  const rows = buildRowsForIndices(idx, beforeLayout, afterLayout, centersBefore, centersAfter, layers);
   const includeGlobalRows = options.includeGlobalRows === true;
   const globalRows = includeGlobalRows
-    ? buildRowsForIndices(
-        idxGlobal,
-        beforeLayout,
-        afterLayout,
-        centersBefore,
-        centersAfter,
-        beforeLayers,
-        afterLayers,
-        semantic
-      )
+    ? buildRowsForIndices(idxGlobal, beforeLayout, afterLayout, centersBefore, centersAfter, layers)
     : null;
 
   return {
@@ -126,16 +151,14 @@ export function computeMetrics(
 function buildRowsForIndices(
   idx: number[],
   beforeLayout: StackLayout,
-  afterLayout: BraidLayout,
+  afterLayout: StackLayout,
   centersBefore: number[][],
   centersAfter: number[][],
-  beforeLayers: LayerInput[],
-  afterLayers: LayerInput[],
-  semantic: MetricsSemanticOptions
+  layers: LayerInput[]
 ): MetricRow[] {
   const centerlineBefore = streamCenterline(beforeLayout);
   const centerlineAfter = streamCenterline(afterLayout);
-  const rows: MetricRow[] = [
+  return [
     row("meanSlope", "Mean slope", meanSlope(centersBefore, idx), meanSlope(centersAfter, idx), "down"),
     row("maxSlope", "Max slope", maxSlope(centersBefore, idx), maxSlope(centersAfter, idx), "down"),
     row(
@@ -177,45 +200,11 @@ function buildRowsForIndices(
     row("illusion", "Sine-illusion proxy", curvatureEnergy(centersBefore, idx), curvatureEnergy(centersAfter, idx), "down"),
     row("sepMean", "Mean layer separation", meanSeparation(beforeLayout, idx), meanSeparation(afterLayout, idx), "up"),
     row("sepMin", "Min layer separation", minSeparation(beforeLayout, idx), minSeparation(afterLayout, idx), "up"),
-    row("extraSpace", "Extra space used", 0, mean(afterLayout.sumGapPx, idx), "down"),
     row("compact", "Compactness loss", compactness(beforeLayout, idx), compactness(afterLayout, idx), "down"),
     row("boundary", "Boundary distortion", 0, roiBoundaryDistortion(beforeLayout, afterLayout, idx), "down"),
-    row("thickness", "Thickness invariance error", 0, thicknessError(afterLayers, afterLayout, idx), "down"),
+    row("thickness", "Thickness invariance error", 0, thicknessError(layers, afterLayout, idx), "down"),
     row("order", "Order stability", 1, orderStability(afterLayout, idx), "up")
   ];
-
-  if (semantic.enableTpidCenterAlignment === true) {
-    rows.push(
-      row(
-        "tpidCenterAlignment",
-        "TPID Center Alignment",
-        tpidCenterAlignment(beforeLayers, beforeLayout, idx, semantic),
-        tpidCenterAlignment(afterLayers, afterLayout, idx, semantic),
-        "up"
-      )
-    );
-  }
-
-  if (
-    semantic.baselineShiftBeforeAbs &&
-    semantic.baselineShiftAfterAbs &&
-    semantic.uncertaintySaliency &&
-    semantic.baselineShiftBeforeAbs.length > 1 &&
-    semantic.baselineShiftAfterAbs.length > 1 &&
-    semantic.uncertaintySaliency.length > 1
-  ) {
-    rows.push(
-      row(
-        "uncShiftCoherence",
-        "Uncertainty-Shift Coherence",
-        uncertaintyShiftCoherence(semantic.baselineShiftBeforeAbs, semantic.uncertaintySaliency, idx),
-        uncertaintyShiftCoherence(semantic.baselineShiftAfterAbs, semantic.uncertaintySaliency, idx),
-        "up"
-      )
-    );
-  }
-
-  return rows;
 }
 
 function row(key: string, label: string, before: number, after: number, better: "up" | "down"): MetricRow {
@@ -247,9 +236,7 @@ function meanSlope(series: number[][], idx: number[]): number {
   const values: number[] = [];
   for (const row of series) {
     for (let i = 1; i < idx.length; i += 1) {
-      const t0 = idx[i - 1];
-      const t1 = idx[i];
-      values.push(Math.abs(row[t1] - row[t0]));
+      values.push(Math.abs(row[idx[i - 1]] - row[idx[i]]));
     }
   }
   return mean(values);
@@ -259,9 +246,7 @@ function maxSlope(series: number[][], idx: number[]): number {
   let m = 0;
   for (const row of series) {
     for (let i = 1; i < idx.length; i += 1) {
-      const t0 = idx[i - 1];
-      const t1 = idx[i];
-      m = Math.max(m, Math.abs(row[t1] - row[t0]));
+      m = Math.max(m, Math.abs(row[idx[i - 1]] - row[idx[i]]));
     }
   }
   return m;
@@ -270,57 +255,40 @@ function maxSlope(series: number[][], idx: number[]): number {
 function maxBaselineDerivative(values: number[], idx: number[]): number {
   let m = 0;
   for (let i = 1; i < idx.length; i += 1) {
-    const t0 = idx[i - 1];
-    const t1 = idx[i];
-    m = Math.max(m, Math.abs(values[t1] - values[t0]));
+    m = Math.max(m, Math.abs(values[idx[i - 1]] - values[idx[i]]));
   }
   return m;
 }
 
 function baselineDerivativeConcentration(values: number[], idx: number[]): number {
-  if (idx.length <= 1) {
-    return 0;
-  }
+  if (idx.length <= 1) return 0;
   const derivatives: number[] = [];
   for (let i = 1; i < idx.length; i += 1) {
-    const t0 = idx[i - 1];
-    const t1 = idx[i];
-    derivatives.push(Math.abs(values[t1] - values[t0]));
+    derivatives.push(Math.abs(values[idx[i - 1]] - values[idx[i]]));
   }
   const meanValue = mean(derivatives);
-  if (meanValue <= 1e-12) {
-    return 0;
-  }
+  if (meanValue <= 1e-12) return 0;
   return Math.max(...derivatives) / meanValue;
 }
 
 function baselineSlopeCoverage(values: number[], idx: number[]): number {
-  if (idx.length <= 1) {
-    return 0;
-  }
+  if (idx.length <= 1) return 0;
   const derivatives: number[] = [];
   for (let i = 1; i < idx.length; i += 1) {
-    const t0 = idx[i - 1];
-    const t1 = idx[i];
-    derivatives.push(Math.abs(values[t1] - values[t0]));
+    derivatives.push(Math.abs(values[idx[i - 1]] - values[idx[i]]));
   }
   const peak = Math.max(...derivatives);
-  if (peak <= 1e-12) {
-    return 0;
-  }
+  if (peak <= 1e-12) return 0;
   const threshold = 0.05 * peak;
-  return mean(derivatives.map((value) => Math.min(1, value / Math.max(1e-12, threshold))));
+  return mean(derivatives.map((v) => Math.min(1, v / Math.max(1e-12, threshold))));
 }
 
 function wiggleEnergy(series: number[][], idx: number[]): number {
   let acc = 0;
   for (const row of series) {
     for (let i = 2; i < idx.length; i += 1) {
-      const a = row[idx[i - 2]];
-      const b = row[idx[i - 1]];
-      const c = row[idx[i]];
-      const secondDiff = c - 2 * b + a;
-      acc += secondDiff * secondDiff;
+      const d = row[idx[i]] - 2 * row[idx[i - 1]] + row[idx[i - 2]];
+      acc += d * d;
     }
   }
   return acc / Math.max(1, series.length);
@@ -330,19 +298,14 @@ function curvatureEnergy(series: number[][], idx: number[]): number {
   const values: number[] = [];
   for (const row of series) {
     for (let i = 2; i < idx.length; i += 1) {
-      const a = row[idx[i - 2]];
-      const b = row[idx[i - 1]];
-      const c = row[idx[i]];
-      values.push(Math.abs(c - 2 * b + a));
+      values.push(Math.abs(row[idx[i]] - 2 * row[idx[i - 1]] + row[idx[i - 2]]));
     }
   }
   return mean(values);
 }
 
 function meanSeparation(layout: StackLayout, idx: number[]): number {
-  if (layout.yBottom.length < 2) {
-    return 0;
-  }
+  if (layout.yBottom.length < 2) return 0;
   const values: number[] = [];
   for (let k = 0; k < layout.yBottom.length - 1; k += 1) {
     for (const t of idx) {
@@ -353,9 +316,7 @@ function meanSeparation(layout: StackLayout, idx: number[]): number {
 }
 
 function minSeparation(layout: StackLayout, idx: number[]): number {
-  if (layout.yBottom.length < 2) {
-    return 0;
-  }
+  if (layout.yBottom.length < 2) return 0;
   let minV = Number.POSITIVE_INFINITY;
   for (let k = 0; k < layout.yBottom.length - 1; k += 1) {
     for (const t of idx) {
@@ -371,9 +332,7 @@ function compactness(layout: StackLayout, idx: number[]): number {
 }
 
 function roiBoundaryDistortion(before: StackLayout, after: StackLayout, idx: number[]): number {
-  if (idx.length < 2) {
-    return 0;
-  }
+  if (idx.length < 2) return 0;
   const endpoints = [idx[0], idx[idx.length - 1]];
   const values: number[] = [];
   for (const t of endpoints) {
@@ -384,137 +343,27 @@ function roiBoundaryDistortion(before: StackLayout, after: StackLayout, idx: num
   return mean(values);
 }
 
-function thicknessError(referenceLayers: LayerInput[], after: StackLayout, idx: number[]): number {
+function thicknessError(layers: LayerInput[], after: StackLayout, idx: number[]): number {
   let maxErr = 0;
-  const layers = referenceLayers;
   for (let k = 0; k < layers.length; k += 1) {
     for (const t of idx) {
-      const thickness = after.yTop[k][t] - after.yBottom[k][t];
-      maxErr = Math.max(maxErr, Math.abs(thickness - layers[k].height[t]));
+      maxErr = Math.max(maxErr, Math.abs(after.yTop[k][t] - after.yBottom[k][t] - layers[k].height[t]));
     }
   }
   return maxErr;
 }
 
 function orderStability(layout: StackLayout, idx: number[]): number {
-  if (layout.yBottom.length < 2) {
-    return 1;
-  }
+  if (layout.yBottom.length < 2) return 1;
   let overlaps = 0;
   let total = 0;
   for (let k = 0; k < layout.yBottom.length - 1; k += 1) {
     for (const t of idx) {
       total += 1;
-      if (layout.yBottom[k + 1][t] < layout.yTop[k][t]) {
-        overlaps += 1;
-      }
+      if (layout.yBottom[k + 1][t] < layout.yTop[k][t]) overlaps += 1;
     }
   }
   return 1 - overlaps / Math.max(1, total);
-}
-
-function tpidCenterAlignment(
-  layers: LayerInput[],
-  layout: StackLayout,
-  idx: number[],
-  semantic: MetricsSemanticOptions
-): number {
-  if (layers.length <= 1 || layout.yBottom.length !== layers.length) {
-    return 1;
-  }
-  const pid = computePidOrdering(layers, {
-    excludeSelf: true,
-    widthPenaltyPower: 1,
-    minComparators: 2,
-    uncertaintySource: semantic.pidUncertaintySource ?? "value"
-  });
-  const depthByLayer = pid.depthByLayerId;
-  const depth: number[] = [];
-  const centerCloseness: number[] = [];
-
-  for (let k = 0; k < layers.length; k += 1) {
-    const layerId = layers[k].id;
-    const d = depthByLayer.get(layerId);
-    if (!Number.isFinite(d)) {
-      continue;
-    }
-    const centerSeries = idx.map((t) => 0.5 * (layout.yBottom[k][t] + layout.yTop[k][t]));
-    const meanAbs = mean(centerSeries.map((v) => Math.abs(v)));
-    depth.push(d as number);
-    centerCloseness.push(-meanAbs);
-  }
-
-  return spearman(depth, centerCloseness);
-}
-
-function uncertaintyShiftCoherence(shiftAbs: number[], saliency: number[], idx: number[]): number {
-  const xs: number[] = [];
-  const ys: number[] = [];
-  const limit = Math.min(shiftAbs.length, saliency.length);
-  for (const t of idx) {
-    if (t < 0 || t >= limit) {
-      continue;
-    }
-    const x = shiftAbs[t];
-    const y = saliency[t];
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      continue;
-    }
-    xs.push(x);
-    ys.push(y);
-  }
-  return pearson(xs, ys);
-}
-
-function spearman(x: number[], y: number[]): number {
-  if (x.length !== y.length || x.length <= 1) {
-    return 1;
-  }
-  const rx = averageRanks(x);
-  const ry = averageRanks(y);
-  return pearson(rx, ry);
-}
-
-function averageRanks(values: number[]): number[] {
-  const pairs = values.map((value, index) => ({ value, index }));
-  pairs.sort((a, b) => a.value - b.value);
-  const ranks = new Array<number>(values.length).fill(0);
-  let i = 0;
-  while (i < pairs.length) {
-    let j = i;
-    while (j + 1 < pairs.length && pairs[j + 1].value === pairs[i].value) {
-      j += 1;
-    }
-    const avgRank = 0.5 * (i + j) + 1;
-    for (let k = i; k <= j; k += 1) {
-      ranks[pairs[k].index] = avgRank;
-    }
-    i = j + 1;
-  }
-  return ranks;
-}
-
-function pearson(x: number[], y: number[]): number {
-  if (x.length !== y.length || x.length <= 1) {
-    return 0;
-  }
-  const mx = mean(x);
-  const my = mean(y);
-  let cov = 0;
-  let vx = 0;
-  let vy = 0;
-  for (let i = 0; i < x.length; i += 1) {
-    const dx = x[i] - mx;
-    const dy = y[i] - my;
-    cov += dx * dy;
-    vx += dx * dx;
-    vy += dy * dy;
-  }
-  const denom = Math.sqrt(vx * vy);
-  if (!Number.isFinite(denom) || denom <= 1e-12) {
-    return 0;
-  }
-  return cov / denom;
 }
 
 function mean(values: number[], idx?: number[]): number {

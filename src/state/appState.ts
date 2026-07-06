@@ -3,7 +3,6 @@ import type {
   BaselineCenterType,
   DatasetKind,
   EnhanceTab,
-  GapMode,
   HorizonFilterMode,
   InsetViewMode,
   OptimizingBaselineMode,
@@ -13,7 +12,6 @@ import type {
   ROI,
   LayoutOptimizationConfig,
   OrderWeightType,
-  SmoothKernel,
   UncertaintyBandMode
 } from "../core/types";
 import { FIXED_SEED } from "../core/utils";
@@ -72,13 +70,9 @@ export interface AppState {
   spaghettiSelectedStates: string[];
   fixedSeed: number;
   baseline: BaselineMode;
-  gapMode: GapMode;
   insetViewMode: InsetViewMode;
   ROI: ROI | null;
   insetROI: ROI | null;
-  gapAlphaPx: number;
-  maxExtraHeightPx: number;
-  smoothKernel: SmoothKernel;
   assertEnabled: boolean;
   yZoomInset: number;
   covidUncertaintyBand: UncertaintyBandMode;
@@ -86,7 +80,6 @@ export interface AppState {
   generatorLayerCount: number;
   generatorTimeCount: number;
   optimization: LayoutOptimizationConfig;
-  enableUncertaintyGap: boolean;
   enableJaggedEdge: boolean;
   insetJaggedAmplitude: number;
   insetJaggedFrequency: number;
@@ -145,13 +138,9 @@ export function createInitialState(): AppState {
     spaghettiSelectedStates: [],
     fixedSeed: FIXED_SEED,
     baseline: "center",
-    gapMode: "uncGap",
     insetViewMode: "split",
     ROI: null,
     insetROI: null,
-    gapAlphaPx: 22,
-    maxExtraHeightPx: 160,
-    smoothKernel: "cubic",
     assertEnabled: true,
     yZoomInset: 1.1,
     covidUncertaintyBand: "95",
@@ -159,11 +148,6 @@ export function createInitialState(): AppState {
     generatorLayerCount: 15,
     generatorTimeCount: 30,
     optimization: {
-      spacingBudgetPx: 320,
-      spacingUncertaintyWeight: 1.6,
-      spacingSlopeWeight: 0.65,
-      spacingTemporalWeight: 0.1,
-      spacingIterations: 2,
       clusterAutoCutScale: 1,
       clusterBoundaryPenalty: 0.5,
       orderSimilaritySigma: 0.75,
@@ -193,7 +177,6 @@ export function createInitialState(): AppState {
       scourMovingInterfaceWeight: 0.25,
       scourMovingInterfaceMode: "optimized"
     },
-    enableUncertaintyGap: true,
     // Keep the knob for future extension, but current release keeps jagged disabled.
     enableJaggedEdge: false,
     insetJaggedAmplitude: 2.4,

@@ -1,22 +1,15 @@
 ﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import WorkbenchPage from "./WorkbenchPage.vue";
-import MultiscaleLabPage from "./views/MultiscaleLabPage.vue";
 import TwoLayerMultiscalePage from "./views/TwoLayerMultiscalePage.vue";
 
-type AppPath = "/" | "/multiscale-lab" | "/two-layer-multiscale";
+type AppPath = "/" | "/two-layer-multiscale";
 
-const SUPPORTED_PATHS = new Set<AppPath>(["/", "/multiscale-lab", "/two-layer-multiscale"]);
+const SUPPORTED_PATHS = new Set<AppPath>(["/", "/two-layer-multiscale"]);
 
 const currentPath = ref<AppPath>(normalizePath(typeof window !== "undefined" ? window.location.pathname : "/"));
 
-const currentPage = computed(() =>
-  currentPath.value === "/multiscale-lab"
-    ? "lab"
-    : currentPath.value === "/two-layer-multiscale"
-      ? "twoLayer"
-      : "workbench"
-);
+const currentPage = computed(() => (currentPath.value === "/two-layer-multiscale" ? "twoLayer" : "workbench"));
 
 function normalizePath(pathname: string): AppPath {
   return SUPPORTED_PATHS.has(pathname as AppPath) ? (pathname as AppPath) : "/";
@@ -55,13 +48,6 @@ onBeforeUnmount(() => {
     <nav class="route-nav" aria-label="Primary">
       <a href="/" :class="{ 'is-active': currentPage === 'workbench' }" @click="onNavigate('/', $event)">Workbench</a>
       <a
-        href="/multiscale-lab"
-        :class="{ 'is-active': currentPage === 'lab' }"
-        @click="onNavigate('/multiscale-lab', $event)"
-      >
-        Multiscale Lab
-      </a>
-      <a
         href="/two-layer-multiscale"
         :class="{ 'is-active': currentPage === 'twoLayer' }"
         @click="onNavigate('/two-layer-multiscale', $event)"
@@ -71,7 +57,6 @@ onBeforeUnmount(() => {
     </nav>
 
     <WorkbenchPage v-if="currentPage === 'workbench'" />
-    <MultiscaleLabPage v-else-if="currentPage === 'lab'" />
     <TwoLayerMultiscalePage v-else />
   </div>
 </template>

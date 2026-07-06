@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import {
-  buildBraidedEnhanceScene,
   buildOptimizingVariantScene,
   buildScene,
   defaultWindow,
@@ -72,7 +71,6 @@ const activeBundle = ref<DatasetBundle>(syntheticBundle);
 
 const mainScene = ref<SceneBuildResult | null>(null);
 const optimizeScene = ref<SceneBuildResult | null>(null);
-const braidedScene = ref<SceneBuildResult | null>(null);
 
 const hover = ref<HoverPayload | null>(null);
 
@@ -83,7 +81,6 @@ const compareViewRef = ref<InsetViewExpose | null>(null);
 
 const enhanceTabs: Array<{ key: AppState["enhanceTab"]; label: string }> = [
   { key: "optimize", label: "Optimizing" },
-  { key: "braided", label: "Braided" },
   { key: "spaghetti", label: "spaghetti" }
 ];
 
@@ -146,16 +143,12 @@ const compareMetrics = computed<MetricResult | null>(() => {
   }
   return computeMetrics(
     current.dataset,
-    compare.braidedLayout,
-    current.braidedLayout,
+    compare.afterLayout,
+    current.afterLayout,
     current.insetRoi,
     { checked: false, violations: [], maxThicknessError: 0 },
     current.orderedLayers,
-    {
-      orderedLayersBefore: compare.orderedLayers,
-      orderedLayersAfter: current.orderedLayers,
-      includeGlobalRows: true
-    }
+    { includeGlobalRows: true }
   );
 });
 
@@ -245,7 +238,6 @@ function recomputeScene(): void {
 
   const nextMain = buildScene(activeBundle.value, mainState);
   const nextOptimize = buildOptimizingVariantScene(activeBundle.value, enhanceState, buildCurrentVariantConfig());
-  const nextBraided = buildBraidedEnhanceScene(activeBundle.value, enhanceState, enhanceBaselineMode.value);
 
   state.baseline = "center";
   state.ROI = nextMain.roi;
@@ -253,7 +245,6 @@ function recomputeScene(): void {
   state.enableJaggedEdge = false;
   mainScene.value = nextMain;
   optimizeScene.value = nextOptimize;
-  braidedScene.value = nextBraided;
   sanitizeSpaghettiSelection();
 }
 
@@ -376,7 +367,7 @@ function baselineHooksFromCompare(): BaselineParameters {
 }
 
 function applyRoiChange(roi: ROI | null): void {
-  const source = mainScene.value ?? optimizeScene.value ?? braidedScene.value;
+  const source = mainScene.value ?? optimizeScene.value;
   if (!source) {
     return;
   }
@@ -427,7 +418,7 @@ function onSpaghettiSelectedStatesChange(next: string[]): void {
 }
 
 function onClearRoi(): void {
-  const source = mainScene.value ?? optimizeScene.value ?? braidedScene.value;
+  const source = mainScene.value ?? optimizeScene.value;
   if (!source) {
     return;
   }
@@ -497,36 +488,9 @@ function sanitizeState(): void {
   state.enableJaggedEdge = false;
   state.generatorLayerCount = Math.max(1, Math.round(finiteAtLeast(state.generatorLayerCount, 15, 1)));
   state.generatorTimeCount = Math.max(2, Math.round(finiteAtLeast(state.generatorTimeCount, 30, 2)));
-  state.gapAlphaPx = finiteAtLeast(state.gapAlphaPx, defaultState.gapAlphaPx, 0);
-  state.maxExtraHeightPx = finiteAtLeast(state.maxExtraHeightPx, defaultState.maxExtraHeightPx, 1);
   state.insetJaggedAmplitude = finiteAtLeast(state.insetJaggedAmplitude, defaultState.insetJaggedAmplitude, 0);
   state.insetJaggedFrequency = finiteAtLeast(state.insetJaggedFrequency, defaultState.insetJaggedFrequency, 0);
 
-  state.optimization.spacingBudgetPx = finiteAtLeast(
-    state.optimization.spacingBudgetPx,
-    defaultState.optimization.spacingBudgetPx,
-    1
-  );
-  state.optimization.spacingUncertaintyWeight = finiteAtLeast(
-    state.optimization.spacingUncertaintyWeight,
-    defaultState.optimization.spacingUncertaintyWeight,
-    0
-  );
-  state.optimization.spacingSlopeWeight = finiteAtLeast(
-    state.optimization.spacingSlopeWeight,
-    defaultState.optimization.spacingSlopeWeight,
-    0
-  );
-  state.optimization.spacingTemporalWeight = finiteBetween(
-    state.optimization.spacingTemporalWeight,
-    defaultState.optimization.spacingTemporalWeight,
-    0,
-    0.95
-  );
-  state.optimization.spacingIterations = Math.max(
-    1,
-    Math.round(finiteAtLeast(state.optimization.spacingIterations, defaultState.optimization.spacingIterations, 1))
-  );
   state.optimization.clusterAutoCutScale = finiteAtLeast(
     state.optimization.clusterAutoCutScale,
     defaultState.optimization.clusterAutoCutScale,
@@ -857,18 +821,7 @@ function layerStateLabel(layerId: string): string {
           :scene="optimizeScene"
           :state="state"
           forced-view-mode="after"
-          :forced-uncertainty-gap="false"
           :enable-layer-hover-highlight="true"
-          @hover="onHover"
-        />
-
-        <InsetDetailView
-          v-else-if="state.enhanceTab === 'braided'"
-          ref="insetViewRef"
-          :scene="braidedScene"
-          :state="state"
-          forced-view-mode="after"
-          :forced-uncertainty-gap="state.enableUncertaintyGap"
           @hover="onHover"
         />
 
@@ -898,7 +851,6 @@ function layerStateLabel(layerId: string): string {
         :scene="compareScene"
         :state="state"
         forced-view-mode="after"
-        :forced-uncertainty-gap="false"
         :enable-layer-hover-highlight="true"
         @hover="onHover"
       />

@@ -16,7 +16,6 @@ import * as d3 from "d3";
 import { computeContourPid } from "../core/ordering/pid";
 import { roiBounds } from "../interactions/roi";
 import type {
-  BraidLayout,
   InsetViewMode,
   LayerInput,
   PidUncertaintySource,
@@ -27,7 +26,6 @@ import type {
 import { clamp, clamp01, percentile, range } from "../core/utils";
 import { createAreaPath } from "./paths";
 import { diffColor, layerColor } from "../styles/palette";
-import { boundaryUncertaintyAt } from "../core/validate";
 import { createRoiBrush, type RoiBrushController } from "../interactions/brush";
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -819,11 +817,10 @@ export interface InsetRenderArgs {
   dataset: PreparedDataset;
   orderedLayers: LayerInput[];
   before: StackLayout;
-  after: BraidLayout;
+  after: StackLayout;
   roi: ROI | null;
   viewMode: InsetViewMode;
   yZoom: number;
-  enableUncertaintyGap: boolean;
   enableJaggedEdge: boolean;
   jaggedAmplitude: number;
   jaggedFrequency: number;
@@ -866,7 +863,7 @@ export class InsetChart {
   render(args: InsetRenderArgs): InsetRenderResult {
     const {
       dataset, orderedLayers, before, after, viewMode, yZoom,
-      enableUncertaintyGap, enableJaggedEdge, jaggedAmplitude, jaggedFrequency, fixedSeed
+      enableJaggedEdge, jaggedAmplitude, jaggedFrequency, fixedSeed
     } = args;
 
     if (dataset.times.length === 0) {
@@ -900,7 +897,7 @@ export class InsetChart {
     // Title
     renderChartTitle(
       this.titleGroup,
-      `mode=${viewMode.toUpperCase()} | uncertainty-gap=${enableUncertaintyGap ? "on" : "off"} | jagged-edge=${enableJaggedEdge ? "on" : "off"} | interactive`
+      `mode=${viewMode.toUpperCase()} | jagged-edge=${enableJaggedEdge ? "on" : "off"} | interactive`
     );
 
     // Layer bands
@@ -910,10 +907,9 @@ export class InsetChart {
       enableJaggedEdge, jaggedAmplitude, jaggedFrequency, fixedSeed
     );
 
-    // Overlay (diff + gap semantics)
-    this.drawDiffAndGapOverlay(
+    this.drawDiffOverlay(
       orderedLayers, dataset, before, after,
-      left, right, xScale, yScale, viewMode, enableUncertaintyGap
+      left, right, xScale, yScale, viewMode
     );
 
     this.applyLayerHover();
@@ -1064,22 +1060,20 @@ export class InsetChart {
     this.overlayGroup.attr("opacity", this.hoveredLayerId ? 0.45 : 1);
   }
 
-  private drawDiffAndGapOverlay(
+  private drawDiffOverlay(
     orderedLayers: LayerInput[],
     dataset: PreparedDataset,
     before: StackLayout,
-    after: BraidLayout,
+    after: StackLayout,
     left: number,
     right: number,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleLinear<number, number>,
-    viewMode: InsetViewMode,
-    enableUncertaintyGap: boolean
+    viewMode: InsetViewMode
   ): void {
     const TIMES_SLICE = [left, right + 1] as const;
     const timesSlice = dataset.times.slice(...TIMES_SLICE);
     const showDiff = viewMode === "diff";
-    const gapCount = Math.max(0, orderedLayers.length - 1);
 
     type OverlayDatum = { key: string; path: string; opacity: number; fill: string; stroke: string; strokeWidth: number };
     const data: OverlayDatum[] = [];
@@ -1101,43 +1095,6 @@ export class InsetChart {
           stroke: "rgba(124, 45, 18, 0.6)",
           strokeWidth: 0.7
         });
-      }
-    }
-
-    // Gap-semantic fill
-    if (enableUncertaintyGap) {
-      for (let k = 0; k < gapCount; k += 1) {
-        const meanGapPx = d3.mean(after.gapsPx[k].slice(...TIMES_SLICE)) ?? 0;
-        if (meanGapPx < 0.7) continue;
-
-        const gapLower = after.yTop[k].slice(...TIMES_SLICE);
-        const gapUpper = after.yBottom[k + 1].slice(...TIMES_SLICE);
-        const unc = timesSlice.map((_, i) => boundaryUncertaintyAt(orderedLayers[k], orderedLayers[k + 1], left + i));
-        const robustHigh = percentile(unc, 0.9);
-
-        const levels = [0.9, 0.68, 0.46, 0.24];
-        for (let q = 0; q < levels.length; q += 1) {
-          const mid = gapLower.map((v, i) => 0.5 * (v + gapUpper[i]));
-          const half = gapLower.map((_v, i) => {
-            const ratio = robustHigh > 0 ? Math.sqrt(clamp01(unc[i] / robustHigh)) : 0;
-            return Math.max(0, (gapUpper[i] - gapLower[i]) * 0.5 * ratio * levels[q]);
-          });
-          data.push({
-            key: `unc-${k}-${q}`,
-            path: createAreaPath(
-              timesSlice,
-              mid.map((v, i) => v - half[i]),
-              mid.map((v, i) => v + half[i]),
-              xScale,
-              yScale,
-              { smoothInterpolation: true, interpolationSubsteps: 8 }
-            ),
-            opacity: 0.16 + 0.12 * q,
-            fill: "#ffffff",
-            stroke: "rgba(51, 65, 85, 0.35)",
-            strokeWidth: 0.7
-          });
-        }
       }
     }
 

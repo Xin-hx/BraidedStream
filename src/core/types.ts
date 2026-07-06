@@ -4,11 +4,9 @@
 
 export type BaselineMode = "sineStream" | "center" | "zero" | "l1" | "l2";
 export type OptimizingBaselineMode = BaselineMode | "multiscale" | "scour";
-export type GapMode = "none" | "uncGap" | "fixedGap";
-export type SmoothKernel = "cubic";
 export type DatasetKind = "synthetic" | "covid" | "sineBank" | "dataGenerator";
 export type InsetViewMode = "before" | "after" | "diff" | "split";
-export type EnhanceTab = "optimize" | "braided" | "spaghetti";
+export type EnhanceTab = "optimize" | "spaghetti";
 export type PidUncertaintySource = "value" | "poportion";
 export type PidTimeOrderMode = "layer_pid_centrality" | "layer_pid_time_weighted";
 export type OptimizingStage = "plainStream" | "stackedGeometry" | "sineStream" | "tpidMultiscale" | "scour" | "custom";
@@ -28,11 +26,6 @@ export interface QuantileBands {
 }
 
 export interface LayoutOptimizationConfig {
-  spacingBudgetPx: number;
-  spacingUncertaintyWeight: number;
-  spacingSlopeWeight: number;
-  spacingTemporalWeight: number;
-  spacingIterations: number;
   clusterAutoCutScale: number;
   clusterBoundaryPenalty: number;
   orderSimilaritySigma: number;
@@ -82,25 +75,6 @@ export interface LayoutOptimizationConfig {
   shuffleSeed?: number;
 }
 
-export interface BraidSpacingDiagnostics {
-  spacingObjective: number;
-  spacingUncertaintyTerm: number;
-  spacingSlopeTerm: number;
-  spacingTemporalTerm: number;
-  spacingIterations: number;
-  spacingObjectiveHistory: number[];
-}
-
-export interface BraidOrderDiagnostics {
-  orderObjectiveBefore: number;
-  orderObjectiveAfter: number;
-  clusterCount: number;
-  trunkCluster: number;
-  crossClusterBoundaries: number;
-}
-
-export type BraidOptimizationDiagnostics = BraidSpacingDiagnostics & Partial<BraidOrderDiagnostics>;
-
 export interface LayerInput {
   id: string;
   /** Optional source color. Loaders should provide a fallback when source data omits it. */
@@ -136,10 +110,6 @@ export interface LayoutInput {
   order: string[];
   baseline: BaselineMode;
   ROI: ROI | null;
-  gapMode: GapMode;
-  gapAlphaPx: number;
-  maxExtraHeightPx: number;
-  smoothKernel: SmoothKernel;
   yScale: (v: number) => number;
 }
 
@@ -147,23 +117,6 @@ export interface StackLayout {
   baseline: number[];
   yBottom: number[][];
   yTop: number[][];
-}
-
-export interface RoiSupportWindow {
-  tau: number;
-  coreStart: number;
-  coreEnd: number;
-  supportStart: number;
-  supportEnd: number;
-}
-
-export interface BraidLayout extends StackLayout {
-  omega: number[];
-  gapsPx: number[][];
-  gapsValue: number[][];
-  sumGapPx: number[];
-  roiSupport: RoiSupportWindow | null;
-  diagnostics?: BraidOptimizationDiagnostics;
 }
 
 export interface InvariantSummary {

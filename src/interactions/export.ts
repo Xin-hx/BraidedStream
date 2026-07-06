@@ -7,7 +7,7 @@ export interface SnapshotArgs {
 
 export async function exportSnapshotSvg(args: SnapshotArgs): Promise<void> {
   const text = composeSvgPanel(args.overviewSvg, args.mainSvg, args.insetSvg);
-  saveTextFile("braided-snapshot.svg", text, "image/svg+xml");
+  saveTextFile("streamgraph-snapshot.svg", text, "image/svg+xml");
 }
 
 export async function exportSnapshotPng(args: SnapshotArgs): Promise<void> {
@@ -38,12 +38,12 @@ export async function exportSnapshotPng(args: SnapshotArgs): Promise<void> {
   const pngData = canvas.toDataURL("image/png");
   const a = document.createElement("a");
   a.href = pngData;
-  a.download = "braided-snapshot.png";
+  a.download = "streamgraph-snapshot.png";
   a.click();
 }
 
 export function exportConfigJson(config: Record<string, unknown>): void {
-  saveTextFile("braided-snapshot-config.json", JSON.stringify(config, null, 2), "application/json");
+  saveTextFile("streamgraph-snapshot-config.json", JSON.stringify(config, null, 2), "application/json");
 }
 
 function composeSvgPanel(overviewSvg: SVGSVGElement, mainSvg: SVGSVGElement, insetSvg: SVGSVGElement): string {
