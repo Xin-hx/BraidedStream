@@ -1,7 +1,7 @@
 import type { ScaleLinear } from "d3";
 import type { LayerInput, StackLayout } from "../core/types";
 import { clamp } from "../core/utils";
-import type { PlotArea } from "../render/chartUtils";
+import type { PlotArea } from "../render/charts";
 
 export interface PlotPointer {
   x: number;

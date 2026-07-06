@@ -274,9 +274,11 @@ export function movingInterfaceEnergy(
     const dLower = (hLower[t + 1] ?? 0) - (hLower[t] ?? 0);
     const upperMotion = db + 0.5 * dUpper;
     const lowerMotion = db - 0.5 * dLower;
+    const upperWeight = 0.5 * (Math.max(0, hUpper[t] ?? 0) + Math.max(0, hUpper[t + 1] ?? 0));
+    const lowerWeight = 0.5 * (Math.max(0, hLower[t] ?? 0) + Math.max(0, hLower[t + 1] ?? 0));
     energy +=
-      Math.max(0, hUpper[t] ?? 0) * upperMotion * upperMotion +
-      Math.max(0, hLower[t] ?? 0) * lowerMotion * lowerMotion;
+      upperWeight * upperMotion * upperMotion +
+      lowerWeight * lowerMotion * lowerMotion;
   }
 
   for (let t = 1; t < T - 1; t += 1) {
@@ -308,8 +310,8 @@ function solveMovingInterface(
   const linear = new Array<number>(T).fill(0);
 
   for (let t = 0; t < T - 1; t += 1) {
-    const upper = Math.max(0, hUpper[t] ?? 0);
-    const lower = Math.max(0, hLower[t] ?? 0);
+    const upper = 0.5 * (Math.max(0, hUpper[t] ?? 0) + Math.max(0, hUpper[t + 1] ?? 0));
+    const lower = 0.5 * (Math.max(0, hLower[t] ?? 0) + Math.max(0, hLower[t + 1] ?? 0));
     const weight = upper + lower;
     const dUpper = (hUpper[t + 1] ?? 0) - (hUpper[t] ?? 0);
     const dLower = (hLower[t + 1] ?? 0) - (hLower[t] ?? 0);

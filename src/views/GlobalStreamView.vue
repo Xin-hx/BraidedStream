@@ -5,9 +5,7 @@ import type { SceneBuildResult } from "../app/sceneBuilder";
 import type { ROI } from "../core/types";
 import { createHoverInfoResolver, tooltipText, type HoverInfoResolver } from "../interactions/hover";
 import { layerIdAtY, pointerToPlot, timeIndexAtPlotX } from "../interactions/hitTest";
-import type { PlotArea } from "../render/chartUtils";
-import { MainChart } from "../render/mainChart";
-import { OverviewChart } from "../render/overviewChart";
+import { MainChart, OverviewChart, type PlotArea } from "../render/charts";
 import { stateLegendEntriesForLayers } from "../styles/palette";
 
 const props = defineProps<{

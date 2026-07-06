@@ -53,7 +53,7 @@ export function layoutScourTree(
   return {
     yBottom,
     yTop,
-    order: renderOrder,
+    order: bottomToTopOrder(tree),
     centerline,
     nodeWiseMovingInterfaces
   };
@@ -176,6 +176,21 @@ function layoutTerminal(
 
     renderOrder.push(layerIdx);
   }
+}
+
+function bottomToTopOrder(node: ScourTreeNode): number[] {
+  return bottomToTopInSlot(node, 1);
+}
+
+function bottomToTopInSlot(node: ScourTreeNode, side: Side): number[] {
+  if (node.type !== "split") {
+    return side === 1 ? node.order.slice() : node.order.slice().reverse();
+  }
+
+  return [
+    ...bottomToTopInSlot(childForSide(node, node.lower), -1),
+    ...bottomToTopInSlot(childForSide(node, node.upper), 1)
+  ];
 }
 
 function childForSide(node: ScourSplitNode, side: ScourSplitSide): ScourTreeNode {

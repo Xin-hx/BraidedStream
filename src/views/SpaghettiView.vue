@@ -3,7 +3,7 @@ import * as d3 from "d3";
 import { onMounted, ref, watch } from "vue";
 import type { LayerInput, PreparedDataset } from "../core/types";
 import { nearestIndexByValue, pointerToPlot } from "../interactions/hitTest";
-import type { PlotArea } from "../render/chartUtils";
+import type { PlotArea } from "../render/charts";
 import { layerColor } from "../styles/palette";
 
 const props = defineProps<{

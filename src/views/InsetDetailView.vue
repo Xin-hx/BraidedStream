@@ -6,9 +6,7 @@ import type { InsetViewMode, StackLayout } from "../core/types";
 import type { AppState } from "../state/appState";
 import { createHoverInfoResolver, tooltipText, type HoverInfoResolver } from "../interactions/hover";
 import { layerIdAtY, pointerToPlot, timeIndexAtPlotX } from "../interactions/hitTest";
-import type { PlotArea } from "../render/chartUtils";
-import { ContourBoxplotChart } from "../render/contourBoxplotChart";
-import { InsetChart } from "../render/insetChart";
+import { ContourBoxplotChart, InsetChart, type PlotArea } from "../render/charts";
 
 const props = defineProps<{
   scene: SceneBuildResult | null;
