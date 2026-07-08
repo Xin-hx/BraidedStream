@@ -4,7 +4,7 @@
 
 export type BaselineMode = "sineStream" | "center" | "zero" | "l1" | "l2";
 export type OptimizingBaselineMode = BaselineMode | "multiscale" | "scour";
-export type DatasetKind = "synthetic" | "covid" | "sineBank" | "dataGenerator";
+export type DatasetKind = "covid" | "sineBank" | "dataGenerator";
 export type InsetViewMode = "before" | "after" | "diff" | "split";
 export type EnhanceTab = "optimize" | "spaghetti";
 export type PidUncertaintySource = "value" | "poportion";

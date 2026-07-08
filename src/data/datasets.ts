@@ -1,12 +1,13 @@
 /**
- * Dataset loading and normalization for synthetic and Covid ensemble inputs.
+ * Dataset loading and normalization for generated and Covid ensemble inputs.
  *
  * Rendering components consume PreparedDataset; this module owns parsing,
  * quantile interpolation, and uncertainty-band switching.
  */
 import * as d3 from "d3";
+import usStateNamesUrl from "../../Data/US_states.json?url";
 import { layerColor } from "../styles/palette";
-import { generateBelievableDataset, generateSyntheticDataset } from "./synthetic";
+import { generateBelievableDataset } from "./generated";
 import type { DatasetKind, LayerInput, PreparedDataset, QuantileBands, UncertaintyBandMode } from "../core/types";
 import { hasFinite, nearlyEqual, sum, toFiniteNumber } from "../core/utils";
 
@@ -60,16 +61,6 @@ interface CovidQuantileSeries {
   q975: number[];
 }
 
-/** Create the built-in synthetic example bundle. */
-export function createSyntheticBundle(): DatasetBundle {
-  return {
-    kind: "synthetic",
-    dataset: generateSyntheticDataset(190, 8),
-    notes: ["source: synthetic generator"],
-    uncNote: null
-  };
-}
-
 /** Create a parameterized generated streamgraph dataset. */
 export function createDataGeneratorBundle(layerCount = 15, timeCount = 30): DatasetBundle {
   const dataset = generateBelievableDataset(layerCount, timeCount);
@@ -88,12 +79,12 @@ export function createDataGeneratorBundle(layerCount = 15, timeCount = 30): Data
 
 /** Load, normalize, and select the Covid ensemble dataset. */
 export async function loadCovidBundle(): Promise<DatasetBundle> {
-  const rows = await fetchEnsembleCovidRows();
+  const [rows, stateNames] = await Promise.all([fetchEnsembleCovidRows(), fetchUsStateNames()]);
   if (rows.length === 0) {
     throw new Error("ensemble_covid.csv has no parseable rows");
   }
 
-  const normalized = normalizeEnsembleCovidRows(rows);
+  const normalized = normalizeEnsembleCovidRows(rows, stateNames);
   const selected = selectAllLayers(normalized.layers);
   applyCovidUncertaintyBand(
     {
@@ -194,6 +185,30 @@ async function fetchEnsembleCovidRows(): Promise<EnsembleCovidRow[]> {
   throw new Error(`Unable to load ensemble_covid.csv: ${String(lastError)}`);
 }
 
+async function fetchUsStateNames(): Promise<Record<string, string>> {
+  const urlCandidates = [
+    usStateNamesUrl,
+    "/Data/US_states.json",
+    "/data/US_states.json",
+    "/US_states.json"
+  ];
+  for (const url of urlCandidates) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        continue;
+      }
+      const parsed = await response.json();
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, string>)
+        : {};
+    } catch {
+      // Fall back to abbreviations when the optional label file is unavailable.
+    }
+  }
+  return {};
+}
+
 async function fetchSineBankRows(): Promise<SineBankRow[]> {
   const urlCandidates = [
     new URL("../../Data/sine_bank.json", import.meta.url).toString(),
@@ -249,7 +264,10 @@ function normalizeSineBankRows(rows: SineBankRow[]): PreparedDataset {
   };
 }
 
-function normalizeEnsembleCovidRows(rows: EnsembleCovidRow[]): { times: number[]; layers: CovidLayerInput[] } {
+function normalizeEnsembleCovidRows(
+  rows: EnsembleCovidRow[],
+  stateNames: Record<string, string>
+): { times: number[]; layers: CovidLayerInput[] } {
   const filtered = rows.filter((row) => {
     const abbreviation = String(row.abbreviation ?? "").trim().toUpperCase();
     const time = Date.parse(String(row.target_end_date ?? ""));
@@ -304,7 +322,7 @@ function normalizeEnsembleCovidRows(rows: EnsembleCovidRow[]): { times: number[]
     const poportion = interpolateCovidQuantileSeries(rawPoportion);
     enforceMonotonicQuantiles(covidQuantileRows(counts));
     enforceMonotonicQuantiles(covidQuantileRows(poportion));
-    layers.push(buildCovidLayer(abbreviation, rawCounts, counts, rawPoportion, poportion));
+    layers.push(buildCovidLayer(abbreviation, stateNames[abbreviation] ?? abbreviation, rawCounts, counts, rawPoportion, poportion));
   }
 
   return {
@@ -377,6 +395,7 @@ function covidQuantileRows(series: CovidQuantileSeries): number[][] {
 
 function buildCovidLayer(
   abbreviation: string,
+  label: string,
   rawCounts: CovidQuantileSeries,
   counts: CovidQuantileSeries,
   rawPoportion: CovidQuantileSeries,
@@ -391,7 +410,7 @@ function buildCovidLayer(
   const poportionUncSeries = poportion.q50.map((_value, i) => Math.max(0, poportionUpperSeries[i] - poportionLowerSeries[i]));
 
   return {
-    id: `${abbreviation}|h1`,
+    id: `${label}|h1`,
     // Representative per-time value for plotting: use q50 (median) for ensemble.
     height: counts.q50.slice(),
     unc: wideSeries.slice(),

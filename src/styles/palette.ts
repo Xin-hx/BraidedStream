@@ -22,12 +22,12 @@ export interface StateLegendEntry {
   color: string;
 }
 
-export function layerColor(index: number, layer?: string | { id: string; fill_color?: string }): string {
+export function layerColor(index: number, layer?: string | { id: string; fill_color?: string; regionKey?: string }): string {
   const sourceColor = typeof layer === "object" ? normalizeColor(layer.fill_color) : null;
   if (sourceColor) {
     return sourceColor;
   }
-  const layerId = typeof layer === "object" ? layer.id : layer;
+  const layerId = typeof layer === "object" ? (layer.regionKey ?? layer.id) : layer;
   const stateKey = stateKeyFromLayerId(layerId);
   if (stateKey) {
     return stateColor(stateKey);
@@ -43,11 +43,11 @@ function normalizeColor(value?: string): string | null {
   return trimmed !== "" ? trimmed : null;
 }
 
-export function stateLegendEntriesForLayers(layers: Array<{ id: string }>): StateLegendEntry[] {
+export function stateLegendEntriesForLayers(layers: Array<{ id: string; regionKey?: string }>): StateLegendEntry[] {
   const seen = new Set<string>();
   const entries: StateLegendEntry[] = [];
   for (const layer of layers) {
-    const key = stateKeyFromLayerId(layer.id);
+    const key = stateKeyFromLayerId(layer.regionKey ?? layer.id);
     if (!key || seen.has(key) || !FIXED_STATE_COLORS[key]) {
       continue;
     }

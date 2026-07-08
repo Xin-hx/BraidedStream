@@ -1,5 +1,7 @@
 Data/*
 Data
+!src/data/
+!src/data/generated.ts
 dist/
 dist/*
 node_modules/
