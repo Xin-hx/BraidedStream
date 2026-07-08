@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
-import { computeCenteredBaseline, computeWiggleBaseline } from "../core/baseline/compute";
-import { computeSineStreamBaseline } from "../core/baseline/sineStream";
-import { computeMultiscaleDistributedBaseline } from "../core/baseline/multiscale";
-import { computeStackedBoundaries } from "../core/stack";
-import type { BaselineCenterType, LayerInput, StackLayout } from "../core/types";
-import { clamp } from "../core/utils";
+import { computeCenteredBaseline, computeWiggleBaseline } from "../../core/baseline/compute";
+import { computeSineStreamBaseline } from "../../core/baseline/sineStream";
+import { computeMultiscaleDistributedBaseline } from "../../core/baseline/multiscale";
+import { computeStackedBoundaries } from "../../core/stack";
+import type { BaselineCenterType, LayerInput, StackLayout } from "../../core/types";
+import { clamp } from "../../core/utils";
 import {
   solveRecursiveScour,
   layoutScourTree,
@@ -13,7 +13,7 @@ import {
   type ScourConfig,
   type ScourDebug,
   type ScourLayout
-} from "../core/temp/index";
+} from "../../core/temp/index";
 
 interface DragTarget {
   layer: "x" | "y";
