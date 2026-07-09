@@ -387,37 +387,31 @@ const scourMovingInterfaceMode = computed<"symmetric" | "optimized" | "fixed">({
 
 const isCustomStage = computed(() => optimizingStage.value === "custom");
 const effectiveOrderingMode = computed<OrderingScoringMode>(() => {
-  if (optimizingStage.value === "plainStream") {
-    return "input";
-  }
-  if (optimizingStage.value === "stackedGeometry") {
+  if (optimizingStage.value === "byronWattenberg") {
     return "insideOut";
   }
-  if (optimizingStage.value === "sineStream") {
+  if (optimizingStage.value === "bartolomeoHu") {
+    return "twoOpt";
+  }
+  if (optimizingStage.value === "buZhang") {
     return "sineStream";
   }
-  if (optimizingStage.value === "tpidMultiscale") {
-    return "pidTimeWeighted";
-  }
-  if (optimizingStage.value === "scour") {
+  if (optimizingStage.value === "ours") {
     return "input";
   }
   return orderingScoringMode.value;
 });
 const effectiveBaselineMode = computed<OptimizingBaselineMode>(() => {
-  if (optimizingStage.value === "plainStream") {
-    return "center";
-  }
-  if (optimizingStage.value === "stackedGeometry") {
+  if (optimizingStage.value === "byronWattenberg") {
     return "l2";
   }
-  if (optimizingStage.value === "sineStream") {
+  if (optimizingStage.value === "bartolomeoHu") {
+    return "l1";
+  }
+  if (optimizingStage.value === "buZhang") {
     return "sineStream";
   }
-  if (optimizingStage.value === "tpidMultiscale") {
-    return "multiscale";
-  }
-  if (optimizingStage.value === "scour") {
+  if (optimizingStage.value === "ours") {
     return "scour";
   }
   return baselineMode.value;
@@ -432,8 +426,14 @@ const showMultiscaleControls = computed(() => effectiveBaselineMode.value === "m
 const showScourControls = computed(() => effectiveBaselineMode.value === "scour");
 const showL1Controls = computed(() => effectiveBaselineMode.value === "l1");
 const showL2Controls = computed(() => effectiveBaselineMode.value === "l2");
-const effectiveOrderingLabel = computed(() => orderingScoringLabel(effectiveOrderingMode.value));
-const effectiveBaselineLabel = computed(() => optimizingBaselineModeLabel(effectiveBaselineMode.value));
+const effectiveOrderingLabel = computed(() =>
+  optimizingStage.value === "ours" ? "Joint order + baseline" : orderingScoringLabel(effectiveOrderingMode.value)
+);
+const effectiveBaselineLabel = computed(() =>
+  optimizingStage.value === "ours"
+    ? "Common-interface joint optimization"
+    : optimizingBaselineModeLabel(effectiveBaselineMode.value)
+);
 
 function onControlsChange(): void {
   emit("controls-change");
@@ -447,12 +447,11 @@ function onControlsChange(): void {
       <label>
         Preset
         <select v-model="optimizingStage" @change="onControlsChange">
-          <option value="plainStream">Plain Stream</option>
-          <option value="stackedGeometry">Stacked Graphs - Geometry</option>
-          <option value="sineStream">SineStream</option>
-          <option value="tpidMultiscale">TPID + Multiscale</option>
-          <option value="scour">Recursive Scour</option>
-          <option value="custom">Custom</option>
+          <option value="byronWattenberg">Byron &amp; Wattenberg</option>
+          <option value="bartolomeoHu">Bartolomeo &amp; Hu</option>
+          <option value="buZhang">Bu &amp; Zhang</option>
+          <option value="ours">Ours</option>
+          <option value="custom">Customer</option>
         </select>
       </label>
 
@@ -476,8 +475,9 @@ function onControlsChange(): void {
         Scoring
         <select v-model="orderingScoringMode" @change="onControlsChange">
           <option value="input">Original order</option>
-          <option value="insideOut">Inside-out</option>
-          <option value="sineStream">SineStream</option>
+          <option value="insideOut">Inside-out (late onset)</option>
+          <option value="twoOpt">2-opt</option>
+          <option value="sineStream">Hierarchy clustering</option>
           <option value="intervalInclusion">One-way inclusion</option>
           <option value="pidMean">PID</option>
           <option value="pidTimeWeighted">PID + time trend</option>
@@ -603,11 +603,11 @@ function onControlsChange(): void {
         <select v-model="baselineMode" @change="onControlsChange">
           <option value="zero">Zero</option>
           <option value="center">Centered</option>
-          <option value="l1">L1</option>
-          <option value="l2">L2</option>
-          <option value="sineStream">SineStream</option>
+          <option value="l1">Weighted wiggle (L1 norm)</option>
+          <option value="l2">Weighted wiggle (L2 norm)</option>
+          <option value="sineStream">Gaussian weighted wiggle</option>
           <option value="multiscale">Multiscale</option>
-          <option value="scour">Recursive Scour</option>
+          <option value="scour">Common-interface joint optimization</option>
         </select>
       </label>
 

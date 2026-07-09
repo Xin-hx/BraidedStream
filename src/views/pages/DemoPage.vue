@@ -16,7 +16,7 @@ import {
 } from "../../core/temp/index";
 
 interface DragTarget {
-  layer: "x" | "y";
+  layerIndex: number;
   index: number;
 }
 
@@ -33,17 +33,21 @@ interface ChartGeometry {
 
 const timeCount = 9;
 const times = Array.from({ length: timeCount }, (_, index) => index);
-const thickness = reactive({
-  x: [24, 24, 24, 24, 24, 150, 24, 24, 24],
-  y: [24, 24, 24, 150, 24, 24, 24, 24, 24]
-});
+const layerColors = ["#0f766e", "#c2410c", "#2563eb"];
+const thickness = reactive<number[][]>([
+  [0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 3, 4, 4, 4, 0, 0, 0]
+]);
 
 const editorSvg = ref<SVGSVGElement | null>(null);
 const dragging = ref<DragTarget | null>(null);
 const centerTypeOptions: BaselineCenterType[] = ["median", "mean", "geometric", "harmonic"];
 const baselineControls = reactive({
+  l1WiggleWeight: 1,
+  l1CenterAnchorWeight: 0,
   l2WiggleWeight: 1,
   l2CenterAnchorWeight: 0,
+  l2WeightedWiggle: false,
   sineCenterType: "median" as BaselineCenterType,
   multiscaleCenterType: "median" as BaselineCenterType,
   multiscaleWaveStrength: 0.72,
@@ -54,14 +58,14 @@ const baselineControls = reactive({
 const scourConfig = reactive<ScourConfig>({ ...DEFAULT_SCOUR_CONFIG });
 
 const editor = {
-  width: 760,
-  height: 270,
-  left: 48,
-  right: 28,
-  top: 24,
-  bottom: 42,
-  minThickness: 8,
-  maxThickness: 170
+  width: 300,
+  height: 240,
+  left: 34,
+  right: 14,
+  top: 18,
+  bottom: 30,
+  minThickness: 0,
+  maxThickness: 5
 };
 
 const chart = {
@@ -82,24 +86,16 @@ const derivativeChart = {
   bottom: 36
 };
 
-const layers = computed<LayerInput[]>(() => [
-  {
-    id: "x-bottom",
-    fill_color: "#0f766e",
-    height: thickness.x.slice()
-  },
-  {
-    id: "y-top",
-    fill_color: "#c2410c",
-    height: thickness.y.slice()
-  }
-]);
+const layers = computed<LayerInput[]>(() =>
+  thickness.map((height, index) => ({
+    id: `layer-${index + 1}`,
+    fill_color: layerColors[index],
+    height: height.slice()
+  }))
+);
 
 // ── compute height matrix [n][T] for scour solver ─────────────────────────────
-const scourHeights = computed(() => [
-  thickness.x.slice(),
-  thickness.y.slice()
-]);
+const scourHeights = computed(() => thickness.map((row) => row.slice()));
 
 const scourResult = computed(() => {
   const config: ScourConfig = { ...scourConfig };
@@ -121,10 +117,18 @@ const scourStackLayout = computed<StackLayout>(() => ({
 
 // ── existing baselines ────────────────────────────────────────────────────────
 const centeredBaseline = computed(() => computeCenteredBaseline(timeCount, layers.value));
+const l1Hooks = computed(() => ({
+  wiggleWeightL1: Math.max(0, baselineControls.l1WiggleWeight),
+  centerAnchorWeight: Math.max(0, baselineControls.l1CenterAnchorWeight)
+}));
 const l2Hooks = computed(() => ({
   wiggleWeightL2: Math.max(0, baselineControls.l2WiggleWeight),
-  centerAnchorWeight: Math.max(0, baselineControls.l2CenterAnchorWeight)
+  centerAnchorWeight: Math.max(0, baselineControls.l2CenterAnchorWeight),
+  weightedWiggle: baselineControls.l2WeightedWiggle
 }));
+const l1Baseline = computed(() =>
+  computeWiggleBaseline(timeCount, layers.value, "l1", l1Hooks.value)
+);
 const l2Baseline = computed(() =>
   computeWiggleBaseline(timeCount, layers.value, "l2", l2Hooks.value)
 );
@@ -143,17 +147,20 @@ const multiscaleResult = computed(() =>
 );
 
 const centeredLayout = computed(() => computeStackedBoundaries(centeredBaseline.value, layers.value));
+const l1Layout = computed(() => computeStackedBoundaries(l1Baseline.value, layers.value));
 const l2Layout = computed(() => computeStackedBoundaries(l2Baseline.value, layers.value));
 const sineLayout = computed(() => computeStackedBoundaries(sineBaseline.value, layers.value));
 const multiscaleLayout = computed(() => computeStackedBoundaries(multiscaleResult.value.baseline, layers.value));
 
 const centeredCenterline = computed(() => centerlineFromLayout(centeredLayout.value));
+const l1Centerline = computed(() => centerlineFromLayout(l1Layout.value));
 const l2Centerline = computed(() => centerlineFromLayout(l2Layout.value));
 const sineCenterline = computed(() => centerlineFromLayout(sineLayout.value));
 const multiscaleCenterline = computed(() => centerlineFromLayout(multiscaleLayout.value));
 const scourCenterline = computed(() => centerlineFromScourLayout(scourLayout.value));
 
 const centeredDerivative = computed(() => derivative(centeredCenterline.value));
+const l1Derivative = computed(() => derivative(l1Centerline.value));
 const l2Derivative = computed(() => derivative(l2Centerline.value));
 const sineDerivative = computed(() => derivative(sineCenterline.value));
 const multiscaleDerivative = computed(() => derivative(multiscaleCenterline.value));
@@ -177,6 +184,8 @@ const sharedYExtent = computed(() => {
   const values = [
     ...centeredLayout.value.yBottom.flat(),
     ...centeredLayout.value.yTop.flat(),
+    ...l1Layout.value.yBottom.flat(),
+    ...l1Layout.value.yTop.flat(),
     ...l2Layout.value.yBottom.flat(),
     ...l2Layout.value.yTop.flat(),
     ...sineLayout.value.yBottom.flat(),
@@ -186,6 +195,7 @@ const sharedYExtent = computed(() => {
     ...scourStackLayout.value.yBottom.flat(),
     ...scourStackLayout.value.yTop.flat(),
     ...centeredCenterline.value,
+    ...l1Centerline.value,
     ...l2Centerline.value,
     ...sineCenterline.value,
     ...multiscaleCenterline.value,
@@ -204,6 +214,7 @@ const sharedYExtent = computed(() => {
 const centeredPaths = computed(() =>
   layerPaths(centeredLayout.value, streamGeometry(chart.width, chart.height, sharedYExtent.value))
 );
+const l1Paths = computed(() => layerPaths(l1Layout.value, streamGeometry(chart.width, chart.height, sharedYExtent.value)));
 const l2Paths = computed(() => layerPaths(l2Layout.value, streamGeometry(chart.width, chart.height, sharedYExtent.value)));
 const sinePaths = computed(() => layerPaths(sineLayout.value, streamGeometry(chart.width, chart.height, sharedYExtent.value)));
 const multiscalePaths = computed(() =>
@@ -215,6 +226,9 @@ const scourPaths = computed(() =>
 
 const centeredCenterPath = computed(() =>
   linePath(centeredCenterline.value, streamGeometry(chart.width, chart.height, sharedYExtent.value))
+);
+const l1CenterPath = computed(() =>
+  linePath(l1Centerline.value, streamGeometry(chart.width, chart.height, sharedYExtent.value))
 );
 const l2CenterPath = computed(() =>
   linePath(l2Centerline.value, streamGeometry(chart.width, chart.height, sharedYExtent.value))
@@ -248,13 +262,13 @@ const editorGeometry = computed(() => {
   };
 });
 
-const xThicknessPath = computed(() => linePath(thickness.x, editorGeometry.value));
-const yThicknessPath = computed(() => linePath(thickness.y, editorGeometry.value));
+const thicknessPaths = computed(() => thickness.map((row) => linePath(row, editorGeometry.value)));
 
 const derivativeExtent = computed(() => {
   const maxValue = Math.max(
     1,
     ...centeredDerivative.value.map(Math.abs),
+    ...l1Derivative.value.map(Math.abs),
     ...l2Derivative.value.map(Math.abs),
     ...sineDerivative.value.map(Math.abs),
     ...multiscaleDerivative.value.map(Math.abs),
@@ -264,6 +278,7 @@ const derivativeExtent = computed(() => {
 });
 
 const centeredDerivativePath = computed(() => derivativeLinePath(centeredDerivative.value));
+const l1DerivativePath = computed(() => derivativeLinePath(l1Derivative.value));
 const l2DerivativePath = computed(() => derivativeLinePath(l2Derivative.value));
 const sineDerivativePath = computed(() => derivativeLinePath(sineDerivative.value));
 const multiscaleDerivativePath = computed(() => derivativeLinePath(multiscaleDerivative.value));
@@ -278,9 +293,16 @@ const comparisons = computed(() => [
     centerPath: centeredCenterPath.value
   },
   {
+    key: "l1",
+    title: "L1 Norm Baseline",
+    note: "least-absolute wiggle baseline",
+    paths: l1Paths.value,
+    centerPath: l1CenterPath.value
+  },
+  {
     key: "l2",
     title: "L2 Norm Baseline",
-    note: "least-squares wiggle baseline",
+    note: baselineControls.l2WeightedWiggle ? "height-weighted centerline wiggle" : "unweighted edge wiggle",
     paths: l2Paths.value,
     centerPath: l2CenterPath.value
   },
@@ -334,6 +356,7 @@ const scourDebugText = computed(() => {
 
 const baselineMetrics = computed(() => [
   metricRow("Centered", centeredDerivative.value, "#64748b"),
+  metricRow("L1 norm", l1Derivative.value, "#0891b2"),
   metricRow("L2 norm", l2Derivative.value, "#2563eb"),
   metricRow("SineStream", sineDerivative.value, "#7c3aed"),
   metricRow("Multiscale", multiscaleDerivative.value, "#059669"),
@@ -342,6 +365,7 @@ const baselineMetrics = computed(() => [
 
 const derivativeLines = computed(() => [
   { label: "Centered", path: centeredDerivativePath.value, color: "#64748b" },
+  { label: "L1 norm", path: l1DerivativePath.value, color: "#0891b2" },
   { label: "L2 norm", path: l2DerivativePath.value, color: "#2563eb" },
   { label: "SineStream", path: sineDerivativePath.value, color: "#7c3aed" },
   { label: "Multiscale", path: multiscaleDerivativePath.value, color: "#059669" },
@@ -352,6 +376,67 @@ const multiscaleNotes = computed(() => ({
   selectedScales: multiscaleResult.value.diagnostics.selectedScales.join(", "),
   verified: multiscaleResult.value.diagnostics.verifiedMultiscale
 }));
+
+function exportComparisonSvg(): void {
+  const panelWidth = chart.width;
+  const panelHeight = chart.height;
+  const titleHeight = 26;
+  const noteHeight = 20;
+  const gap = 16;
+  const padding = 18;
+  const columns = 3;
+  const panelOuterHeight = titleHeight + panelHeight + noteHeight;
+  const rows = Math.ceil(comparisons.value.length / columns);
+  const width = padding * 2 + columns * panelWidth + (columns - 1) * gap;
+  const height = padding * 2 + rows * panelOuterHeight + (rows - 1) * gap;
+  const geometry = streamGeometry(chart.width, chart.height, sharedYExtent.value);
+  const zeroY = geometry.y(0);
+  const focusX = geometry.x(focusStep.value);
+  const panels = comparisons.value.map((item, index) => {
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    const x = padding + col * (panelWidth + gap);
+    const y = padding + row * (panelOuterHeight + gap);
+    return `
+      <g transform="translate(${x},${y})">
+        <text x="0" y="17" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a">${escapeXml(item.title)}</text>
+        <g transform="translate(0,${titleHeight})">
+          <rect width="${panelWidth}" height="${panelHeight}" fill="#ffffff" stroke="#cbd5e1"/>
+          <line x1="${chart.left}" x2="${chart.width - chart.right}" y1="${zeroY}" y2="${zeroY}" stroke="#cbd5e1"/>
+          ${item.paths
+            .map((path, layerIndex) => `<path d="${escapeXml(path)}" fill="${layerColors[layerIndex] ?? "#64748b"}" opacity="0.78"/>`)
+            .join("\n")}
+          <path d="${escapeXml(item.centerPath)}" fill="none" stroke="#0f172a" stroke-width="3" stroke-linecap="round"/>
+          <line x1="${focusX}" x2="${focusX}" y1="${chart.top}" y2="${chart.height - chart.bottom}" stroke="#334155" stroke-dasharray="5 5"/>
+        </g>
+        <text x="4" y="${titleHeight + panelHeight + 15}" font-family="Arial, sans-serif" font-size="11" fill="#475569">${escapeXml(item.note)}</text>
+      </g>`;
+  });
+  downloadText("demo-comparison.svg", `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  ${panels.join("\n")}
+</svg>
+`);
+}
+
+function downloadText(filename: string, content: string): void {
+  const blob = new Blob([content], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 function streamGeometry(width: number, height: number, extent: { min: number; max: number }): ChartGeometry {
   const innerWidth = width - chart.left - chart.right;
@@ -461,8 +546,14 @@ function metricRow(label: string, values: number[], color: string): { label: str
   };
 }
 
-function onPointerDown(layer: "x" | "y", index: number, event: PointerEvent): void {
-  dragging.value = { layer, index };
+function addLayer(): void {
+  if (thickness.length < 3) {
+    thickness.push(new Array<number>(timeCount).fill(0));
+  }
+}
+
+function onPointerDown(layerIndex: number, index: number, event: PointerEvent): void {
+  dragging.value = { layerIndex, index };
   (event.currentTarget as SVGElement).setPointerCapture?.(event.pointerId);
   updateDragValue(event);
 }
@@ -488,27 +579,31 @@ function updateDragValue(event: PointerEvent): void {
   const viewY = ((event.clientY - rect.top) / Math.max(1, rect.height)) * editor.height;
   const ratio = 1 - (viewY - editor.top) / Math.max(1, editor.height - editor.top - editor.bottom);
   const nextValue = editor.minThickness + clamp(ratio, 0, 1) * (editor.maxThickness - editor.minThickness);
-  thickness[target.layer][target.index] = Math.round(nextValue);
+  thickness[target.layerIndex][target.index] = Math.round(clamp(nextValue, editor.minThickness, editor.maxThickness));
 }
 
 function resetCase(kind: "burst" | "exchange" | "smooth"): void {
   const next =
     kind === "exchange"
-      ? {
-          x: [42, 42, 42, 42, 174, 42, 42, 42, 42],
-          y: [132, 132, 132, 132, 8, 132, 132, 132, 132]
-        }
+      ? [
+          [1, 1, 1, 1, 5, 1, 1, 1, 1],
+          [4, 4, 4, 4, 0, 4, 4, 4, 4],
+          [0, 1, 2, 3, 4, 3, 2, 1, 0]
+        ]
       : kind === "smooth"
-        ? {
-            x: [42, 48, 56, 66, 78, 88, 96, 102, 106],
-            y: [72, 70, 69, 67, 66, 64, 63, 61, 60]
-          }
-        : {
-            x: [24, 24, 24, 24, 24, 150, 24, 24, 24],
-            y: [24, 24, 24, 150, 24, 24, 24, 24, 24]
-          };
-  thickness.x.splice(0, thickness.x.length, ...next.x);
-  thickness.y.splice(0, thickness.y.length, ...next.y);
+        ? [
+            [1, 1, 2, 2, 2, 3, 3, 3, 3],
+            [2, 2, 2, 2, 2, 2, 2, 2, 2],
+            [3, 3, 3, 2, 2, 2, 1, 1, 1]
+          ]
+        : [
+            [0, 0, 0, 0, 0, 5, 0, 0, 0],
+            [0, 0, 3, 4, 4, 4, 0, 0, 0],
+            [0, 0, 0, 2, 5, 2, 0, 0, 0]
+          ];
+  for (let i = 0; i < thickness.length; i += 1) {
+    thickness[i].splice(0, thickness[i].length, ...(next[i] ?? new Array<number>(timeCount).fill(0)));
+  }
 }
 
 function fmt(value: number): string {
@@ -529,23 +624,23 @@ function fmtShort(value: number): string {
 <template>
   <div class="two-layer-page">
     <header class="two-layer-header">
-      <h1>Two-layer Baseline + Recursive Scour Demo</h1>
-      <div class="two-layer-actions" aria-label="Preset cases">
-        <button type="button" @click="resetCase('burst')">Burst</button>
-        <button type="button" @click="resetCase('exchange')">Exchange</button>
-        <button type="button" @click="resetCase('smooth')">Smooth</button>
-      </div>
+      <h1>Demo</h1>
+      
     </header>
 
-    <section class="two-layer-workspace" aria-label="Interactive thickness editor">
+    <div class="demo-body">
+    <aside class="two-layer-workspace" aria-label="Interactive thickness editor">
       <div class="two-layer-editor">
         <div class="two-layer-section-title">
           <h2>Layer Thickness</h2>
-          <div class="two-layer-legend">
-            <span><i class="swatch swatch-x"></i>x bottom layer</span>
-            <span><i class="swatch swatch-y"></i>y top layer</span>
-          </div>
+          <button type="button" :disabled="thickness.length >= 3" @click="addLayer">+ Layer</button>
         </div>
+          <div class="two-layer-legend">
+            <span v-for="(_layer, index) in thickness" :key="`legend-${index}`">
+              <i class="swatch" :style="{ backgroundColor: layerColors[index] }"></i>layer {{ index + 1 }}
+            </span>
+          </div>
+          
         <svg
           ref="editorSvg"
           class="two-layer-editor-svg"
@@ -574,26 +669,26 @@ function fmtShort(value: number): string {
             :y2="editorGeometry.bottom"
             stroke="#e2e8f0"
           />
-          <path :d="xThicknessPath" fill="none" stroke="#0f766e" stroke-width="4" stroke-linecap="round" />
-          <path :d="yThicknessPath" fill="none" stroke="#c2410c" stroke-width="4" stroke-linecap="round" />
-          <g v-for="(value, index) in thickness.x" :key="`x-${index}`">
+          <path
+            v-for="(path, layerIndex) in thicknessPaths"
+            :key="`path-${layerIndex}`"
+            :d="path"
+            fill="none"
+            :stroke="layerColors[layerIndex]"
+            stroke-width="4"
+            stroke-linecap="round"
+          />
+          <g v-for="(row, layerIndex) in thickness" :key="`layer-${layerIndex}`">
             <circle
-              class="drag-handle drag-handle-x"
+              v-for="(value, index) in row"
+              :key="`point-${layerIndex}-${index}`"
+              class="drag-handle"
+              :fill="layerColors[layerIndex]"
               :cx="editorGeometry.x(index)"
               :cy="editorGeometry.y(value)"
-              r="9"
+              r="7"
               tabindex="0"
-              @pointerdown="onPointerDown('x', index, $event)"
-            />
-          </g>
-          <g v-for="(value, index) in thickness.y" :key="`y-${index}`">
-            <circle
-              class="drag-handle drag-handle-y"
-              :cx="editorGeometry.x(index)"
-              :cy="editorGeometry.y(value)"
-              r="9"
-              tabindex="0"
-              @pointerdown="onPointerDown('y', index, $event)"
+              @pointerdown="onPointerDown(layerIndex, index, $event)"
             />
           </g>
           <text
@@ -608,8 +703,14 @@ function fmtShort(value: number): string {
             t{{ index - 1 }}
           </text>
         </svg>
+        <div class="two-layer-actions" aria-label="Preset cases">
+        <button type="button" @click="resetCase('burst')">Burst</button>
+        <button type="button" @click="resetCase('exchange')">Exchange</button>
+        <button type="button" @click="resetCase('smooth')">Smooth</button>
       </div>
-    </section>
+      </div>
+    </aside>
+    <main class="demo-main">
 
     <!-- Scour parameters -->
     <section class="two-layer-metric-strip scour-params" aria-label="Scour parameters">
@@ -681,11 +782,27 @@ function fmtShort(value: number): string {
       </div>
     </section>
 
-    <section class="two-layer-compare" aria-label="Baseline and scour comparison">
-      <div v-for="item in comparisons" :key="item.key" class="two-layer-chart">
+    <section class="two-layer-compare-section" aria-label="Baseline and scour comparison">
+      <div class="two-layer-section-title">
+        <h2>Baseline Comparison</h2>
+        <button type="button" @click="exportComparisonSvg">Export SVG</button>
+      </div>
+      <div class="two-layer-compare">
+        <div v-for="item in comparisons" :key="item.key" class="two-layer-chart">
         <h2>{{ item.title }}</h2>
         <div class="baseline-controls" :aria-label="`${item.title} parameters`">
           <span v-if="item.key === 'centered'" class="baseline-controls__static">b(t) = -H(t)/2</span>
+
+          <template v-else-if="item.key === 'l1'">
+            <label>
+              wiggle L1
+              <input v-model.number="baselineControls.l1WiggleWeight" type="number" min="0" step="0.05" />
+            </label>
+            <label>
+              center anchor
+              <input v-model.number="baselineControls.l1CenterAnchorWeight" type="number" min="0" step="0.05" />
+            </label>
+          </template>
 
           <template v-else-if="item.key === 'l2'">
             <label>
@@ -695,6 +812,10 @@ function fmtShort(value: number): string {
             <label>
               center anchor
               <input v-model.number="baselineControls.l2CenterAnchorWeight" type="number" min="0" step="0.05" />
+            </label>
+            <label>
+              weighted
+              <input v-model="baselineControls.l2WeightedWiggle" type="checkbox" />
             </label>
           </template>
 
@@ -749,8 +870,13 @@ function fmtShort(value: number): string {
             :y2="streamGeometry(chart.width, chart.height, sharedYExtent).y(0)"
             stroke="#cbd5e1"
           />
-          <path :d="item.paths[0]" fill="#0f766e" opacity="0.78" />
-          <path :d="item.paths[1]" fill="#c2410c" opacity="0.78" />
+          <path
+            v-for="(path, layerIndex) in item.paths"
+            :key="`area-${item.key}-${layerIndex}`"
+            :d="path"
+            :fill="layerColors[layerIndex]"
+            opacity="0.78"
+          />
           <path :d="item.centerPath" fill="none" stroke="#0f172a" stroke-width="3" stroke-linecap="round" />
           <line
             :x1="streamGeometry(chart.width, chart.height, sharedYExtent).x(focusStep)"
@@ -770,6 +896,7 @@ function fmtShort(value: number): string {
           </text>
           <text x="36" :y="chart.height - 10" fill="#475569" font-size="11">{{ item.note }}</text>
         </svg>
+      </div>
       </div>
     </section>
 
@@ -814,6 +941,8 @@ function fmtShort(value: number): string {
         </g>
       </svg>
     </section>
+    </main>
+    </div>
   </div>
 </template>
 
@@ -827,6 +956,7 @@ function fmtShort(value: number): string {
 .two-layer-header,
 .two-layer-workspace,
 .two-layer-metric-strip,
+.two-layer-compare-section,
 .two-layer-compare,
 .two-layer-derivative {
   width: 100%;
@@ -850,8 +980,24 @@ function fmtShort(value: number): string {
   gap: 6px;
 }
 
+.demo-body {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.demo-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .two-layer-workspace {
   display: block;
+  position: sticky;
+  top: 10px;
 }
 
 .two-layer-editor,
@@ -873,6 +1019,21 @@ function fmtShort(value: number): string {
   gap: 8px 16px;
   align-items: center;
   justify-content: space-between;
+}
+
+.two-layer-section-title button {
+  padding: 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #0f172a;
+  cursor: pointer;
+  font: inherit;
+}
+
+.two-layer-section-title button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .two-layer-legend {
@@ -985,7 +1146,7 @@ function fmtShort(value: number): string {
 
 .two-layer-compare {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1057,6 +1218,14 @@ function fmtShort(value: number): string {
 }
 
 @media (max-width: 860px) {
+  .demo-body {
+    grid-template-columns: 1fr;
+  }
+
+  .two-layer-workspace {
+    position: static;
+  }
+
   .two-layer-compare {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -36,35 +36,30 @@ export interface OptimizingVariantConfig {
 // ── Config resolution ────────────────────────────────────────────────────────
 
 export function resolveOptimizingVariantConfig(config: OptimizingVariantConfig): OptimizingVariantConfig {
-  if (config.optimizingStage === "plainStream") {
-    return {
-      ...config,
-      orderingScoringMode: "input",
-      baselineMode: "center"
-    };
-  }
-  if (config.optimizingStage === "stackedGeometry") {
+  if (config.optimizingStage === "byronWattenberg") {
     return {
       ...config,
       orderingScoringMode: "insideOut",
-      baselineMode: "l2"
+      baselineMode: "l2",
+      baselineHooks: { ...config.baselineHooks, weightedWiggle: true, centerAnchorWeight: 0 }
     };
   }
-  if (config.optimizingStage === "sineStream") {
+  if (config.optimizingStage === "bartolomeoHu") {
+    return {
+      ...config,
+      orderingScoringMode: "twoOpt",
+      baselineMode: "l1",
+      baselineHooks: { ...config.baselineHooks, weightedWiggle: true, centerAnchorWeight: 0 }
+    };
+  }
+  if (config.optimizingStage === "buZhang") {
     return {
       ...config,
       orderingScoringMode: "sineStream",
       baselineMode: "sineStream"
     };
   }
-  if (config.optimizingStage === "tpidMultiscale") {
-    return {
-      ...config,
-      orderingScoringMode: "pidTimeWeighted",
-      baselineMode: "multiscale"
-    };
-  }
-  if (config.optimizingStage === "scour") {
+  if (config.optimizingStage === "ours") {
     return {
       ...config,
       orderingScoringMode: "input",
@@ -81,10 +76,13 @@ export function orderingScoringLabel(mode: OrderingScoringMode): string {
     return "Original order";
   }
   if (mode === "insideOut") {
-    return "Inside-out";
+    return "Inside-out (late onset)";
+  }
+  if (mode === "twoOpt") {
+    return "2-opt";
   }
   if (mode === "sineStream") {
-    return "SineStream";
+    return "Hierarchy clustering";
   }
   if (mode === "pidMean") {
     return "PID";
@@ -96,22 +94,19 @@ export function orderingScoringLabel(mode: OrderingScoringMode): string {
 }
 
 export function optimizingStageLabel(stage: OptimizingStage): string {
-  if (stage === "plainStream") {
-    return "Plain stream";
+  if (stage === "byronWattenberg") {
+    return "Byron & Wattenberg";
   }
-  if (stage === "stackedGeometry") {
-    return "Stacked Graphs geometry/aesthetics";
+  if (stage === "bartolomeoHu") {
+    return "Bartolomeo & Hu";
   }
-  if (stage === "sineStream") {
-    return "SineStream readability";
+  if (stage === "buZhang") {
+    return "Bu & Zhang";
   }
-  if (stage === "tpidMultiscale") {
-    return "TPID + multiscale";
+  if (stage === "ours") {
+    return "Ours";
   }
-  if (stage === "scour") {
-    return "Recursive Scour";
-  }
-  return "Custom";
+  return "Customer";
 }
 
 export function optimizingBaselineModeLabel(mode: OptimizingBaselineMode): string {
@@ -122,16 +117,16 @@ export function optimizingBaselineModeLabel(mode: OptimizingBaselineMode): strin
     return "Centered";
   }
   if (mode === "l1") {
-    return "L1";
+    return "Weighted wiggle (L1 norm)";
   }
   if (mode === "l2") {
-    return "L2";
+    return "Weighted wiggle (L2 norm)";
   }
   if (mode === "sineStream") {
-    return "SineStream";
+    return "Gaussian weighted wiggle";
   }
   if (mode === "scour") {
-    return "Recursive Scour";
+    return "Common-interface joint optimization";
   }
   return "Multiscale";
 }

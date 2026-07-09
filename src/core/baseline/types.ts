@@ -7,6 +7,8 @@ export interface BaselineParameters {
   wiggleWeightL1?: number;
   /** L2 wiggle weight (for mode=l2) */
   wiggleWeightL2?: number;
+  /** Use height-weighted centerline wiggle for mode=l1/l2 */
+  weightedWiggle?: boolean;
   /** Anchor weight toward centered baseline for L1/L2 modes */
   centerAnchorWeight?: number;
   /** IRLS iterations used by L1 mode */

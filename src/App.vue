@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import MainVisualizationPage from "./views/pages/MainVisualizationPage.vue";
-import TwoLayerDemoPage from "./views/pages/TwoLayerDemoPage.vue";
+import DemoPage from "./views/pages/DemoPage.vue";
 import "./styles.css";
 
-type RoutePath = "/" | "/two-layer-demo";
+type RoutePath = "/" | "/demo";
 
 const routes: Array<{ path: RoutePath; label: string }> = [
   { path: "/", label: "Main Visualization" },
-  { path: "/two-layer-demo", label: "Two-layer Demo" }
+  { path: "/demo", label: "Demo" }
 ];
 
 const currentPath = ref<RoutePath>(normalizePath(typeof window !== "undefined" ? window.location.pathname : "/"));
-const currentPage = computed(() => (currentPath.value === "/two-layer-demo" ? TwoLayerDemoPage : MainVisualizationPage));
+const currentPage = computed(() => (currentPath.value === "/demo" ? DemoPage : MainVisualizationPage));
 
 function normalizePath(pathname: string): RoutePath {
-  return pathname === "/two-layer-demo" || pathname === "/two-layer-multiscale" ? "/two-layer-demo" : "/";
+  return pathname === "/demo" || pathname === "/two-layer-demo" || pathname === "/two-layer-multiscale" ? "/demo" : "/";
 }
 
 function syncFromLocation(): void {

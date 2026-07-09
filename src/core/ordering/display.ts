@@ -43,12 +43,22 @@ export function buildCenterOutOrder(sortedOrder: string[]): string[] {
   return out;
 }
 
-/** Classic inside-out ordering by total layer mass. */
+/** Inside-out ordering with late-onset layers kept near the stream center. */
 export function buildInsideOutOrder(layers: LayerInput[], inputOrder: string[]): string[] {
   const byId = new Map(layers.map((layer) => [layer.id, layer]));
   const totals = inputOrder
-    .map((id) => ({ id, total: byId.get(id)?.height.reduce((acc, value) => acc + Math.max(0, value), 0) ?? 0 }))
+    .map((id) => {
+      const layer = byId.get(id);
+      return {
+        id,
+        onset: layer ? onsetIndex(layer.height) : 0,
+        total: layer?.height.reduce((acc, value) => acc + Math.max(0, value), 0) ?? 0
+      };
+    })
     .sort((a, b) => {
+      if (b.onset !== a.onset) {
+        return b.onset - a.onset;
+      }
       if (b.total !== a.total) {
         return b.total - a.total;
       }
@@ -69,6 +79,35 @@ export function buildInsideOutOrder(layers: LayerInput[], inputOrder: string[]):
     }
   }
   return lower.concat(upper);
+}
+
+/** 2-opt ordering over adjacent layer counter-motion distance. */
+export function buildTwoOptOrder(layers: LayerInput[], inputOrder: string[]): string[] {
+  const byId = new Map(layers.map((layer) => [layer.id, layer]));
+  const layerIds = layers.map((layer) => layer.id);
+  const order = normalizeOrderForComparison(inputOrder, layerIds, layerIds);
+  if (order.length <= 3) {
+    return order;
+  }
+
+  const distance = (a: string, b: string) => adjacencyDistance(byId.get(a)!, byId.get(b)!);
+  for (let pass = 0; pass < order.length; pass += 1) {
+    let improved = false;
+    for (let i = 1; i < order.length - 2; i += 1) {
+      for (let k = i + 1; k < order.length - 1; k += 1) {
+        const before = distance(order[i - 1], order[i]) + distance(order[k], order[k + 1]);
+        const after = distance(order[i - 1], order[k]) + distance(order[i], order[k + 1]);
+        if (after + 1e-12 < before) {
+          order.splice(i, k - i + 1, ...order.slice(i, k + 1).reverse());
+          improved = true;
+        }
+      }
+    }
+    if (!improved) {
+      break;
+    }
+  }
+  return order;
 }
 
 /** Normalize an order to contain each allowed layer exactly once. */
@@ -127,4 +166,36 @@ function centerOutSlots(length: number): number[] {
     }
   }
   return slots;
+}
+
+function onsetIndex(values: number[]): number {
+  const first = values.findIndex((value) => value > 1e-9);
+  if (first >= 0) {
+    return first;
+  }
+  let best = 0;
+  for (let i = 1; i < values.length; i += 1) {
+    if (values[i] > values[best]) {
+      best = i;
+    }
+  }
+  return best;
+}
+
+function adjacencyDistance(a: LayerInput, b: LayerInput): number {
+  const length = Math.min(a.height.length, b.height.length);
+  let weighted = 0;
+  let weightSum = 0;
+  for (let t = 1; t < length; t += 1) {
+    const da = a.height[t] - a.height[t - 1];
+    const db = b.height[t] - b.height[t - 1];
+    const denom = Math.abs(da) + Math.abs(db);
+    if (denom <= 1e-12) {
+      continue;
+    }
+    const weight = Math.max(1e-9, a.height[t] + b.height[t]);
+    weighted += weight * (Math.abs(da + db) / denom);
+    weightSum += weight;
+  }
+  return weightSum <= 0 ? 0 : weighted / weightSum;
 }

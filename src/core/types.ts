@@ -9,8 +9,15 @@ export type InsetViewMode = "before" | "after" | "diff" | "split";
 export type EnhanceTab = "optimize" | "spaghetti";
 export type PidUncertaintySource = "value" | "poportion";
 export type PidTimeOrderMode = "layer_pid_centrality" | "layer_pid_time_weighted";
-export type OptimizingStage = "plainStream" | "stackedGeometry" | "sineStream" | "tpidMultiscale" | "scour" | "custom";
-export type OrderingScoringMode = "input" | "insideOut" | "sineStream" | "intervalInclusion" | "pidMean" | "pidTimeWeighted";
+export type OptimizingStage = "byronWattenberg" | "bartolomeoHu" | "buZhang" | "ours" | "custom";
+export type OrderingScoringMode =
+  | "input"
+  | "insideOut"
+  | "twoOpt"
+  | "sineStream"
+  | "intervalInclusion"
+  | "pidMean"
+  | "pidTimeWeighted";
 export type BaselineCenterType = "median" | "mean" | "geometric" | "harmonic";
 export type OrderWeightType = "max" | "arithmetic" | "geometric" | "harmonic" | "median";
 export type UncertaintyBandMode = "50" | "95";

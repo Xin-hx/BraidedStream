@@ -347,6 +347,7 @@ function baselineHooksFromState(): BaselineParameters {
     centerType: state.optimization.baselineCenterType ?? "median",
     wiggleWeightL1: state.optimization.wiggleWeightL1,
     wiggleWeightL2: state.optimization.wiggleWeightL2,
+    weightedWiggle: true,
     centerAnchorWeight: state.optimization.centerAnchorWeight,
     irlsIterations: state.optimization.irlsIterations,
     irlsEps: state.optimization.irlsEps
@@ -358,6 +359,7 @@ function baselineHooksFromCompare(): BaselineParameters {
     centerType: state.compare.baselineCenterType,
     wiggleWeightL1: state.compare.wiggleWeightL1,
     wiggleWeightL2: state.compare.wiggleWeightL2,
+    weightedWiggle: true,
     centerAnchorWeight: state.compare.centerAnchorWeight,
     irlsIterations: state.compare.irlsIterations,
     irlsEps: state.compare.irlsEps

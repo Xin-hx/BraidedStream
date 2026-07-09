@@ -111,7 +111,9 @@ export function buildOptimizingVariantScene(
   });
   const diagnosticsNotes = [
     `stage: ${optimizingStageLabel(config.optimizingStage)}`,
-    `ordering scoring: ${orderingScoringLabel(resolvedConfig.orderingScoringMode)}`,
+    config.optimizingStage === "ours"
+      ? "method: common-interface joint layer ordering + baseline optimization"
+      : `ordering scoring: ${orderingScoringLabel(resolvedConfig.orderingScoringMode)}`,
     `baseline: ${optimizingBaselineModeLabel(resolvedConfig.baselineMode)}`,
     ...orderResult.notes
   ];
@@ -166,7 +168,9 @@ function buildScourVariantScene(
   });
   const diagnosticsNotes = [
     `stage: ${optimizingStageLabel(config.optimizingStage)}`,
-    `ordering scoring: ${orderingScoringLabel(resolvedConfig.orderingScoringMode)}`,
+    config.optimizingStage === "ours"
+      ? "method: common-interface joint layer ordering + baseline optimization"
+      : `ordering scoring: ${orderingScoringLabel(resolvedConfig.orderingScoringMode)}`,
     `baseline: ${optimizingBaselineModeLabel(resolvedConfig.baselineMode)}`,
     ...orderResult.notes,
     `scour search: ${scourConfig.searchMode}, maxDepth=${scourConfig.maxDepth}, rho=${scourConfig.rhoSplit.toFixed(3)}`,
@@ -340,6 +344,7 @@ function baselineHooksFromState(state: AppState) {
     centerType: state.optimization.baselineCenterType ?? "median",
     wiggleWeightL1: state.optimization.wiggleWeightL1,
     wiggleWeightL2: state.optimization.wiggleWeightL2,
+    weightedWiggle: true,
     centerAnchorWeight: state.optimization.centerAnchorWeight,
     irlsIterations: state.optimization.irlsIterations,
     irlsEps: state.optimization.irlsEps

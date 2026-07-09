@@ -6,7 +6,7 @@ import {
 } from "../core/ordering/pid";
 import type { PreparedDataset } from "../core/types";
 import { resolveOptimizingVariantConfig, type OptimizingVariantConfig } from "../optimizingConfig";
-import { buildCenterOutOrder, buildInsideOutOrder, normalizedInputOrder } from "../core/ordering/display";
+import { buildCenterOutOrder, buildInsideOutOrder, buildTwoOptOrder, normalizedInputOrder } from "../core/ordering/display";
 import { optimizeLayerOrder } from "../core/ordering/sineStream";
 
 export interface OptimizingOrderResult {
@@ -27,7 +27,14 @@ export function computeOptimizingOrder(dataset: PreparedDataset, config: Optimiz
   if (resolved.orderingScoringMode === "insideOut") {
     return {
       displayOrder: buildInsideOutOrder(dataset.layers, normalizedInputOrder(dataset)),
-      notes: ["ordering: inside-out layer ordering for streamgraph geometry/aesthetics"]
+      notes: ["ordering: inside-out layer ordering with late-onset layers near the center"]
+    };
+  }
+
+  if (resolved.orderingScoringMode === "twoOpt") {
+    return {
+      displayOrder: buildTwoOptOrder(dataset.layers, normalizedInputOrder(dataset)),
+      notes: ["ordering: 2-opt adjacent counter-motion ordering"]
     };
   }
 
@@ -53,8 +60,8 @@ export function computeOptimizingOrder(dataset: PreparedDataset, config: Optimiz
     return {
       displayOrder: optimized.order,
       notes: [
-        "ordering: SineStream hierarchical clustering + optimal leaf ordering",
-        `SineStream order objective: ${optimized.diagnostics.objectiveBefore.toFixed(3)} -> ${optimized.diagnostics.objectiveAfter.toFixed(3)}`
+        "ordering: hierarchical clustering + optimal leaf ordering",
+        `hierarchy order objective: ${optimized.diagnostics.objectiveBefore.toFixed(3)} -> ${optimized.diagnostics.objectiveAfter.toFixed(3)}`
       ]
     };
   }
