@@ -150,10 +150,12 @@ button.active { background: var(--accent); border-color: var(--accent); color: w
 
 #chart .layer { cursor: pointer; }
 #chart .layer.dim { opacity: 0.28; }
-#chart .internal-space { fill: none; pointer-events: none; }
+#chart .allocated-space.dim { opacity: 0.28; }
+#chart .envelope-hit { cursor: pointer; }
 #chart .space-hit { cursor: help; }
-#chart .q-envelope { fill: none; stroke-width: 1.2; stroke-dasharray: 4 3; opacity: .9; pointer-events: none; }
+#chart .dynamic-slot-boundary { fill: none; stroke-width: 1.2; stroke-dasharray: 4 3; opacity: .9; pointer-events: none; }
 #chart .axis text { font-size: 15px; fill: #48576a; font-family: var(--mono); }
+#chart .axis-label { font-size: 12px; fill: #48576a; font-family: var(--mono); }
 #chart .axis line, #chart .axis path { stroke: var(--line); }
 #chart .grid line { stroke: #f0f0f0; }
 #chart .hover-line { stroke: var(--accent); stroke-width: 1; opacity: 0.5; }

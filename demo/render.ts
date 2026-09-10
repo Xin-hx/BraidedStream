@@ -8,7 +8,6 @@ import {
   curveBasis,
   curveLinear,
   hsl,
-  line,
   scaleLinear,
   select,
   stack,
@@ -39,7 +38,7 @@ export interface RenderInput {
   end: number;
   visMethod: VisMethod;
   smoothContours: boolean;
-  showOutlines: boolean;
+  showSlotBoundary: boolean;
   /** Pack colored branches back into the representative Q50 band. */
   collapseBranches: boolean;
   hover: number | null;
@@ -101,8 +100,9 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
     return x(xValues[left] + (xValues[right] - xValues[left]) * (time - left));
   };
   const curve = input.smoothContours ? curveBasis : curveLinear;
-  const makeArea = (lo: number[], hi: number[]) =>
+  const makeArea = (lo: number[], hi: number[], defined?: boolean[]) =>
     area<number>()
+      .defined((t) => (defined ? defined[t] : true) && Number.isFinite(lo[t]) && Number.isFinite(hi[t]))
       .curve(curve)
       .x((t) => x(xValues[t]))
       .y0((t) => y(lo[t]))
@@ -118,6 +118,24 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
       .x((t) => x(xValues[t]))
       .y0((t) => y(lo[t]))
       .y1((t) => y(hi[t]))(indices.filter((t) => t >= start && t <= end)) ?? "";
+  const interpolated = braided
+    ? interpolateBraidedGeometry(
+        input.result.braided,
+        xValues,
+        firstTime,
+        lastTime,
+        input.smoothContours ? 8 : 1,
+        input.smoothContours,
+      )
+    : null;
+  const renderIndices = interpolated?.x.map((_, index) => index) ?? [];
+  const makeBraidedArea = (band: RenderBand, defined: boolean[]) =>
+    area<number>()
+      .defined((index) => defined[index])
+      .curve(curveLinear)
+      .x((index) => x(interpolated!.x[index]))
+      .y0((index) => y(band.y0[index]))
+      .y1((index) => y(band.y1[index]))(renderIndices) ?? "";
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("width", "100%");
   const root = select(svg);
@@ -143,25 +161,17 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
     .append("g")
     .attr("class", "axis")
     .attr("transform", `translate(0,${H - M.bottom})`);
-  if (eventAligned) {
-    xAxis.call(
-      axisBottom(x)
-        .ticks(8)
-        .tickFormat((day) => String(Math.round(Number(day)))),
-    );
-    root
-      .append("text")
-      .attr("x", M.left + IW / 2)
-      .attr("y", H - 10)
-      .attr("text-anchor", "middle")
-      .text("Days since diagnosis");
-  } else {
-    xAxis.call(
-      axisBottom(x)
-        .tickValues(xTicks)
-        .tickFormat((t) => tickLabel(input.times[Number(t)] ?? "")),
-    );
-  }
+  const coordinateTicks = xTicks.map((t) => xValues[t]);
+  xAxis.call(
+    axisBottom(x)
+      .tickValues(coordinateTicks)
+      .tickFormat((value) => {
+        const index = xValues.reduce((best, coordinate, candidate) =>
+          Math.abs(coordinate - Number(value)) < Math.abs(xValues[best] - Number(value)) ? candidate : best,
+        firstTime);
+        return tickLabel(input.times[index] ?? "");
+      }),
+  );
   root
     .append("g")
     .attr("class", "axis axis-y")
@@ -169,30 +179,71 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
     .call(
       axisLeft(y)
         .ticks(ticks)
-        .tickFormat((value) => fmtNum(Number(value))),
+        .tickFormat((value) => braided ? "" : fmtNum(Number(value))),
     );
+  if (braided) {
+    const maxThickness = Math.max(...input.result.base.yTop.flatMap((row, i) =>
+      row.map((top, t) => top - input.result.base.yBottom[i][t])
+    ));
+    const rulerValue = niceRuler(maxThickness);
+    const rulerPixels = Math.abs(y(rulerValue) - y(0));
+    const rulerX = W - M.right - 8;
+    const rulerBottom = H - M.bottom - 12;
+    root.append("line")
+      .attr("x1", rulerX).attr("x2", rulerX)
+      .attr("y1", rulerBottom).attr("y2", rulerBottom - rulerPixels)
+      .attr("stroke", "#48576a").attr("stroke-width", 2);
+    root.append("text")
+      .attr("x", rulerX - 6).attr("y", rulerBottom - rulerPixels / 2)
+      .attr("text-anchor", "end").attr("dominant-baseline", "middle")
+      .attr("class", "axis-label")
+      .text(`${fmtNum(rulerValue)} thickness units`);
+    root.append("text")
+      .attr("x", W - M.right).attr("y", M.top + 12)
+      .attr("text-anchor", "end").attr("class", "axis-label")
+      .text("high-value side ↑");
+  }
   const colorOf = (idx: number): string => colorForLayer(input.layers, layerIds[idx]);
   if (braided) {
     const layers = root.append("g").attr("class", "layers");
     for (const [i, geometry] of input.result.braided.layers.entries()) {
+      const visual = interpolated!.layers[i];
       const dim =
         input.highlightLayer && geometry.layerId !== input.highlightLayer
           ? " dim"
           : "";
+      if (input.showSlotBoundary) {
+        layers
+          .append("path")
+          .attr("d", makeBraidedArea(visual.envelope, visual.defined))
+          .attr("class", `envelope${dim}`)
+          .attr("fill", "none")
+          .attr("stroke", "#7a8793")
+          .attr("stroke-dasharray", "4 3")
+          .attr("pointer-events", "none");
+      }
       layers
         .append("path")
-        .attr("d", makeArea(geometry.visualEnvelopeY0, geometry.visualEnvelopeY1))
-        .attr("class", `envelope${dim}`)
-        .attr("fill", colorOf(i))
-        .attr("fill-opacity", 0.16)
-        .attr("pointer-events", "none");
+        .attr("d", makeBraidedArea(visual.envelope, visual.defined))
+        .attr("class", "envelope-hit")
+        .attr("fill", "transparent")
+        .attr("stroke", "none")
+        .attr("pointer-events", "all")
+        .attr("data-owner-layer", geometry.layerId);
       // A single compound fill keeps the shared edge of packed channels invisible.
+      const collapsedBand = {
+        y0: visual.branches[0].y0,
+        y1: visual.branches[0].y0.map((bottom, sample) =>
+          bottom + visual.branches.reduce(
+            (sum, branch) => sum + branch.y1[sample] - branch.y0[sample],
+            0,
+          )),
+      };
       const branchAreas = input.collapseBranches
-        ? [makeArea(geometry.slotY0, geometry.slotY0.map((bottom, t) =>
-            bottom + input.result.base.yTop[i][t] - input.result.base.yBottom[i][t]))]
-        : geometry.branches.map((branch) =>
-            indices.some((t) => branch.y1[t] > branch.y0[t])
-              ? makeArea(branch.y0, branch.y1)
+        ? [makeBraidedArea(collapsedBand, visual.defined)]
+        : visual.branches.map((branch) =>
+            renderIndices.some((sample) => branch.y1[sample] > branch.y0[sample])
+              ? makeBraidedArea(branch, visual.defined)
               : "",
           );
       layers
@@ -202,34 +253,22 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
         .attr("fill", colorOf(i))
         .attr("fill-opacity", 0.82)
         .attr("stroke", "none")
-        .attr("data-id", geometry.layerId);
-      // Only outline positive-width runs. Zero-width temporal paths must not become whiskers.
-      for (const branch of geometry.branches) {
-        if (!input.showOutlines || input.collapseBranches) continue;
-        const outline = area<number>()
-          .defined((t) => geometry.active[t] && geometry.branchCount[t] > 1 && branch.y1[t] > branch.y0[t])
-          .curve(curve)
-          .x((t) => x(xValues[t]))
-          .y0((t) => y(branch.y0[t]))
-          .y1((t) => y(branch.y1[t]))(indices);
+        .attr("data-id", geometry.layerId)
+        .attr("data-owner-layer", geometry.layerId);
+      const tint = lighterFamilyColor(colorOf(i));
+      for (const [spaceIndex, space] of geometry.spaces.entries()) {
+        const visualSpace = visual.spaces[spaceIndex];
         layers
           .append("path")
-          .attr("d", outline ?? "")
-          .attr("class", `layer branch${dim}`)
-          .attr("fill", "none")
-          .attr("stroke", colorOf(i))
-          .attr("stroke-width", 0.8)
-          .attr("data-id", geometry.layerId)
-          .attr("data-branch-index", branch.branchIndex);
-      }
-      for (const space of geometry.spaces) {
+          .attr("d", makeBraidedArea(visualSpace, visual.defined))
+          .attr("class", `allocated-space${dim}`)
+          .attr("fill", tint)
+          .attr("fill-opacity", 0.68)
+          .attr("stroke", "none")
+          .attr("pointer-events", "none");
         layers
           .append("path")
-          .attr("d", makeArea(space.y0, space.y1))
-          .attr("class", "internal-space");
-        layers
-          .append("path")
-          .attr("d", makeArea(space.y0, space.y1))
+          .attr("d", makeBraidedArea(visualSpace, visual.defined))
           .attr("class", "space-hit")
           .attr("fill", "transparent")
           .attr("stroke", "none")
@@ -238,18 +277,6 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
           .attr("data-space-kind", space.kind)
           .attr("data-gap-index", space.gapIndex);
       }
-      // Draw last so the fixed Q^eta boundary remains visible above branches.
-      layers
-        .append("path")
-        .attr(
-          "d",
-          line<number>()
-            .curve(curve)
-            .x((t) => x(xValues[t]))
-            .y((t) => y(geometry.slotY1[t]))(indices) ?? "",
-        )
-        .attr("class", `q-envelope${dim}`)
-        .attr("stroke", colorOf(i));
     }
   } else {
     root
@@ -266,8 +293,8 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
       )
       .attr("fill", (_, i) => colorOf(i))
       .attr("fill-opacity", 0.82)
-      .attr("stroke", (_, i) => (input.showOutlines ? colorOf(i) : "none"))
-      .attr("stroke-width", input.showOutlines ? 0.8 : 0)
+      .attr("stroke", "none")
+      .attr("stroke-width", 0)
       .attr("data-idx", (_, i) => i)
       .attr("data-id", (id) => id);
     const exposure = layerIds.map(
@@ -365,7 +392,98 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): vo
 
 export function diseaseDay(label: string): number {
   const match = /^day (\d+)$/.exec(label);
-  return match ? Number(match[1]) : Number.NaN;
+  if (match) return Number(match[1]);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(label) ? Date.parse(`${label}T00:00:00Z`) : Number.NaN;
+  return Number.isFinite(date) ? date / 86_400_000 : Number.NaN;
+}
+
+type RenderBand = { y0: number[]; y1: number[] };
+export type InterpolatedBraidedGeometry = {
+  x: number[];
+  layers: Array<{
+    defined: boolean[];
+    envelope: RenderBand;
+    branches: RenderBand[];
+    spaces: RenderBand[];
+  }>;
+};
+
+/**
+ * Smooth non-negative branch/gap thicknesses, then rebuild cumulative bounds.
+ * This preserves all allocation invariants between observations as well as at them.
+ */
+export function interpolateBraidedGeometry(
+  layout: PipelineResult["braided"],
+  xValues: number[],
+  start: number,
+  end: number,
+  subdivisions = 8,
+  smooth = true,
+): InterpolatedBraidedGeometry {
+  const steps = Math.max(1, Math.floor(subdivisions));
+  const samples: Array<{ x: number; left: number; right: number; fraction: number }> = [];
+  for (let time = start; time < end; time += 1) {
+    for (let step = 0; step < steps; step += 1) {
+      const fraction = step / steps;
+      samples.push({
+        x: xValues[time] + fraction * (xValues[time + 1] - xValues[time]),
+        left: time,
+        right: time + 1,
+        fraction,
+      });
+    }
+  }
+  samples.push({ x: xValues[end], left: end, right: end, fraction: 0 });
+
+  const baseline = seriesInterpolator(xValues, layout.layers[0].slotY0, smooth);
+  const branchHeight = layout.layers.map((layer) => layer.branches.map((branch) =>
+    seriesInterpolator(xValues, branch.y1.map((high, time) => high - branch.y0[time]), smooth)
+  ));
+  const gapHeight = layout.layers.map((layer) => layer.spaces.map((space) =>
+    seriesInterpolator(xValues, space.y1.map((high, time) => high - space.y0[time]), smooth)
+  ));
+  const layers = layout.layers.map((layer) => ({
+    defined: new Array<boolean>(samples.length),
+    envelope: { y0: new Array<number>(samples.length), y1: new Array<number>(samples.length) },
+    branches: layer.branches.map(() => ({ y0: new Array<number>(samples.length), y1: new Array<number>(samples.length) })),
+    spaces: layer.spaces.map(() => ({ y0: new Array<number>(samples.length), y1: new Array<number>(samples.length) })),
+  }));
+
+  samples.forEach((sample, sampleIndex) => {
+    let slotBottom = baseline(sample.x);
+    layout.layers.forEach((layer, layerIndex) => {
+      const output = layers[layerIndex];
+      output.defined[sampleIndex] = sample.left === sample.right || sample.fraction === 0
+        ? !layer.missing[sample.left]
+        : !layer.missing[sample.left] && !layer.missing[sample.right];
+      output.envelope.y0[sampleIndex] = slotBottom;
+      let cursor = slotBottom;
+      const lower = Math.max(0, gapHeight[layerIndex][0](sample.x));
+      output.spaces[0].y0[sampleIndex] = cursor;
+      output.spaces[0].y1[sampleIndex] = cursor + lower;
+      cursor += lower;
+      for (let branch = 0; branch < output.branches.length; branch += 1) {
+        const height = Math.max(0, branchHeight[layerIndex][branch](sample.x));
+        output.branches[branch].y0[sampleIndex] = cursor;
+        output.branches[branch].y1[sampleIndex] = cursor + height;
+        cursor += height;
+        if (branch + 1 < output.branches.length) {
+          const gap = Math.max(0, gapHeight[layerIndex][branch + 1](sample.x));
+          output.spaces[branch + 1].y0[sampleIndex] = cursor;
+          output.spaces[branch + 1].y1[sampleIndex] = cursor + gap;
+          cursor += gap;
+        }
+      }
+      const upperIndex = output.spaces.length - 1;
+      const upper = Math.max(0, gapHeight[layerIndex][upperIndex](sample.x));
+      output.spaces[upperIndex].y0[sampleIndex] = cursor;
+      output.spaces[upperIndex].y1[sampleIndex] = cursor + upper;
+      cursor += upper;
+      output.envelope.y1[sampleIndex] = cursor;
+      slotBottom = cursor;
+    });
+  });
+  return { x: samples.map((sample) => sample.x), layers };
 }
 
 function drawStars(
@@ -487,6 +605,54 @@ function fmtNum(value: number): string {
   if (Math.abs(value) >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
   if (Math.abs(value) >= 1e3) return `${(value / 1e3).toFixed(0)}k`;
   return value.toFixed(Math.abs(value) < 10 ? 1 : 0);
+}
+
+function niceRuler(maximum: number): number {
+  if (!(maximum > 0)) return 1;
+  const target = maximum / 3;
+  const power = 10 ** Math.floor(Math.log10(target));
+  const scaled = target / power;
+  return (scaled >= 5 ? 5 : scaled >= 2 ? 2 : 1) * power;
+}
+
+export function lighterFamilyColor(input: string): string {
+  const tint = hsl(input);
+  tint.s *= 0.72;
+  tint.l = Math.min(0.94, tint.l + (1 - tint.l) * 0.58);
+  return tint.formatHex();
+}
+
+function seriesInterpolator(x: number[], y: number[], smooth: boolean): (value: number) => number {
+  if (x.length !== y.length || !x.length) throw new Error("invalid interpolation series");
+  if (x.length === 1) return () => y[0];
+  const widths = x.slice(0, -1).map((value, index) => x[index + 1] - value);
+  if (widths.some((width) => !(width > 0))) throw new Error("time coordinates must be strictly increasing");
+  const slopes = widths.map((width, index) => (y[index + 1] - y[index]) / width);
+  const tangents = new Array<number>(x.length);
+  tangents[0] = slopes[0];
+  tangents[tangents.length - 1] = slopes[slopes.length - 1];
+  for (let index = 1; index + 1 < x.length; index += 1) {
+    if (slopes[index - 1] * slopes[index] <= 0) tangents[index] = 0;
+    else {
+      const leftWeight = 2 * widths[index] + widths[index - 1];
+      const rightWeight = widths[index] + 2 * widths[index - 1];
+      tangents[index] = (leftWeight + rightWeight) /
+        (leftWeight / slopes[index - 1] + rightWeight / slopes[index]);
+    }
+  }
+  return (value) => {
+    let left = Math.max(0, Math.min(x.length - 2, x.findIndex((next) => next > value) - 1));
+    if (value >= x.at(-1)!) left = x.length - 2;
+    const fraction = (value - x[left]) / widths[left];
+    if (!smooth) return y[left] + fraction * (y[left + 1] - y[left]);
+    const f2 = fraction * fraction;
+    const f3 = f2 * fraction;
+    const valueAt = (2 * f3 - 3 * f2 + 1) * y[left] +
+      (f3 - 2 * f2 + fraction) * widths[left] * tangents[left] +
+      (-2 * f3 + 3 * f2) * y[left + 1] +
+      (f3 - f2) * widths[left] * tangents[left + 1];
+    return Math.max(Math.min(y[left], y[left + 1]), Math.min(Math.max(y[left], y[left + 1]), valueAt));
+  };
 }
 function el(tag: string, attrs: Record<string, string | number>): SVGElement {
   const node = document.createElementNS(NS, tag);

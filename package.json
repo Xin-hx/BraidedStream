@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Budgeted braided streamgraphs for uncertain temporal compositions — framework-free demo",
+  "description": "Distribution-aware braided streamgraphs for temporal categorical distributions",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

@@ -10,6 +10,7 @@ import {
   diseaseDay,
   exportPng,
   exportSvg,
+  lighterFamilyColor,
   renderChart,
   renderTimeFilter,
   M,
@@ -46,9 +47,8 @@ type DatasetId = keyof typeof DATASETS;
 
 /** Code-owned parameters; future controls can update this object before run(). */
 export const BRAIDED_PARAMETERS: Partial<BraidedStreamOptions> = {
-  representativeQuantile: 0.5,
-  envelopeQuantile: 0.9,
-  uncertaintyFocusPercent: 10,
+  bandwidthRatio: 0.3,
+  debug: true,
 };
 
 interface State {
@@ -56,7 +56,7 @@ interface State {
   visMethod: VisMethod;
   baseline: "wiggle" | "sine";
   smoothContours: boolean;
-  showOutlines: boolean;
+  showSlotBoundary: boolean;
   collapseBranches: boolean;
   hover: number | null;
   highlight: string | null;
@@ -69,7 +69,7 @@ const state: State = {
   visMethod: "braided",
   baseline: "wiggle",
   smoothContours: true,
-  showOutlines: false,
+  showSlotBoundary: true,
   collapseBranches: false,
   hover: null,
   highlight: null,
@@ -133,7 +133,7 @@ function render(): void {
     end: state.timeEnd,
     visMethod: state.visMethod,
     smoothContours: state.smoothContours,
-    showOutlines: state.showOutlines,
+    showSlotBoundary: state.showSlotBoundary,
     collapseBranches: state.collapseBranches,
     hover: state.hover,
     highlightLayer: state.highlight,
@@ -157,13 +157,7 @@ function renderCosts(): void {
     `curvature  braided ${fmt(c.curvatureBraided)} vs base ${fmt(c.curvatureBase)}`,
     `slope      braided ${fmt(c.slopeBraided)} vs base ${fmt(c.slopeBase)}`,
     `nonlocal displacement ${fmt(c.displacement)}`,
-    `extra-space alloc/req ${(c.allocRatio * 100).toFixed(1)}%  (req ${fmt(c.requestedTotal)} → alloc ${fmt(c.allocatedTotal)})`,
-    ...(result.options.debug
-      ? [
-          `relax collisions ${result.braided.collisionRelaxation.beforeCount} → ${result.braided.collisionRelaxation.afterCount}`,
-          `relax max overlap ${fmt(result.braided.collisionRelaxation.maxOverlapBefore)} → ${fmt(result.braided.collisionRelaxation.maxOverlapAfter)}`,
-        ]
-      : []),
+    `deformation total  ΣD=ΣU ${fmt(c.dispersionTotal)}`,
   ];
   costsEl.innerHTML = lines.join("\n");
 }
@@ -177,11 +171,15 @@ function renderLegend(): void {
       return `<span class="sw" style="background:${color}"></span>#${idx + 1} ${id} <span style="opacity:.6">TPID=${d.toFixed(6)}</span>`;
     })
     .join("&nbsp;&nbsp;");
-  const meaning =
-    state.dataset === "tcm"
-      ? `thickness = ${quantileName(result!.options.representativeQuantile)} dose among patients observed at each visit number`
-      : `thickness = stacked ${quantileName(result!.options.representativeQuantile)} forecasts (state marginals; not an aggregate predictive distribution)`;
-  legendEl.innerHTML = `<div>${meaning}</div>${html}`;
+  const meaning = state.dataset === "tcm"
+    ? "each layer-time cell = patient-dose distribution; thickness = smoothed median"
+    : "each layer-time cell = weighted reconstructed predictive mixture; thickness = smoothed median";
+  const sampleColor = colorForLayer(dataCache!.layers, result.pid.ranking[0]);
+  const geometryKey = state.visMethod === "braided"
+    ? `<div><span class="sw" style="background:${sampleColor}"></span>solid = representative thickness H&nbsp;&nbsp;` +
+      `<span class="sw" style="background:${lighterFamilyColor(sampleColor)}"></span>light = allocated deformation space (not probability mass or a confidence interval)</div>`
+    : "";
+  legendEl.innerHTML = `<div>${meaning}</div>${geometryKey}${html}`;
 }
 
 function fmt(v: number): string {
@@ -236,15 +234,15 @@ function onHoverMove(evt: MouseEvent): void {
     ? result.braided.layers.map((layer) => layer.slotY1)
     : result.base.yTop;
   const ids = result.pid.order;
-  const space = (evt.target as Element).closest?.(
-    ".space-hit",
+  const target = (evt.target as Element).closest?.(
+    "[data-owner-layer]",
   ) as SVGElement | null;
-  const owner = space?.dataset.ownerLayer;
+  const owner = target?.dataset.ownerLayer;
   const hit = owner
     ? ids.indexOf(owner)
     : ids.findIndex((_, i) => dataY(py, bottom[i][t], top[i][t]) !== null);
   state.highlight = hit >= 0 ? ids[hit] : null;
-  showTooltip(t, hit >= 0 ? ids[hit] : null, space?.dataset.spaceKind);
+  showTooltip(t, hit >= 0 ? ids[hit] : null, target?.dataset.spaceKind);
   render();
 }
 
@@ -289,54 +287,39 @@ function showTooltip(
     return;
   }
   const i = result.pid.order.indexOf(layer.id);
-  const sourceIndex = layers.indexOf(layer);
-  const u = result.uncertainty.value[sourceIndex][t];
-  const uncertaintyRank = result.uncertainty.rank[sourceIndex][t];
-  const exposure = result.uncertainty.exposure[sourceIndex][t];
   const geometry = result.braided.layers[i];
+  const point = geometry.debug?.[t];
   const d = result.pid.depth[layer.id];
   const magnitude = result.base.yTop[i][t] - result.base.yBottom[i][t];
-  const quantiles = resolveLayerQuantiles(
-    layer,
-    t,
-    result.options.envelopeQuantile,
-    result.options.representativeQuantile,
-  );
-  const representativeLabel = `representative (${quantileName(result.options.representativeQuantile)})`;
-  const envelopeLabel = `external envelope (${quantileName(result.options.envelopeQuantile)})`;
+  const quantiles = resolveLayerQuantiles(layer, t);
   const sampleSize = layer.sampleSize?.[t];
   const perCapita = layer.perCapita ? ` · ${fmt(layer.perCapita[t])}/cap` : "";
 
   const rows = [
-    [
-      representativeLabel,
-      fmt(magnitude),
-    ],
-    [envelopeLabel, fmt(quantiles.qEnvelope)],
-    ...(layer.sourceKind === "hybrid"
-      ? [["trained Q2.5-Q97.5 (diagnostic)", `[${fmt(quantiles.qLow)}, ${fmt(quantiles.qHigh)}]`]]
+    ["representative thickness H = median", fmt(magnitude)],
+    ["dispersion U", fmt(geometry.actualSpace[t])],
+    ["directional deviation A- / A+", point ? `${fmt(point.deviationLow)} / ${fmt(point.deviationHigh)}` : "n/a"],
+    ["asymmetry b", geometry.balance[t].toFixed(3)],
+    ["KDE beta / bandwidth h", point ? `${point.bandwidthRatio.toFixed(2)} / ${fmt(point.bandwidth)}` : "n/a"],
+    ["modes K", String(geometry.branchCount[t])],
+    ["basin masses pi", point ? point.branchMasses.map((mass) => mass.toFixed(3)).join(", ") : "n/a"],
+    ["mode separations d", point ? point.separations.map(fmt).join(", ") || "none" : "n/a"],
+    ["allocated gaps g", point ? point.gaps.map(fmt).join(", ") : "n/a"],
+    ...(layer.sourceKind === "quantile-mixture"
+      ? [["official submitted Q2.5-Q97.5 (reference only)", `[${fmt(quantiles.qLow)}, ${fmt(quantiles.qHigh)}]`]]
       : []),
-    ["Qη envelope boundary", "always shown"],
-    ["deformation", geometry.active[t] ? "yes" : "no"],
-    ["uncertainty value", u.toFixed(3)],
-    ["global percentile rank", uncertaintyRank.toFixed(3)],
-    ["visual exposure", exposure.toFixed(3)],
-    ["envelope budget", fmt(quantiles.qEnvelope - quantiles.qRepresentative)],
-    ["allocated deformation space", fmt(geometry.allocatedSpace[t])],
+    ["dynamic-slot boundary", state.showSlotBoundary ? "shown" : "hidden"],
     ["TPID score", d.toFixed(6)],
-    ["visible branches", String(!state.collapseBranches && geometry.active[t] ? geometry.branchCount[t] : 1)],
+    ["visible branches", String(!state.collapseBranches ? geometry.branchCount[t] : 1)],
     ...(spaceKind ? [["space owner", `${spaceKind} · ${layer.id}`]] : []),
     ...(sampleSize === null || sampleSize === undefined
       ? []
-      : [["patient sample", String(sampleSize)]]),
+      : [[layer.sourceKind === "quantile-mixture" ? "model members" : "patient sample", String(sampleSize)]]),
   ];
   tt.innerHTML =
     `<div class="tt-title">${times[t]} · ${layer.id}${perCapita}</div>` +
     rows
-      .map(
-        ([k, v]) =>
-          `<div class="tt-row"><span class="k">${k}</span><span class="v">${v}</span></div>`,
-      )
+      .map(([k, v]) => `<div class="tt-row"><span class="k">${k}</span><span class="v">${v}</span></div>`)
       .join("");
   tt.classList.remove("hidden");
 }
@@ -375,17 +358,9 @@ function bindControls(): void {
     state.baseline = v as State["baseline"];
     run();
   });
-  bind("ctl-representative", (v) => {
-    BRAIDED_PARAMETERS.representativeQuantile = Number(v);
-    run();
-  });
-  bind("ctl-envelope", (v) => {
-    BRAIDED_PARAMETERS.envelopeQuantile = Number(v);
-    run();
-  });
-  bind("ctl-uncertainty-focus", (v) => {
-    BRAIDED_PARAMETERS.uncertaintyFocusPercent = Number(v);
-    $("ctl-uncertainty-focus-value").textContent = `${v}%`;
+  bind("ctl-bandwidth-ratio", (v) => {
+    BRAIDED_PARAMETERS.bandwidthRatio = Number(v);
+    $("ctl-bandwidth-ratio-value").textContent = Number(v).toFixed(2);
     run();
   });
   const smooth = $<HTMLInputElement>("ctl-smooth");
@@ -393,9 +368,9 @@ function bindControls(): void {
     state.smoothContours = smooth.checked;
     render();
   });
-  const outlines = $<HTMLInputElement>("ctl-outlines");
-  outlines.addEventListener("change", () => {
-    state.showOutlines = outlines.checked;
+  const slotBoundary = $<HTMLInputElement>("ctl-slot-boundary");
+  slotBoundary.addEventListener("change", () => {
+    state.showSlotBoundary = slotBoundary.checked;
     render();
   });
   $("btn-collapse").addEventListener("click", () => {
@@ -424,10 +399,6 @@ function bindControls(): void {
     tooltip.classList.add("hidden");
     render();
   });
-}
-
-function quantileName(probability: number): string {
-  return `Q${(probability * 100).toFixed(Number.isInteger(probability * 100) ? 0 : 1)}`;
 }
 
 async function main(): Promise<void> {

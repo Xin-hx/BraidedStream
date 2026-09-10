@@ -104,6 +104,7 @@ export function parseTcmCsv(text: string) {
       const categories: Record<string, number> = {};
       for (const [id, value] of Object.entries(visit.categories ?? {})) {
         const dose = Number(value);
+        if (Number.isFinite(dose) && dose < 0) throw new Error(`negative dose for ${id}`);
         if (Number.isFinite(dose)) categories[id] = dose;
       }
       return { categories };
@@ -114,14 +115,11 @@ export function parseTcmCsv(text: string) {
   const categories = [...new Set(records.flatMap((record) => record.visits.flatMap((visit) => Object.keys(visit.categories))))].sort();
   const data = inputDataset({
     times: Array.from({ length: visitCount }, (_, index) => `visit ${index + 1}`),
-    magnitudePolicy: "empirical-mean",
+    magnitudePolicy: "median",
     layers: categories.map((id) => ({
       id,
       cells: Array.from({ length: visitCount }, (_, visitIndex) => ({
         kind: "empirical" as const,
-        // No patient observed at this visit index: retain sampleSize=0,
-        // but its representative stream thickness is the requested zero.
-        emptyValue: 0,
         observations: records.map((record) => {
           const visit = record.visits[visitIndex];
           return { memberId: record.id, value: visit ? Number(visit.categories[id]) || 0 : Number.NaN };

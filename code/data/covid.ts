@@ -1,4 +1,4 @@
-/** COVID Forecast Hub trained-ensemble case-study adapter. */
+/** COVID adapter: full member quantile functions form one weighted predictive mixture. */
 import type { CanonicalLayer } from "../types";
 
 type CovidCase = {
@@ -38,7 +38,7 @@ export const DEFAULT_COVID_STATES = [
 ] as const;
 export type CovidStateSelection = "all" | readonly string[];
 
-/** Official trained quantiles define extent; performance-weighted member Q50s define topology. */
+/** Official ensemble quantiles are retained only as a reference; geometry uses the member mixture. */
 export function parseCovidCaseJson(
   text: string,
   stateSelection: CovidStateSelection = DEFAULT_COVID_STATES,
@@ -68,14 +68,22 @@ export function parseCovidCaseJson(
       }
       qKeys.forEach((key, i) => q[key].push(submitted[i]));
       const weightSum = cell.members.reduce((sum, member) => sum + member.weight, 0);
-      if (cell.members.some((member) => !Number.isFinite(member.q50) || !Number.isFinite(member.weight) || member.weight <= 0)
+      if (cell.members.some((member) => {
+        const values = keys.map((key) => member[key]);
+        return !Number.isFinite(member.weight) || member.weight <= 0 ||
+          values.some((value, index) => !Number.isFinite(value) || value < 0 ||
+            (index > 0 && value < values[index - 1]));
+      })
           || Math.abs(weightSum - 1) > 1e-6) {
         throw new Error(`${source.state} ${time}: invalid active trained weights`);
       }
       return {
-        kind: "samples" as const,
-        values: cell.members.map((member) => member.q50),
-        weights: cell.members.map((member) => member.weight),
+        kind: "quantile-mixture" as const,
+        members: cell.members.map((member) => ({
+          probabilities: [0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.975],
+          values: [member.q025, member.q10, member.q25, member.q50, member.q75, member.q90, member.q975],
+          weight: member.weight,
+        })),
       };
     });
     return {
@@ -84,7 +92,7 @@ export function parseCovidCaseJson(
       magnitude: q.p50.slice(),
       distribution,
       sampleSize: source.series.map((cell) => cell.members.length),
-      sourceKind: "hybrid",
+      sourceKind: "quantile-mixture",
     };
   });
   return { times, layers };

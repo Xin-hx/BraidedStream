@@ -27,10 +27,18 @@ function slopeEnergy(y: number[][]): number {
   return e;
 }
 
+/** The two colored outer boundaries that the renderer exposes to the viewer. */
+function renderedBoundaryEnergy(
+  metric: (boundaries: number[][]) => number,
+  lower: number[][],
+  upper: number[][],
+): number {
+  return metric(lower) + metric(upper);
+}
+
 export function computeGeometryCosts(
   base: BaseLayout,
   braided: BraidedLayout,
-  aReq: number[][],
   h0: number[]
 ): CostReport {
   const tLen = h0.length;
@@ -39,9 +47,7 @@ export function computeGeometryCosts(
   let collisionCount = 0;
   let minGap = Infinity;
   let displacement = 0;
-  let requestedTotal = 0;
-  let allocatedTotal = 0;
-  let phaseContinuityMax = 0;
+  let dispersionTotal = 0;
 
   for (let t = 0; t < tLen; t += 1) {
     const ratio = h0[t] > 0 ? braided.totalHeight[t] / h0[t] : 1;
@@ -60,9 +66,9 @@ export function computeGeometryCosts(
 
   for (let i = 0; i < n; i += 1) {
     for (let t = 0; t < tLen; t += 1) {
-      displacement += Math.abs(braided.s[i][t]);
-      requestedTotal += aReq[i][t];
-      allocatedTotal += braided.aAlloc[i][t];
+      displacement += Math.abs(braided.yBottomStar[i][t] - base.yBottom[i][t]);
+      displacement += Math.abs(braided.yTopStar[i][t] - base.yTop[i][t]);
+      dispersionTotal += braided.actualSpace[i][t];
     }
   }
 
@@ -71,14 +77,19 @@ export function computeGeometryCosts(
     meanHeightRatio: sumRatio / Math.max(1, tLen),
     collisionCount,
     minGap,
-    curvatureBraided: curvatureEnergy(braided.yTopStar),
-    curvatureBase: curvatureEnergy(base.yTop),
-    slopeBraided: slopeEnergy(braided.yTopStar),
-    slopeBase: slopeEnergy(base.yTop),
+    curvatureBraided: renderedBoundaryEnergy(
+      curvatureEnergy,
+      braided.yBottomStar,
+      braided.yTopStar,
+    ),
+    curvatureBase: renderedBoundaryEnergy(curvatureEnergy, base.yBottom, base.yTop),
+    slopeBraided: renderedBoundaryEnergy(
+      slopeEnergy,
+      braided.yBottomStar,
+      braided.yTopStar,
+    ),
+    slopeBase: renderedBoundaryEnergy(slopeEnergy, base.yBottom, base.yTop),
     displacement,
-    allocRatio: requestedTotal > 0 ? allocatedTotal / requestedTotal : 1,
-    phaseContinuityMax,
-    requestedTotal,
-    allocatedTotal,
+    dispersionTotal,
   };
 }

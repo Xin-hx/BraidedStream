@@ -1,10 +1,10 @@
-/** Resolve a normalized uncertainty input for continuous deformation. */
+/** Resolve normalized values used only by non-braided comparison encodings. */
 import type { Layer, UncertaintyResult } from "../types";
 
 export function computeUncertainty(
   layers: Layer[],
   epsilon = 1e-9,
-  focusPercent = 10,
+  threshold = 0.9,
 ): UncertaintyResult {
   const tLen = layers[0].q.p50.length;
   const value = layers.map((layer) => {
@@ -28,22 +28,21 @@ export function computeUncertainty(
   });
 
   const rank = percentileRanks(value);
-  return { value, rank, exposure: exposureFromRanks(value, rank, focusPercent) };
+  return { value, rank, exposure: exposureFromRanks(value, rank, threshold) };
 }
 
-/** Top-p percentile ramp. Zero uncertainty remains unexposed even when all values tie. */
+/** Midrank ramp for comparison encodings; it is not used by braided geometry. */
 export function exposureFromRanks(
   value: number[][],
   rank: number[][],
-  focusPercent: number,
+  threshold: number,
 ): number[][] {
-  if (!Number.isFinite(focusPercent) || focusPercent < 0 || focusPercent > 100) {
-    throw new Error("uncertaintyFocusPercent must be in [0, 100]");
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    throw new Error("uncertaintyThreshold must be in [0, 1]");
   }
-  if (focusPercent === 0) return value.map((row) => row.map(() => 0));
-  const threshold = 1 - focusPercent / 100;
+  if (threshold === 1) return value.map((row) => row.map(() => 0));
   return rank.map((row, i) => row.map((r, t) =>
-    value[i][t] <= 0 || r < threshold
+    value[i][t] <= 0 || r <= threshold
       ? 0
       : (r - threshold) / (1 - threshold)
   ));
@@ -52,6 +51,11 @@ export function exposureFromRanks(
 function percentileRanks(values: number[][]): number[][] {
   const sorted = values.flat().sort((a, b) => a - b);
   const rank = new Map<number, number>();
-  sorted.forEach((value, i) => rank.set(value, (i + 1) / sorted.length));
+  for (let start = 0; start < sorted.length;) {
+    let end = start + 1;
+    while (end < sorted.length && sorted[end] === sorted[start]) end += 1;
+    rank.set(sorted[start], ((start + 1) + end) / (2 * sorted.length));
+    start = end;
+  }
   return values.map((row) => row.map((value) => rank.get(value)!));
 }

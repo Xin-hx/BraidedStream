@@ -10,53 +10,53 @@
   <body>
     <div class="layout">
       <aside id="panel" class="panel">
-        <button id="btn-panel" class="panel-toggle" title="toggle panel">«</button>
+        <button id="btn-panel" class="panel-toggle" title="toggle panel">
+          «
+        </button>
         <div class="panel-body">
           <div class="p-title">Controls</div>
 
-          <label>Dataset
+          <label
+            >Dataset
             <select id="ctl-dataset">
-              <option value="editable">Editable CSV</option>
+              <!-- <option value="editable">Editable CSV</option> -->
               <option value="tcm">TCM prescriptions</option>
               <option value="covid-inc" selected>COVID-inc</option>
             </select>
           </label>
-          <label>Vis method
+          <label
+            >Vis method
             <select id="ctl-vis-method">
               <option value="braided" selected>Braided stream</option>
               <option value="star">markers</option>
               <option value="color-blur">Color + blur</option>
             </select>
           </label>
-          <label>Baseline
+          <label
+            >Baseline
             <select id="ctl-baseline">
               <option value="wiggle" selected>L2 wiggle</option>
               <option value="sine">Sine (Gaussian L2)</option>
             </select>
           </label>
-          <label>Representative statistic
-            <select id="ctl-representative">
-              <option value="0.25">Q25</option>
-              <option value="0.5" selected>Q50</option>
-              <option value="0.75">Q75</option>
-            </select>
+          <label
+            >KDE resolution β
+            <span id="ctl-bandwidth-ratio-value">0.30</span>
+            <input
+              id="ctl-bandwidth-ratio"
+              type="range"
+              min="0.1"
+              max="1.5"
+              step="0.05"
+              value="0.3"
+            />
           </label>
-          <label>Envelope statistic
-            <select id="ctl-envelope">
-              <option value="0.9" selected>Q90</option>
-              <option value="0.975">Q97.5</option>
-            </select>
-          </label>
-          <label>Expose top <span id="ctl-uncertainty-focus-value">10%</span> uncertainty
-            <input id="ctl-uncertainty-focus" type="range" min="0" max="100" step="1" value="10" />
-          </label>
-          <div id="ctl-parameters" hidden></div>
-
           <label class="chk">
             <input id="ctl-smooth" type="checkbox" checked /> Smooth contours
           </label>
           <label class="chk">
-            <input id="ctl-outlines" type="checkbox" /> Layer outlines
+            <input id="ctl-slot-boundary" type="checkbox" checked /> Show
+            envelope boundary
           </label>
           <div class="actions">
             <button id="btn-collapse" title="toggle braid">Collapse</button>
@@ -68,7 +68,11 @@
 
       <main class="content">
         <svg id="chart" role="img" aria-label="braided streamgraph"></svg>
-        <svg id="time-filter" role="slider" aria-label="Time range filter"></svg>
+        <svg
+          id="time-filter"
+          role="slider"
+          aria-label="Time range filter"
+        ></svg>
         <div id="tooltip" class="tooltip hidden"></div>
         <div id="costs" class="costs"></div>
         <div id="legend" class="legend"></div>

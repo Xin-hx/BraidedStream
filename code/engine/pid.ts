@@ -20,7 +20,8 @@ export interface TpidOptions {
 
 type MaskSource =
   | { kind: "members"; values: number[]; weights?: number[] }
-  | { kind: "quantiles"; probabilities: number[]; values: number[] };
+  | { kind: "quantiles"; probabilities: number[]; values: number[] }
+  | { kind: "quantile-mixture"; members: Array<{ probabilities: number[]; values: number[]; weight: number }> };
 
 /** Empirical P(X >= v) at each value-grid point. */
 export function memberSurvival(values: number[], grid: number[], weights?: number[]): number[] {
@@ -115,9 +116,14 @@ function layerSources(layer: Layer): Array<MaskSource | undefined> {
   if (layer.distribution !== undefined) {
     return layer.distribution.map((cell) => {
       if (!cell) return undefined;
-      return cell.kind === "samples"
-        ? memberSource(cell.values, cell.weights)
-        : quantileSource(cell.probabilities, cell.values);
+      if (cell.kind === "samples") return memberSource(cell.values, cell.weights);
+      if (cell.kind === "quantiles") return quantileSource(cell.probabilities, cell.values);
+      const members = cell.members.filter((member) => Number.isFinite(member.weight) && member.weight > 0);
+      const total = members.reduce((sum, member) => sum + member.weight, 0);
+      return total ? {
+        kind: "quantile-mixture" as const,
+        members: members.map((member) => ({ ...member, weight: member.weight / total })),
+      } : undefined;
     });
   }
   const timeLength = Math.max(...QUANTILE_KEYS.map((key) => layer.q[key].length));
@@ -149,9 +155,21 @@ function quantileSource(probabilities: readonly number[], values: readonly numbe
 }
 
 function survival(source: MaskSource, grid: number[]): number[] {
-  return source.kind === "members"
-    ? memberSurvival(source.values, grid, source.weights)
-    : survivalFromQuantiles(source.probabilities.map((probability, i) => ({ probability, value: source.values[i] })), grid);
+  if (source.kind === "members") return memberSurvival(source.values, grid, source.weights);
+  if (source.kind === "quantiles") {
+    return survivalFromQuantiles(source.probabilities.map((probability, i) => ({ probability, value: source.values[i] })), grid);
+  }
+  const memberCurves = source.members.map((member) => ({
+    weight: member.weight,
+    survival: survivalFromQuantiles(
+      member.probabilities.map((probability, i) => ({ probability, value: member.values[i] })),
+      grid,
+    ),
+  }));
+  return grid.map((_, index) => memberCurves.reduce(
+    (sum, member) => sum + member.weight * member.survival[index],
+    0,
+  ));
 }
 
 function normalizedMembers(values: number[], weights?: number[]): Array<{ value: number; weight: number }> {
@@ -190,8 +208,14 @@ function survivalFromQuantiles(
 }
 
 function valueGrid(a: MaskSource, b: MaskSource): number[] {
-  return [...new Set([0, ...a.values, ...b.values].filter((value) => Number.isFinite(value) && value >= 0))]
+  return [...new Set([0, ...sourceValues(a), ...sourceValues(b)].filter((value) => Number.isFinite(value) && value >= 0))]
     .sort((x, y) => x - y);
+}
+
+function sourceValues(source: MaskSource): number[] {
+  return source.kind === "quantile-mixture"
+    ? source.members.flatMap((member) => member.values)
+    : source.values;
 }
 
 function timeMajor(values: TpidLayerInput["values"]): number[][] {

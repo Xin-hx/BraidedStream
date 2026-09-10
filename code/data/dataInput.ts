@@ -26,13 +26,17 @@ export function inputDataset(dataset: DistributionalTemporalDataset): {
         }
         sourceKind = cell.kind;
         const noObservedMembers = cell.kind === "empirical" && !cell.observations.some((observation) => Number.isFinite(observation.value));
-        const values = noObservedMembers && cell.emptyValue !== undefined
-          ? PROBABILITIES.map(() => cell.emptyValue!)
+        const values = noObservedMembers
+          ? PROBABILITIES.map(() => Number.NaN)
           : PROBABILITIES.map((p) => quantileAt(cell, p));
         KEYS.forEach((key, index) => q[key].push(values[index]));
         if (cell.kind === "empirical") {
-          magnitude.push(noObservedMembers && cell.emptyValue !== undefined ? cell.emptyValue : weightedMean(cell));
-          distribution.push({
+          magnitude.push(noObservedMembers
+            ? Number.NaN
+            : dataset.magnitudePolicy === "empirical-mean"
+              ? weightedMean(cell)
+              : weightedQuantile(cell.observations, 0.5));
+          distribution.push(noObservedMembers ? null : {
             kind: "samples",
             values: cell.observations.map((observation) => observation.value),
             weights: cell.observations.map((observation) => observation.weight ?? 1),
@@ -76,7 +80,7 @@ function sortedQuantiles(cell: Extract<DistributionCell, { kind: "quantile" }>) 
   const pairs = cell.probabilities.map((probability, i) => ({ probability, value: cell.quantiles[i] })).sort((a, b) => a.probability - b.probability);
   for (let i = 0; i < pairs.length; i += 1) {
     const pair = pairs[i];
-    if (!Number.isFinite(pair.probability) || pair.probability < 0 || pair.probability > 1 || !Number.isFinite(pair.value)) throw new Error("invalid quantile cell");
+    if (!Number.isFinite(pair.probability) || pair.probability <= 0 || pair.probability >= 1 || !Number.isFinite(pair.value) || pair.value < 0) throw new Error("invalid quantile cell");
     if (i > 0 && (pair.probability <= pairs[i - 1].probability || pair.value < pairs[i - 1].value)) throw new Error("non-monotone quantile cell");
   }
   return pairs;
