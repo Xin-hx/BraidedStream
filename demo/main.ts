@@ -167,8 +167,10 @@ function renderLegend(): void {
   const html = result.pid.ranking
     .map((id, idx) => {
       const color = colorForLayer(dataCache!.layers, id);
-      const d = result!.pid.depth[id];
-      return `<span class="sw" style="background:${color}"></span>#${idx + 1} ${id} <span style="opacity:.6">TPID=${d.toFixed(6)}</span>`;
+      const depthLabel = result!.pid.defined
+        ? `TPID=${result!.pid.depth[id].toFixed(6)}`
+        : "TPID undefined";
+      return `<span class="sw" style="background:${color}"></span>#${idx + 1} ${id} <span style="opacity:.6">${depthLabel}</span>`;
     })
     .join("&nbsp;&nbsp;");
   const meaning = state.dataset === "tcm"
@@ -179,7 +181,10 @@ function renderLegend(): void {
     ? `<div><span class="sw" style="background:${sampleColor}"></span>solid = representative thickness H&nbsp;&nbsp;` +
       `<span class="sw" style="background:${lighterFamilyColor(sampleColor)}"></span>light = allocated deformation space (not probability mass or a confidence interval)</div>`
     : "";
-  legendEl.innerHTML = `<div>${meaning}</div>${geometryKey}${html}`;
+  const orderKey = result.pid.defined
+    ? `<div>center-out order = decreasing TPID over ${result.pid.referenceTimeIndices.length} common time points</div>`
+    : "<div>TPID undefined for this reference set; stable ID fallback order</div>";
+  legendEl.innerHTML = `<div>${meaning}</div>${orderKey}${geometryKey}${html}`;
 }
 
 function fmt(v: number): string {
@@ -309,7 +314,10 @@ function showTooltip(
       ? [["official submitted Q2.5-Q97.5 (reference only)", `[${fmt(quantiles.qLow)}, ${fmt(quantiles.qHigh)}]`]]
       : []),
     ["dynamic-slot boundary", state.showSlotBoundary ? "shown" : "hidden"],
-    ["TPID score", d.toFixed(6)],
+    ["TPID = min(IN-in, IN-out)", result.pid.defined ? d.toFixed(6) : "undefined"],
+    ["directional IN-in / IN-out", result.pid.defined
+      ? `${result.pid.inclusionIn[layer.id].toFixed(6)} / ${result.pid.inclusionOut[layer.id].toFixed(6)}`
+      : "undefined"],
     ["visible branches", String(!state.collapseBranches ? geometry.branchCount[t] : 1)],
     ...(spaceKind ? [["space owner", `${spaceKind} · ${layer.id}`]] : []),
     ...(sampleSize === null || sampleSize === undefined

@@ -130,12 +130,12 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
     : null;
   const renderIndices = interpolated?.x.map((_, index) => index) ?? [];
   const makeBraidedArea = (band: RenderBand, defined: boolean[]) =>
-    area<number>()
+    interpolated!.segments.map(([start, end]) => area<number>()
       .defined((index) => defined[index])
       .curve(curveLinear)
       .x((index) => x(interpolated!.x[index]))
       .y0((index) => y(band.y0[index]))
-      .y1((index) => y(band.y1[index]))(renderIndices) ?? "";
+      .y1((index) => y(band.y1[index]))(renderIndices.slice(start, end)) ?? "").join("");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("width", "100%");
   const root = select(svg);
@@ -400,6 +400,8 @@ export function diseaseDay(label: string): number {
 type RenderBand = { y0: number[]; y1: number[] };
 export type InterpolatedBraidedGeometry = {
   x: number[];
+  /** Separate interval paths permit invisible endpoint subdivisions to change. */
+  segments: Array<[number, number]>;
   layers: Array<{
     defined: boolean[];
     envelope: RenderBand;
@@ -408,9 +410,61 @@ export type InterpolatedBraidedGeometry = {
   }>;
 };
 
+export type GapEndpoint = { branches: number[]; gaps: number[] };
+
+/** Center the shorter internal-gap sequence; relative position resolves the two-way tie. */
+export function alignGapEndpoints(a: GapEndpoint, b: GapEndpoint): [GapEndpoint, GapEndpoint] {
+  if (a.branches.length === b.branches.length) return [a, b];
+  const aIsLarger = a.branches.length > b.branches.length;
+  const large = aIsLarger ? a : b;
+  const small = aIsLarger ? b : a;
+  const difference = large.branches.length - small.branches.length;
+  const positions = (endpoint: GapEndpoint) => {
+    const total = [...endpoint.branches, ...endpoint.gaps].reduce((s, v) => s + v, 0);
+    let cursor = endpoint.gaps[0];
+    return endpoint.branches.slice(0, -1).map((height, index) => {
+      cursor += height;
+      const center = cursor + endpoint.gaps[index + 1] / 2;
+      cursor += endpoint.gaps[index + 1];
+      return total > 0 ? center / total : 0;
+    });
+  };
+  const largePositions = positions(large);
+  const smallPositions = positions(small);
+  const cost = (offset: number) => smallPositions.reduce(
+    (sum, value, index) => sum + (value - largePositions[offset + index]) ** 2, 0,
+  );
+  const low = Math.floor(difference / 2);
+  const high = Math.ceil(difference / 2);
+  const lowCost = cost(low);
+  const highCost = cost(high);
+  // Numerical equality only: no user-facing matching tolerance.
+  const offset = highCost < lowCost - Number.EPSILON * Math.max(1, lowCost, highCost) ? high : low;
+  const refined: GapEndpoint = {
+    branches: new Array(large.branches.length).fill(0),
+    gaps: new Array(large.gaps.length).fill(0),
+  };
+  refined.gaps[0] = small.gaps[0];
+  refined.gaps[refined.gaps.length - 1] = small.gaps.at(-1)!;
+  let first = 0;
+  small.branches.forEach((height, index) => {
+    const last = index + 1 === small.branches.length
+      ? large.branches.length - 1 : offset + index;
+    const total = large.branches.slice(first, last + 1).reduce((s, v) => s + v, 0);
+    for (let k = first; k <= last; k += 1) {
+      refined.branches[k] = height * (total > 0 ? large.branches[k] / total : 1 / (last - first + 1));
+    }
+    if (index + 1 < small.branches.length) refined.gaps[last + 1] = small.gaps[index + 1];
+    first = last + 1;
+  });
+  return aIsLarger ? [large, refined] : [refined, large];
+}
+
 /**
  * Smooth non-negative branch/gap thicknesses, then rebuild cumulative bounds.
- * This preserves all allocation invariants between observations as well as at them.
+ * This preserves non-negativity and packed envelopes between observations.
+ * Distribution-derived ratios are guaranteed at observations only; interpolated
+ * primitives do not define an inferred intermediate probability distribution.
  */
 export function interpolateBraidedGeometry(
   layout: PipelineResult["braided"],
@@ -422,8 +476,10 @@ export function interpolateBraidedGeometry(
 ): InterpolatedBraidedGeometry {
   const steps = Math.max(1, Math.floor(subdivisions));
   const samples: Array<{ x: number; left: number; right: number; fraction: number }> = [];
+  const segments: Array<[number, number]> = [];
   for (let time = start; time < end; time += 1) {
-    for (let step = 0; step < steps; step += 1) {
+    const segmentStart = samples.length;
+    for (let step = 0; step <= steps; step += 1) {
       const fraction = step / steps;
       samples.push({
         x: xValues[time] + fraction * (xValues[time + 1] - xValues[time]),
@@ -432,16 +488,27 @@ export function interpolateBraidedGeometry(
         fraction,
       });
     }
+    segments.push([segmentStart, samples.length]);
   }
-  samples.push({ x: xValues[end], left: end, right: end, fraction: 0 });
+  if (start === end) {
+    samples.push({ x: xValues[end], left: end, right: end, fraction: 0 });
+    segments.push([0, 1]);
+  }
 
   const baseline = seriesInterpolator(xValues, layout.layers[0].slotY0, smooth);
-  const branchHeight = layout.layers.map((layer) => layer.branches.map((branch) =>
-    seriesInterpolator(xValues, branch.y1.map((high, time) => high - branch.y0[time]), smooth)
-  ));
-  const gapHeight = layout.layers.map((layer) => layer.spaces.map((space) =>
-    seriesInterpolator(xValues, space.y1.map((high, time) => high - space.y0[time]), smooth)
-  ));
+  const aligned = layout.layers.map((layer) => {
+    const endpoint = (time: number): GapEndpoint => {
+      const count = Math.max(1, layer.branchCount[time]);
+      return {
+        branches: layer.branches.slice(0, count).map((band) => Math.max(0, band.y1[time] - band.y0[time])),
+        gaps: [...layer.spaces.slice(0, count), layer.spaces.at(-1)!]
+          .map((band) => Math.max(0, band.y1[time] - band.y0[time])),
+      };
+    };
+    return Array.from({ length: Math.max(1, end - start) }, (_, index) =>
+      alignGapEndpoints(endpoint(start + index), endpoint(Math.min(end, start + index + 1)))
+    );
+  });
   const layers = layout.layers.map((layer) => ({
     defined: new Array<boolean>(samples.length),
     envelope: { y0: new Array<number>(samples.length), y1: new Array<number>(samples.length) },
@@ -453,29 +520,35 @@ export function interpolateBraidedGeometry(
     let slotBottom = baseline(sample.x);
     layout.layers.forEach((layer, layerIndex) => {
       const output = layers[layerIndex];
+      const [left, right] = aligned[layerIndex][sample.left - start];
+      const s = sample.fraction;
+      const weight = smooth ? s * s * (3 - 2 * s) : s;
+      const blend = (a: number, b: number) => (1 - weight) * a + weight * b;
       output.defined[sampleIndex] = sample.left === sample.right || sample.fraction === 0
         ? !layer.missing[sample.left]
+        : sample.fraction === 1 ? !layer.missing[sample.right]
         : !layer.missing[sample.left] && !layer.missing[sample.right];
       output.envelope.y0[sampleIndex] = slotBottom;
       let cursor = slotBottom;
-      const lower = Math.max(0, gapHeight[layerIndex][0](sample.x));
+      const lower = blend(left.gaps[0], right.gaps[0]);
       output.spaces[0].y0[sampleIndex] = cursor;
       output.spaces[0].y1[sampleIndex] = cursor + lower;
       cursor += lower;
       for (let branch = 0; branch < output.branches.length; branch += 1) {
-        const height = Math.max(0, branchHeight[layerIndex][branch](sample.x));
+        const height = blend(left.branches[branch] ?? 0, right.branches[branch] ?? 0);
         output.branches[branch].y0[sampleIndex] = cursor;
         output.branches[branch].y1[sampleIndex] = cursor + height;
         cursor += height;
         if (branch + 1 < output.branches.length) {
-          const gap = Math.max(0, gapHeight[layerIndex][branch + 1](sample.x));
+          const gap = branch + 1 < left.branches.length
+            ? blend(left.gaps[branch + 1], right.gaps[branch + 1]) : 0;
           output.spaces[branch + 1].y0[sampleIndex] = cursor;
           output.spaces[branch + 1].y1[sampleIndex] = cursor + gap;
           cursor += gap;
         }
       }
       const upperIndex = output.spaces.length - 1;
-      const upper = Math.max(0, gapHeight[layerIndex][upperIndex](sample.x));
+      const upper = blend(left.gaps.at(-1)!, right.gaps.at(-1)!);
       output.spaces[upperIndex].y0[sampleIndex] = cursor;
       output.spaces[upperIndex].y1[sampleIndex] = cursor + upper;
       cursor += upper;
@@ -483,7 +556,7 @@ export function interpolateBraidedGeometry(
       slotBottom = cursor;
     });
   });
-  return { x: samples.map((sample) => sample.x), layers };
+  return { x: samples.map((sample) => sample.x), segments, layers };
 }
 
 function drawStars(

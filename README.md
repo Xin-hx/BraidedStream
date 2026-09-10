@@ -9,6 +9,9 @@ thickness into branches; a neutral outline marks the complete envelope.
 TCM weighted scalar sets and COVID weighted member-quantile mixtures use the
 same analysis and geometry pipeline. The only statistical resolution control is
 the shared KDE ratio `beta` in `h = beta * standardDeviation(P)`.
+The same analysis distributions also define directional temporal probability
+masks for PID. Decreasing TPID rank is mapped from the center toward the outer
+ordinal layer positions.
 
 ```bash
 npm install

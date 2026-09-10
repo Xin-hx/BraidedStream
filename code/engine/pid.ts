@@ -1,7 +1,17 @@
-/** Layer-level probabilistic inclusion depth (PID) ordering. */
-import { QUANTILE_KEYS, type Layer, type PidResult, type QuantileMatrix } from "../types";
-
-const QUANTILE_PROBABILITIES = [0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.975] as const;
+/** Temporal PID ordering over the analysis distributions shared with braiding. */
+import {
+  DEFAULT_BRAIDED_STREAM_OPTIONS,
+  analysisOverlap,
+  buildAnalysisDistribution,
+  computeAnalysisTopology,
+  type AnalysisDistribution,
+  type AnalysisTopology,
+} from "./braided";
+import {
+  type DistributionAtTime,
+  type Layer,
+  type PidResult,
+} from "../types";
 
 export interface TpidLayerInput {
   layer_id: string;
@@ -15,207 +25,132 @@ export interface TpidOrderingEntry {
 }
 
 export interface TpidOptions {
-  epsilon?: number;
+  /** Shared KDE ratio beta; the pipeline supplies its braided value. */
+  bandwidthRatio?: number;
 }
 
-type MaskSource =
-  | { kind: "members"; values: number[]; weights?: number[] }
-  | { kind: "quantiles"; probabilities: number[]; values: number[] }
-  | { kind: "quantile-mixture"; members: Array<{ probabilities: number[]; values: number[]; weight: number }> };
-
-/** Empirical P(X >= v) at each value-grid point. */
-export function memberSurvival(values: number[], grid: number[], weights?: number[]): number[] {
-  const members = normalizedMembers(values, weights);
-  if (!members.length) return [];
-  return grid.map((v) => v < 0 ? 0 : members.reduce(
-    (survival, member) => survival + (member.value >= v ? member.weight : 0),
-    0,
-  ));
+/** PID inclusion on the joint time-value domain for two declared layers. */
+export function temporalInclusion(
+  layerA: Layer,
+  layerB: Layer,
+  bandwidthRatio = DEFAULT_BRAIDED_STREAM_OPTIONS.bandwidthRatio,
+): number {
+  const analysis = computeAnalysisTopology([layerA, layerB], bandwidthRatio);
+  return directionalInclusion(analysis[0], analysis[1], commonReferenceTimes(analysis));
 }
 
-/** Approximate P(X >= v) from the fixed quantiles available at one time point. */
-export function quantileSurvival(q: QuantileMatrix, t: number, grid: number[]): number[] {
-  return survivalFromQuantiles(
-    QUANTILE_KEYS.map((key, i) => ({ probability: QUANTILE_PROBABILITIES[i], value: q[key][t] })),
-    grid
-  );
-}
-
-/** Probabilistic inclusion integral(a*b) / integral(a). */
-export function inclusion(a: number[], b: number[], grid: number[], epsilon = 1e-12): number {
-  let denominator = 0;
-  let numerator = 0;
-  for (let i = 1; i < grid.length; i += 1) {
-    const width = grid[i] - grid[i - 1];
-    denominator += width * (a[i - 1] + a[i]) / 2;
-    numerator += width * (a[i - 1] * b[i - 1] + a[i] * b[i]) / 2;
-  }
-  return denominator <= epsilon ? 0 : numerator / denominator;
-}
-
-/** Equal-time average of pairwise inclusion over shared, observed time points. */
-export function temporalInclusion(layerA: Layer, layerB: Layer, epsilon = 1e-12): number {
-  return temporalInclusionSources(layerSources(layerA), layerSources(layerB), epsilon);
-}
-
-/** Member-sample adapter retained for the standalone TPID ordering API. */
+/** Member-sample adapter using the same empirical-measure to KDE path as the main pipeline. */
 export function compute_tpid_layer_ordering(
   layers: TpidLayerInput[],
-  options: TpidOptions = {}
+  options: TpidOptions = {},
 ): TpidOrderingEntry[] {
-  return rankLayers(layers.map((layer) => ({
-    id: layer.layer_id,
-    sources: timeMajor(layer.values).map((values) => memberSource(values)),
-  })), epsilonFrom(options));
+  const bandwidthRatio = betaFrom(options);
+  const analysis = layers.map((layer) => timeMajor(layer.values).map((values) =>
+    buildAnalysisDistribution(sampleDistribution(values), bandwidthRatio)
+  ));
+  const result = computePidFromAnalysis(layers.map((layer) => layer.layer_id), analysis);
+  return result.ranking.map((layer_id) => ({ layer_id, tpid_score: result.depth[layer_id] }));
 }
 
 export function computePid(layers: Layer[], options: TpidOptions = {}): PidResult {
-  const ranked = rankLayers(layers.map((layer) => ({ id: layer.id, sources: layerSources(layer) })), epsilonFrom(options));
-  const depth = Object.fromEntries(ranked.map(({ layer_id, tpid_score }) => [layer_id, tpid_score]));
-  const ranking = ranked.map((entry) => entry.layer_id);
-  return { depth, ranking, order: centerOutOrder(ranking) };
+  return computePidFromAnalysis(
+    layers.map((layer) => layer.id),
+    computeAnalysisTopology(layers, betaFrom(options)),
+  );
 }
 
-function rankLayers(
-  layers: Array<{ id: string; sources: Array<MaskSource | undefined> }>,
-  epsilon: number
-): TpidOrderingEntry[] {
-  return layers.map((layer, i) => {
-    if (layers.length === 1) return { layer_id: layer.id, tpid_score: 0 };
-    let inclusionIn = 0;
-    let inclusionOut = 0;
-    for (let j = 0; j < layers.length; j += 1) {
-      if (j === i) continue;
-      inclusionIn += temporalInclusionSources(layer.sources, layers[j].sources, epsilon);
-      inclusionOut += temporalInclusionSources(layers[j].sources, layer.sources, epsilon);
-    }
-    const peers = layers.length - 1;
-    return { layer_id: layer.id, tpid_score: Math.min(inclusionIn / peers, inclusionOut / peers) };
-  }).sort((a, b) => b.tpid_score - a.tpid_score || a.layer_id.localeCompare(b.layer_id));
-}
-
-function temporalInclusionSources(
-  a: Array<MaskSource | undefined>,
-  b: Array<MaskSource | undefined>,
-  epsilon: number
-): number {
-  let total = 0;
-  let sharedTimes = 0;
-  for (let t = 0; t < Math.max(a.length, b.length); t += 1) {
-    const sourceA = a[t];
-    const sourceB = b[t];
-    if (!sourceA || !sourceB) continue;
-    const grid = valueGrid(sourceA, sourceB);
-    total += inclusion(survival(sourceA, grid), survival(sourceB, grid), grid, epsilon);
-    sharedTimes += 1;
+/** Official PID applied to temporal survival masks u_i(t,x)=P_hat_it(X>x). */
+export function computePidFromAnalysis(
+  layerIds: string[],
+  analysis: AnalysisTopology,
+): PidResult {
+  if (layerIds.length !== analysis.length || new Set(layerIds).size !== layerIds.length) {
+    throw new Error("TPID layer IDs and analysis rows must match uniquely");
   }
-  return sharedTimes ? total / sharedTimes : 0;
-}
-
-function layerSources(layer: Layer): Array<MaskSource | undefined> {
-  if (layer.distribution !== undefined) {
-    return layer.distribution.map((cell) => {
-      if (!cell) return undefined;
-      if (cell.kind === "samples") return memberSource(cell.values, cell.weights);
-      if (cell.kind === "quantiles") return quantileSource(cell.probabilities, cell.values);
-      const members = cell.members.filter((member) => Number.isFinite(member.weight) && member.weight > 0);
-      const total = members.reduce((sum, member) => sum + member.weight, 0);
-      return total ? {
-        kind: "quantile-mixture" as const,
-        members: members.map((member) => ({ ...member, weight: member.weight / total })),
-      } : undefined;
-    });
+  const referenceTimeIndices = commonReferenceTimes(analysis);
+  if (layerIds.length < 2 || !referenceTimeIndices.length) {
+    const ranking = layerIds.slice().sort((a, b) => a.localeCompare(b));
+    const zero = Object.fromEntries(layerIds.map((id) => [id, 0]));
+    return {
+      depth: zero,
+      inclusionIn: { ...zero },
+      inclusionOut: { ...zero },
+      ranking,
+      order: centerOutOrder(ranking),
+      referenceTimeIndices,
+      defined: false,
+    };
   }
-  const timeLength = Math.max(...QUANTILE_KEYS.map((key) => layer.q[key].length));
-  return Array.from({ length: timeLength }, (_, t) => quantileSource(
-    QUANTILE_PROBABILITIES,
-    QUANTILE_KEYS.map((key) => layer.q[key][t])
+
+  const count = layerIds.length;
+  const masses = analysis.map((layer) => referenceTimeIndices.reduce(
+    (sum, time) => sum + layer[time]!.summary.mean,
+    0,
   ));
-}
-
-function memberSource(values: number[], weights?: number[]): MaskSource | undefined {
-  const members = normalizedMembers(values, weights);
-  if (!members.length) return undefined;
+  const inwardOverlap = new Array<number>(count).fill(0);
+  const outwardInclusion = new Array<number>(count).fill(0);
+  for (const time of referenceTimeIndices) {
+    const cells = analysis.map((layer) => layer[time]!);
+    for (let source = 0; source < count; source += 1) {
+      for (let target = source; target < count; target += 1) {
+        const overlap = analysisOverlap(cells[source], cells[target]);
+        inwardOverlap[source] += overlap;
+        if (masses[source] > 0) outwardInclusion[target] += overlap / masses[source];
+        if (target !== source) {
+          inwardOverlap[target] += overlap;
+          if (masses[target] > 0) outwardInclusion[source] += overlap / masses[target];
+        }
+      }
+    }
+  }
+  const entries = layerIds.map((id, index) => ({
+    id,
+    inclusionIn: masses[index] > 0
+      ? clamp01(inwardOverlap[index] / (count * masses[index]))
+      : 0,
+    inclusionOut: clamp01(outwardInclusion[index] / count),
+    depth: 0,
+  })).map((entry) => ({
+    ...entry,
+    depth: Math.min(entry.inclusionIn, entry.inclusionOut),
+  })).sort((a, b) => b.depth - a.depth || a.id.localeCompare(b.id));
+  const ranking = entries.map((entry) => entry.id);
   return {
-    kind: "members",
-    values: members.map((member) => member.value),
-    ...(weights ? { weights: members.map((member) => member.weight) } : {}),
+    depth: Object.fromEntries(entries.map((entry) => [entry.id, entry.depth])),
+    inclusionIn: Object.fromEntries(entries.map((entry) => [entry.id, entry.inclusionIn])),
+    inclusionOut: Object.fromEntries(entries.map((entry) => [entry.id, entry.inclusionOut])),
+    ranking,
+    order: centerOutOrder(ranking),
+    referenceTimeIndices,
+    defined: true,
   };
 }
 
-function quantileSource(probabilities: readonly number[], values: readonly number[]): MaskSource | undefined {
-  const pairs = probabilities.map((probability, i) => ({ probability, value: values[i] }))
-    .filter(({ probability, value }) => Number.isFinite(probability) && probability >= 0 && probability <= 1 && Number.isFinite(value))
-    .sort((a, b) => a.value - b.value || a.probability - b.probability);
-  return pairs.length ? {
-    kind: "quantiles",
-    probabilities: pairs.map((pair) => pair.probability),
-    values: pairs.map((pair) => pair.value),
-  } : undefined;
-}
-
-function survival(source: MaskSource, grid: number[]): number[] {
-  if (source.kind === "members") return memberSurvival(source.values, grid, source.weights);
-  if (source.kind === "quantiles") {
-    return survivalFromQuantiles(source.probabilities.map((probability, i) => ({ probability, value: source.values[i] })), grid);
+function directionalInclusion(
+  source: Array<AnalysisDistribution | null>,
+  target: Array<AnalysisDistribution | null>,
+  referenceTimes: number[],
+): number {
+  let numerator = 0;
+  let denominator = 0;
+  for (const time of referenceTimes) {
+    const sourceCell = source[time];
+    const targetCell = target[time];
+    if (!sourceCell || !targetCell) throw new Error("TPID reference time must be observed");
+    numerator += analysisOverlap(sourceCell, targetCell);
+    denominator += sourceCell.summary.mean;
   }
-  const memberCurves = source.members.map((member) => ({
-    weight: member.weight,
-    survival: survivalFromQuantiles(
-      member.probabilities.map((probability, i) => ({ probability, value: member.values[i] })),
-      grid,
-    ),
-  }));
-  return grid.map((_, index) => memberCurves.reduce(
-    (sum, member) => sum + member.weight * member.survival[index],
-    0,
-  ));
+  return denominator > 0 ? clamp01(numerator / denominator) : 0;
 }
 
-function normalizedMembers(values: number[], weights?: number[]): Array<{ value: number; weight: number }> {
-  if (weights && weights.length !== values.length) throw new Error("member weights length mismatch");
-  const members = values.flatMap((value, i) => {
-    const weight = weights?.[i] ?? 1;
-    return Number.isFinite(value) && Number.isFinite(weight) && weight > 0 ? [{ value, weight }] : [];
-  });
-  const totalWeight = members.reduce((sum, member) => sum + member.weight, 0);
-  return totalWeight ? members.map((member) => ({ ...member, weight: member.weight / totalWeight })) : [];
+function commonReferenceTimes(analysis: AnalysisTopology): number[] {
+  const length = Math.max(0, ...analysis.map((layer) => layer.length));
+  return Array.from({ length }, (_, time) => time)
+    .filter((time) => analysis.every((layer) => layer[time] !== null && layer[time] !== undefined));
 }
 
-function survivalFromQuantiles(
-  pairs: Array<{ probability: number; value: number }>,
-  grid: number[]
-): number[] {
-  const knots: Array<{ probability: number; value: number }> = [];
-  for (const pair of pairs.filter((pair) => Number.isFinite(pair.value) && Number.isFinite(pair.probability))
-    .sort((a, b) => a.value - b.value || a.probability - b.probability)) {
-    if (knots.at(-1)?.value === pair.value) knots[knots.length - 1] = pair;
-    else knots.push(pair);
-  }
-  if (!knots.length) return [];
-  if (knots.length === 1) return grid.map((v) => v >= 0 && v <= knots[0].value ? 1 : 0);
-  return grid.map((v) => {
-    if (v < 0) return 0;
-    if (v < knots[0].value) return 1;
-    if (v > knots.at(-1)!.value) return 0;
-    const right = knots.findIndex((knot) => v <= knot.value);
-    if (right <= 0) return 1 - knots[0].probability;
-    const left = knots[right - 1];
-    const ratio = (v - left.value) / (knots[right].value - left.value);
-    const cdf = left.probability + ratio * (knots[right].probability - left.probability);
-    return Math.max(0, Math.min(1, 1 - cdf));
-  });
-}
-
-function valueGrid(a: MaskSource, b: MaskSource): number[] {
-  return [...new Set([0, ...sourceValues(a), ...sourceValues(b)].filter((value) => Number.isFinite(value) && value >= 0))]
-    .sort((x, y) => x - y);
-}
-
-function sourceValues(source: MaskSource): number[] {
-  return source.kind === "quantile-mixture"
-    ? source.members.flatMap((member) => member.values)
-    : source.values;
+function sampleDistribution(values: number[]): DistributionAtTime | null {
+  return values.some(Number.isFinite) ? { kind: "samples", values } : null;
 }
 
 function timeMajor(values: TpidLayerInput["values"]): number[][] {
@@ -224,8 +159,10 @@ function timeMajor(values: TpidLayerInput["values"]): number[][] {
     : values as number[][];
 }
 
-function epsilonFrom(options: TpidOptions): number {
-  return Number.isFinite(options.epsilon) && options.epsilon! > 0 ? options.epsilon! : 1e-12;
+function betaFrom(options: TpidOptions): number {
+  const value = options.bandwidthRatio ?? DEFAULT_BRAIDED_STREAM_OPTIONS.bandwidthRatio;
+  if (!Number.isFinite(value) || value <= 0) throw new Error("TPID bandwidth ratio beta must be positive");
+  return value;
 }
 
 function centerOutOrder(rankedIds: string[]): string[] {
@@ -236,4 +173,8 @@ function centerOutOrder(rankedIds: string[]): string[] {
     order[position] = rankedIds[rank];
   }
   return order;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }

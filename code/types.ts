@@ -212,10 +212,18 @@ export type BraidedStreamOptions = {
 export interface PidResult {
   /** TPID score per layer id. */
   depth: Record<string, number>;
+  /** Mean directional inclusion u_i subset_p u_j, including the official self term. */
+  inclusionIn: Record<string, number>;
+  /** Mean directional inclusion u_j subset_p u_i, including the official self term. */
+  inclusionOut: Record<string, number>;
   /** Layer ids sorted by descending TPID score. */
   ranking: string[];
-  /** Stack order with the highest TPID layers nearest the center. */
+  /** Bottom-to-top stack order with higher TPID assigned to more interior ordinal shells. */
   order: string[];
+  /** Common observed time indices used by every pairwise comparison. */
+  referenceTimeIndices: number[];
+  /** False when fewer than two layers or no common observed time exists. */
+  defined: boolean;
 }
 
 export interface BaseLayout {

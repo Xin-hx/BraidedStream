@@ -46,6 +46,30 @@ Colored thickness is `H=m` and the deformation budget is `D=U`; the demo uses
 one layout unit per data unit. There is no Q90 capacity, uncertainty rank,
 activation threshold, or channel-specific gain.
 
+## Probability inclusion order
+
+TPID consumes the same analysis objects as braiding. For the common observed
+reference times, each layer defines the temporal probability mask
+
+```text
+u_i(t,x) = P_hat_it(X > x),  x >= 0
+```
+
+on the joint time-value domain. The implementation follows the official PID
+definition: `u_i subset_p u_j` is directional because it is normalized by the
+mass of `u_i`; `IN-in` and `IN-out` are averaged separately over all `N`
+layers, including the official self term; `TPID=min(IN-in,IN-out)`. There is no
+pairwise symmetrization. A stable center-out mapping assigns higher TPID ranks
+to more interior ordinal slots. This does not guarantee smaller pixel distance
+to the chart midline or better geometric smoothness.
+
+The time-value numerator is the weighted sum of `E[min(X_it,X_jt)]`, while the
+source denominator is the weighted sum of `E[X_it]`. Equal observation-time
+weights are used. Missing cells restrict the common reference set; a real
+point mass at zero remains observed and follows PID's zero-mask convention.
+The input representation, KDE ratio `beta`, reflected boundary treatment, and
+degenerate-distribution rules are therefore identical in TPID and braiding.
+
 ## Modes, branches, and gaps
 
 All KDE maxima at the declared `beta` are retained, including a one-sided
@@ -69,12 +93,16 @@ lower gap, branch 1, internal gap 1, ..., branch K, upper gap
 
 This construction fills a slot of height `H+D` directly and therefore needs no
 collision or repacking pass. Across time, branch and internal-gap arrays are
-aligned by low-to-high rank and zero-padded at the high end; the upper exterior
-gap remains a separate path. For smooth rendering, the implementation applies a
-shape-preserving cubic interpolation to non-negative branch and gap thicknesses,
+aligned by centered contiguous internal-gap matching. If two centered offsets
+are possible, squared envelope-relative gap-center distance chooses one;
+numerical ties choose the lower offset. Exterior gaps retain their side.
+Unmatched gaps close inside a band, whose invisible subdivisions inherit the
+other endpoint's relative branch thicknesses (equal shares for a zero total).
+Statistical branch counts remain unchanged. Each interval has its own path.
+Smooth rendering uses the monotone weight `3s²-2s³` on the aligned thicknesses,
 then reconstructs every cumulative boundary. Turning smoothing off uses linear
 interpolation of the same primitives. Both modes pass through observed values,
-preserve the branch/gap budgets between observations, and break paths at missing
+preserve non-negativity and envelope packing, and break paths at missing
 cells.
 
 ## Rendering semantics
@@ -89,5 +117,6 @@ ordinal visit positions; ISO COVID target dates use their actual temporal
 spacing. The complete envelope is an interaction target, while internal-gap
 targets retain their lower, internal, or upper semantic label.
 
-Run `npm test` to check mass conservation, budget conservation, asymmetry shift,
-mixture reconstruction, degenerate cells, and positive unit scaling.
+Run `npm test` to check PID directionality and analytic point-mass values as
+well as mass conservation, budget conservation, asymmetry shift, mixture
+reconstruction, degenerate cells, and positive unit scaling.

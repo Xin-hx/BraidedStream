@@ -4,12 +4,13 @@
  */
 import { validateData } from "./engine/quantiles";
 import { computeUncertainty } from "./engine/uncertainty";
-import { computePid, type TpidOptions } from "./engine/pid";
+import { computePidFromAnalysis } from "./engine/pid";
 import { computeSineBaseline, computeWiggleBaseline } from "./engine/baseline";
 import {
   DEFAULT_BRAIDED_STREAM_OPTIONS,
+  branchTopologyFromAnalysis,
   buildLayerSlotGeometry,
-  computeBranchTopology,
+  computeAnalysisTopology,
   resolveLayerQuantiles,
   requestDynamicSpaces,
 } from "./engine/braided";
@@ -35,7 +36,6 @@ export function h0FromLayers(layers: Layer[]): number[] {
 export interface PipelineOptions {
   /** New uncertainty-aware layer-slot configuration. */
   braided?: Partial<BraidedStreamOptions>;
-  tpid?: TpidOptions;
   /** baseline layout algorithm: "wiggle" (Byron-Wattenberg L2) or "sine"
    *  (SineStream Gaussian-weighted L2). Default "wiggle". */
   baselineMode?: "wiggle" | "sine";
@@ -60,15 +60,17 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
   // Retained for the two non-braided comparison views; it never affects braided geometry.
   const uncertainty = computeUncertainty(valid, braidOptions.epsilon, 0);
 
-  const pid = computePid(layers, options.tpid);
+  const analysis = computeAnalysisTopology(valid, braidOptions.bandwidthRatio);
+  const pid = computePidFromAnalysis(valid.map((layer) => layer.id), analysis);
 
-  // Stack order: highest TPID at the center, then lower scores toward the outside.
+  // Higher TPID ranks occupy progressively more interior ordinal shells.
   const order = pid.order;
   const sourceLayers = order.map((id) => valid.find((l) => l.id === id)!);
+  const orderedAnalysis = order.map((id) => analysis[valid.findIndex((layer) => layer.id === id)]);
   const quantiles = sourceLayers.map((layer) => layer.q.p50.map((_, t) =>
     resolveLayerQuantiles(layer, t)
   ));
-  const topology = computeBranchTopology(sourceLayers, braidOptions.bandwidthRatio);
+  const topology = branchTopologyFromAnalysis(orderedAnalysis);
   const ordered = sourceLayers.map((layer, i) => ({
     ...layer,
     magnitude: topology[i].map((point) => point?.median ?? 0),

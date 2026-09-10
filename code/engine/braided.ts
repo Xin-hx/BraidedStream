@@ -20,7 +20,7 @@ export const DEFAULT_BRAIDED_STREAM_OPTIONS: BraidedStreamOptions = {
 
 const QUANTILE_PROBABILITIES = [0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.975];
 const KDE_GRID_SIZE = 257;
-const INTEGRATION_STEPS = 128;
+export const ANALYSIS_INTEGRATION_STEPS = 128;
 
 type Atom = { kind: "atom"; value: number; mass: number };
 type UniformSegment = { kind: "uniform"; low: number; high: number; mass: number };
@@ -40,6 +40,16 @@ export type DistributionAnalysis = {
   modes: BranchMode[];
   separations: number[];
 };
+export type AnalysisDistribution = {
+  summary: DistributionAnalysis;
+  /** Survival mask S(x)=P_hat(X>x) on the shared non-negative value domain. */
+  survival: (value: number) => number;
+  /** Numerical upper bound used for integrals over the smoothed tail. */
+  upper: number;
+  /** Exact location for the zero-bandwidth case; null for a smoothed density. */
+  pointMass: number | null;
+};
+export type AnalysisTopology = Array<Array<AnalysisDistribution | null>>;
 export type BranchTopology = Array<Array<DistributionAnalysis | null>>;
 
 export type DynamicSpaceRequests = {
@@ -89,6 +99,14 @@ export function analyzeDistribution(
   distribution: DistributionAtTime | null,
   bandwidthRatio: number,
 ): DistributionAnalysis | null {
+  return buildAnalysisDistribution(distribution, bandwidthRatio)?.summary ?? null;
+}
+
+/** Build the one analysis distribution consumed by both TPID and braiding. */
+export function buildAnalysisDistribution(
+  distribution: DistributionAtTime | null,
+  bandwidthRatio: number,
+): AnalysisDistribution | null {
   if (!distribution) return null;
   if (!Number.isFinite(bandwidthRatio) || bandwidthRatio <= 0) {
     throw new Error("bandwidthRatio beta must be finite and positive");
@@ -97,7 +115,7 @@ export function analyzeDistribution(
   if (!parts.length) return null;
   const { mean, variance, maximum } = moments(parts);
   if (variance === 0) {
-    return {
+    const summary = {
       median: mean,
       mean,
       deviationLow: 0,
@@ -108,6 +126,12 @@ export function analyzeDistribution(
       modes: [{ location: mean, mass: 1 }],
       separations: [],
     };
+    return {
+      summary,
+      survival: (value) => value >= 0 && value < mean ? 1 : 0,
+      upper: mean,
+      pointMass: mean,
+    };
   }
 
   const bandwidth = bandwidthRatio * Math.sqrt(variance);
@@ -116,7 +140,7 @@ export function analyzeDistribution(
   let upper = maximum + 8 * bandwidth;
   while (cdf(upper) < 1 - 1e-10) upper *= 2;
   const median = bisectCdf(cdf, upper, 0.5);
-  const deviationLow = simpson(cdf, 0, median, INTEGRATION_STEPS);
+  const deviationLow = simpson(cdf, 0, median, ANALYSIS_INTEGRATION_STEPS);
   const smoothedMean = parts.reduce((sum, part) => sum + part.mass * (
     part.kind === "atom"
       ? foldedNormalMean(part.value, bandwidth)
@@ -124,7 +148,7 @@ export function analyzeDistribution(
           (z) => foldedNormalMean(z, bandwidth),
           part.low,
           part.high,
-          INTEGRATION_STEPS,
+          ANALYSIS_INTEGRATION_STEPS,
         ) / (part.high - part.low)
   ), 0);
   const deviationHigh = Math.max(0, smoothedMean - median + deviationLow);
@@ -147,7 +171,7 @@ export function analyzeDistribution(
   const separations = peakIndices.slice(0, -1).map((left, index) =>
     lowDensitySeparation(grid, left, peakIndices[index + 1])
   );
-  return {
+  const summary = {
     median,
     mean: smoothedMean,
     deviationLow,
@@ -158,15 +182,56 @@ export function analyzeDistribution(
     modes,
     separations,
   };
+  return {
+    summary,
+    survival: (value) => value < 0 ? 0 : clamp(1 - cdf(value), 0, 1),
+    upper,
+    pointMass: null,
+  };
+}
+
+/** Expected overlap E[min(X,Y)] for independent draws from two analysis distributions. */
+export function analysisOverlap(a: AnalysisDistribution, b: AnalysisDistribution): number {
+  if (a.pointMass !== null && b.pointMass !== null) {
+    return Math.min(a.pointMass, b.pointMass);
+  }
+  if (a.pointMass !== null) {
+    return a.pointMass > 0
+      ? simpson(b.survival, 0, Math.min(a.pointMass, b.upper), ANALYSIS_INTEGRATION_STEPS)
+      : 0;
+  }
+  if (b.pointMass !== null) {
+    return b.pointMass > 0
+      ? simpson(a.survival, 0, Math.min(b.pointMass, a.upper), ANALYSIS_INTEGRATION_STEPS)
+      : 0;
+  }
+  // The product vanishes with the shorter tail; a larger peer must not coarsen this grid.
+  const upper = Math.min(a.upper, b.upper);
+  return upper > 0
+    ? simpson((value) => a.survival(value) * b.survival(value), 0, upper, ANALYSIS_INTEGRATION_STEPS)
+    : 0;
+}
+
+export function computeAnalysisTopology(
+  layers: Layer[],
+  bandwidthRatio: number,
+): AnalysisTopology {
+  return layers.map((layer) =>
+    layer.q.p50.map((_, time) =>
+      buildAnalysisDistribution(distributionAt(layer, time), bandwidthRatio)
+    )
+  );
+}
+
+export function branchTopologyFromAnalysis(analysis: AnalysisTopology): BranchTopology {
+  return analysis.map((layer) => layer.map((cell) => cell?.summary ?? null));
 }
 
 export function computeBranchTopology(
   orderedLayers: Layer[],
   bandwidthRatio: number,
 ): BranchTopology {
-  return orderedLayers.map((layer) =>
-    layer.q.p50.map((_, time) => analyzeDistribution(distributionAt(layer, time), bandwidthRatio))
-  );
+  return branchTopologyFromAnalysis(computeAnalysisTopology(orderedLayers, bandwidthRatio));
 }
 
 /** Allocate D=U once across A_-, d_1,...,d_(K-1), A_+. */
@@ -438,18 +503,18 @@ function addAtom(parts: MeasurePart[], value: number, mass: number): void {
 
 function moments(parts: MeasurePart[]): { mean: number; variance: number; maximum: number } {
   let mean = 0;
-  let second = 0;
   let maximum = 0;
   for (const part of parts) {
     const partMean = part.kind === "atom" ? part.value : (part.low + part.high) / 2;
-    const partSecond = part.kind === "atom"
-      ? part.value * part.value
-      : (part.low * part.low + part.low * part.high + part.high * part.high) / 3;
     mean += part.mass * partMean;
-    second += part.mass * partSecond;
     maximum = Math.max(maximum, part.kind === "atom" ? part.value : part.high);
   }
-  return { mean, variance: Math.max(0, second - mean * mean), maximum };
+  const variance = parts.reduce((sum, part) => {
+    const partMean = part.kind === "atom" ? part.value : (part.low + part.high) / 2;
+    const within = part.kind === "atom" ? 0 : (part.high - part.low) ** 2 / 12;
+    return sum + part.mass * ((partMean - mean) ** 2 + within);
+  }, 0);
+  return { mean, variance, maximum };
 }
 
 function reflectedDensity(parts: MeasurePart[], bandwidth: number, x: number): number {
@@ -501,7 +566,7 @@ function kdeGrid(density: (x: number) => number, upper: number): KdeGrid {
 
 function findPeaks(grid: KdeGrid): number[] {
   const peaks: number[] = [];
-  if (grid.density[0] >= grid.density[1]) peaks.push(0);
+  if (grid.density[0] > 0 && grid.density[0] >= grid.density[1]) peaks.push(0);
   for (let index = 1; index + 1 < grid.x.length; index += 1) {
     if (grid.density[index] <= grid.density[index - 1]) continue;
     let end = index;
