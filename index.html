@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Braided Streamgraph — Demo</title>
+    <link rel="stylesheet" href="/demo/style.css" />
+  </head>
+  <body data-presentation="publication">
+    <div class="layout">
+      <aside id="panel" class="panel">
+        <button id="btn-panel" class="panel-toggle" title="toggle panel">«</button>
+        <div class="panel-body">
+          <div class="p-title">Controls</div>
+
+          <label>Dataset
+            <select id="ctl-dataset">
+              <option value="editable" selected>Editable CSV</option>
+              <option value="tcm">TCM prescriptions (33 patients)</option>
+              <option value="covid-inc">COVID new cases (8 states)</option>
+              <option value="flusight">FluSight hosp admissions (8 states)</option>
+            </select>
+          </label>
+          <label>Mode
+            <select id="ctl-mode">
+              <option value="base">Base streamgraph</option>
+              <option value="pid">PID order</option>
+              <option value="braided" selected>PID + Braided</option>
+            </select>
+          </label>
+          <label>Baseline
+            <select id="ctl-baseline">
+              <option value="wiggle" selected>L2 wiggle</option>
+              <option value="sine">Sine (Gaussian L2)</option>
+            </select>
+          </label>
+
+          <div class="sliders">
+            <label>Budget η
+              <input id="ctl-eta" type="range" min="1" max="3" step="0.05" value="1.6" />
+              <span id="val-eta" class="val">1.60</span>
+            </label>
+            <label>Amplitude a<sub>max</sub>
+              <input id="ctl-amax" type="range" min="0" max="10" step="0.5" value="3" />
+              <span id="val-amax" class="val">3.0%</span>
+            </label>
+            <label>Gate close τ
+              <input id="ctl-tau" type="range" min="0" max="1" step="0.05" value="0.3" />
+              <span id="val-tau" class="val">0.30</span>
+            </label>
+            <label>Gate ramp
+              <input id="ctl-window" type="range" min="1" max="40" step="1" value="30" />
+              <span id="val-window" class="val">0.30</span>
+            </label>
+          </div>
+
+          <label class="chk">
+            <input id="ctl-ref" type="checkbox" checked /> Σq50 reference
+          </label>
+          <label class="chk">
+            <input id="ctl-smooth" type="checkbox" checked /> 平滑轮廓
+          </label>
+
+          <div class="actions">
+            <button id="btn-collapse" title="toggle braid">Collapse</button>
+            <button id="btn-svg">SVG</button>
+            <button id="btn-png">PNG</button>
+          </div>
+          <a class="compare-link" href="/compare.html">Route-A encoding pages</a>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="figure-toolbar" aria-label="presentation and export controls">
+          <div class="presentation-switch" role="group" aria-label="Presentation mode">
+            <button id="btn-publication" class="active" aria-pressed="true">Publication</button>
+            <button id="btn-diagnostic" aria-pressed="false">Diagnostic</button>
+          </div>
+          <div class="publication-actions">
+            <button id="btn-pub-svg">SVG</button>
+            <button id="btn-pub-png">PNG 2×</button>
+          </div>
+        </div>
+        <svg id="chart" role="img" aria-label="braided streamgraph"></svg>
+        <div id="tooltip" class="tooltip hidden"></div>
+        <div id="costs" class="costs"></div>
+        <div id="legend" class="legend"></div>
+      </main>
+    </div>
+
+    <script type="module" src="/demo/main.ts"></script>
+  </body>
+</html>

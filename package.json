@@ -1,0 +1,29 @@
+{
+  "name": "pid-braided-streamgraph-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Budgeted braided streamgraphs for uncertain temporal compositions — framework-free demo",
+  "scripts": {
+    "dev": "vite",
+    "prebuild": "node scripts/copy-dataset.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "diagnostics:publication": "vite-node scripts/publication-diagnostics.ts"
+  },
+  "devDependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.62.4",
+    "@types/d3": "^7.4.3",
+    "@types/node": "^26.2.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.5"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  },
+  "dependencies": {
+    "d3": "^7.9.0"
+  }
+}

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Route A — Zhou glare</title>
+    <link rel="stylesheet" href="/demo/route-a.css" />
+  </head>
+  <body data-mode="zhou-glare">
+    <main>
+      <nav><a href="/compare.html">All Route-A pages</a><button id="export-svg">Export standalone SVG</button></nav>
+      <h1>Parameter-adapted visual replication of selected glare-component characteristics from Zhou et al. (2020)</h1>
+      <p class="status"><a href="https://doi.org/10.1109/TVCG.2020.2970522">DOI 10.1109/TVCG.2020.2970522</a> · threshold <i>v</i><sub>t</sub> = 0.40 · glare intensity α = 0.60. Deterministic local sources use fixed 3 px center carriers; the analytic SVG approximation combines a soft central bloom, faint colored lenticular halos, and a radiating ciliary corona with screen-style composition. <i>u</i> is normalized, and tone mapping is intentionally excluded. This is not a replication of the full Photographic HDR method, nor an exact computational replication of its physical glare kernel.</p>
+      <div class="plot-frame"><svg id="route-a-plot" role="img" aria-label="Parameter-adapted Zhou glare uncertainty streamgraph"></svg></div>
+    </main>
+    <script type="module" src="/demo/route-a-page.ts"></script>
+  </body>
+</html>
