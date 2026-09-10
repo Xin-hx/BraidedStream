@@ -3,3 +3,9 @@ dist/
 coverage/
 .vite/
 *.log
+public/*
+outputs/
+.tmp_check/
+dataset/
+scripts/
+tests/
