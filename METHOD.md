@@ -15,8 +15,10 @@
 基础厚度与总量：
 
 ```math
-m_i(t)=Q_i(t,0.50),\qquad H_0(t)=\sum_{i=1}^{n} m_i(t).
+m_i(t)=\operatorname{magnitude}_i(t),\qquad H_0(t)=\sum_{i=1}^{n} m_i(t).
 ```
+
+`m_i(t)` is supplied independently of the quantile signature: empirical TCM cells use the attended-patient mean including zeros; forecast cells use an official point value when available, otherwise `Q_i(t,0.50)`. Thus a sum of layer medians is only a stacked central forecast, never an aggregate predictive quantile.
 
 分位数语义声明（展示文案强制）：Q_p(ΣX)≠ΣQ_p(X)；撑开外轮廓是 display envelope，不是总体预测区间。
 
@@ -192,21 +194,21 @@ mulberry32(seed)。真值类型（每类一个 profile）：
 σ_i(t)=σ0·(1+2·gauss(t;t_p,σ_t))，t_p 为不确定性峰值时段 ⇒ 高不确定区段明确可见。
 T=120, n=8。输出 QuantileBands{P 全部 7 档}。
 
-## M11. COVID 数据（code/dataset/ensemble_covid_inc_case.csv）
+## M11. COVID 数据（public/dataset/ensemble_covid_inc_case.csv）
 
-层=州子集 {FL,PA,IL,OH,GA,MI,NJ,VA}；value=COVIDhub-ensemble **1 wk ahead inc case**（新增病例）预测分位数；
+层=West Pacific 州 {Alaska, California, Hawaii, Oregon, Washington}；value=COVIDhub-ensemble **1 wk ahead inc case**（新增病例）预测分位数；
 quantiles 取 P 全集（0.025/0.10/0.25/0.50/0.75/0.90/0.975）。时间=周（target_end_date）。
-hover 附加 per-capita（value/population）。提取脚本 `scripts/extract-inc-case.mjs`（从本地 covid19-forecast-hub 仓库）。
+CSV 使用 `state` 全名列；hover 显示州级中心预测与预测区间。提取脚本 `scripts/extract-inc-case.mjs`（从本地 covid19-forecast-hub 仓库）。
 
-## M11b. FluSight 流感住院数据（code/dataset/ensemble_flusight_hosp.csv）
+## M11b. FluSight 流感住院数据（public/dataset/ensemble_flusight_hosp.csv）
 
 层=Census 四大区（50 州 + DC 聚合）；value=FluSight-ensemble **wk inc flu hosp**（流感新增住院）分位数，horizon=1；
 quantiles 同 P 全集；时间=周（target_end_date，2023-10-21~2026-06-06，85 周，无缺失）。
 提取脚本 `scripts/extract-flusight.mjs`（本地仓库 `Datasets/FluSight-forecast-hub`，sparse checkout 仅 `model-output/FluSight-ensemble`）。
 
-## M12. Publication iteration 1: shared-scale explicit seams (supersedes M3-M8 geometry)
+## M12. Shared-scale explicit seams (supersedes M3-M8 geometry)
 
-This section records the formulas implemented by the publication pipeline as of 2026-08-13. Where M3-M8 above describe per-layer normalization, Boolean participation, moving-average windows, permanent clearance, oscillatory offsets, or phase optimization, M12 supersedes them.
+This section records the formulas implemented by the current pipeline as of 2026-08-13. Where M3-M8 above describe per-layer normalization, Boolean participation, moving-average windows, permanent clearance, oscillatory offsets, or phase optimization, M12 supersedes them.
 
 For the 80% interval width, one dataset-wide calibration is used:
 
@@ -253,13 +255,13 @@ Define cumulative offsets `r_0(t)=0`, `r_{i+1}(t)=r_i(t)+d_i(t)`, and center the
 L_i^*(t)=L_i(t)+s_i(t),\qquad U_i^*(t)=U_i(t)+s_i(t).
 ```
 
-Thus `U_i^*-L_i^*=q50_i` exactly and the displayed adjacent seam is
+Thus `U_i^*-L_i^*=m_i` exactly and the displayed adjacent seam is
 
 ```math
 L_{i+1}^*(t)-U_i^*(t)=d_i(t)\ge0.
 ```
 
-If both adjacent gates are zero, `d_i(t)=0` exactly; no fixed clearance remains. Total displayed height is `H^*(t)=H_0(t)+\sum_j d_j(t) <= B(t)`. Phase/frequency arrays remain compatibility diagnostics, but phase optimization is not invoked and phase does not alter publication geometry.
+If both adjacent gates are zero, `d_i(t)=0` exactly; no fixed clearance remains. Total displayed height is `H^*(t)=H_0(t)+\sum_j d_j(t) <= B(t)`. Phase/frequency arrays remain compatibility diagnostics, but phase optimization is not invoked and phase does not alter the displayed geometry.
 
 Synthetic uncertainty uses staggered layer-local compact bumps
 

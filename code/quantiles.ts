@@ -5,6 +5,7 @@ import {
   QUANTILE_KEYS,
   type QuantileKey,
   type QuantileMatrix,
+  type Layer,
   type ValidationIssue,
   type ValidationResult,
 } from "./types";
@@ -79,15 +80,23 @@ export function validateLayerQuantiles(
 }
 
 export function validateData(
-  layers: { id: string; q: QuantileMatrix }[],
+  layers: Layer[],
   fillMissing = true
-): { layers: { id: string; q: QuantileMatrix }[]; result: ValidationResult } {
+): { layers: Layer[]; result: ValidationResult } {
   const issues: ValidationIssue[] = [];
-  const out: { id: string; q: QuantileMatrix }[] = [];
+  const out: Layer[] = [];
   for (const layer of layers) {
     const { matrix, issues: layerIssues } = validateLayerQuantiles(layer.id, layer.q, fillMissing);
     issues.push(...layerIssues);
-    out.push({ id: layer.id, q: matrix });
+    const magnitude = layer.magnitude ?? matrix.p50;
+    if (magnitude.length !== matrix.p50.length) throw new Error(`layer ${layer.id}: magnitude length mismatch`);
+    const filledMagnitude = fillMissing ? fillMissingTimeSeries(magnitude) : magnitude.slice();
+    for (let t = 0; t < filledMagnitude.length; t += 1) {
+      if (!Number.isFinite(filledMagnitude[t]) || filledMagnitude[t] < 0) {
+        issues.push({ layerId: layer.id, timeIndex: t, message: "invalid magnitude" });
+      }
+    }
+    out.push({ ...layer, q: matrix, magnitude: filledMagnitude });
   }
   return { layers: out, result: { ok: issues.length === 0, issues } };
 }

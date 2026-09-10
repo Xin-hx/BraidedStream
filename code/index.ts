@@ -5,7 +5,7 @@
  */
 import { validateData } from "./quantiles";
 import { computeUncertainty } from "./uncertainty";
-import { computePid } from "./pid";
+import { computePid, type TpidOptions } from "./pid";
 import { computeSineBaseline, computeWiggleBaseline } from "./baseline";
 import {
   allocateBudget,
@@ -22,16 +22,18 @@ import type {
 } from "./types";
 
 export function h0FromLayers(layers: Layer[]): number[] {
-  const tLen = layers[0].q.p50.length;
+  const tLen = (layers[0].magnitude ?? layers[0].q.p50).length;
   const h0 = new Array<number>(tLen).fill(0);
   for (const layer of layers) {
-    for (let t = 0; t < tLen; t += 1) h0[t] += layer.q.p50[t];
+    const magnitude = layer.magnitude ?? layer.q.p50;
+    for (let t = 0; t < tLen; t += 1) h0[t] += magnitude[t];
   }
   return h0;
 }
 
 export interface PipelineOptions {
   corridors: CorridorOptions;
+  tpid?: TpidOptions;
   /** normalize mode for uncertainty (default "global"). */
   normalize?: "per-layer" | "global";
   smoothWindow?: number;
@@ -50,14 +52,14 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
   if (n === 0) {
     throw new Error("runPipeline: no layers");
   }
-  const tLen = valid[0].q.p50.length;
+  const tLen = (valid[0].magnitude ?? valid[0].q.p50).length;
 
   const uncertainty = computeUncertainty(valid, {
     normalize: options.normalize ?? "global",
     smoothWindow: options.smoothWindow ?? 0,
   });
 
-  const pid = computePid(valid);
+  const pid = computePid(valid, options.tpid);
 
   // stack order: PID inside-out (deepest center), then base layout
   const order = pid.order;
@@ -140,3 +142,6 @@ function h0Max(h0: number[]): number {
 }
 
 export type { Layer, QuantileMatrix, ValidationResult };
+export { inputDataset as canonicalizeDataset } from "./dataInput";
+export { compute_tpid_layer_ordering } from "./pid";
+export type { TpidLayerInput, TpidOptions, TpidOrderingEntry } from "./pid";

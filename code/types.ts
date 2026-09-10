@@ -31,7 +31,46 @@ export interface Layer {
   color?: string;
   /** Per-capita value (optional, shown in hover detail). */
   perCapita?: number[];
+  /** Streamgraph thickness. Distinct from distribution quantiles. */
+  magnitude?: number[];
+  /** Time-major distribution values: distribution[t][z]. */
+  distribution?: number[][];
+  /** Number of empirical members; null when only quantiles are supplied. */
+  sampleSize?: Array<number | null>;
+  sourceKind?: "empirical" | "quantile";
   q: QuantileMatrix;
+}
+
+export interface EmpiricalDistributionCell {
+  kind: "empirical";
+  observations: Array<{ memberId: string; value: number; weight?: number }>;
+}
+
+export interface QuantileDistributionCell {
+  kind: "quantile";
+  probabilities: number[];
+  quantiles: number[];
+  pointValue?: number;
+}
+
+export type DistributionCell = EmpiricalDistributionCell | QuantileDistributionCell;
+
+export interface DistributionalLayer {
+  id: string;
+  cells: Array<DistributionCell | null>;
+}
+
+export interface DistributionalTemporalDataset {
+  times: string[];
+  layers: DistributionalLayer[];
+  magnitudePolicy: "empirical-mean" | "point" | "median";
+}
+
+export interface CanonicalLayer extends Omit<Layer, "magnitude" | "distribution" | "sampleSize" | "sourceKind"> {
+  magnitude: number[];
+  distribution: number[][];
+  sampleSize: Array<number | null>;
+  sourceKind: "empirical" | "quantile";
 }
 
 export interface ForecastData {
@@ -70,11 +109,11 @@ export interface UncertaintyResult {
   u: number[][];
 }
 
-/** PID proxy depth, see METHOD.md M2. */
+/** Temporal probabilistic inclusion depth used by the existing pipeline API. */
 export interface PidResult {
-  /** depth per layer id, in [0,1]. */
+  /** TPID score per layer id. */
   depth: Record<string, number>;
-  /** inside-out order: deepest first in the middle. */
+  /** Stack order with the highest TPID layers nearest the center. */
   order: string[];
 }
 
@@ -201,4 +240,3 @@ export interface PipelineResult {
 }
 
 export type ViewMode = "base" | "pid" | "braided";
-export type PresentationMode = "diagnostic" | "publication";

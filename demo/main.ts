@@ -5,13 +5,13 @@ import { runPipeline } from "../code/index";
 import { parseCovidCsv } from "../code/covid";
 import { parseEditableCsv } from "../code/editable";
 import { parseTcmCsv } from "../code/tcm";
-import { PALETTE, PUBLICATION_PALETTE, baseGeometryInInputOrder, exportPng, exportSvg, renderChart, M, W, H } from "./render";
-import type { Layer, PipelineResult, PresentationMode, ViewMode } from "../code/types";
+import { PALETTE, baseGeometryInInputOrder, exportPng, exportSvg, renderChart, M, W, H } from "./render";
+import type { Layer, PipelineResult, ViewMode } from "../code/types";
 
 // CSV files are served from the vite public/ dir (see scripts/copy-dataset.mjs).
 const DATASETS = {
   editable: { path: "dataset/editable.csv", label: "editable", parse: parseEditableCsv },
-  tcm: { path: "dataset/TCMRecord.csv", label: "tcm", parse: parseTcmCsv },
+  tcm: { path: "dataset/TCM_subset.csv", label: "tcm", parse: parseTcmCsv },
   "covid-inc": { path: "dataset/ensemble_covid_inc_case.csv", label: "covid-inc" },
   flusight: { path: "dataset/ensemble_flusight_hosp.csv", label: "flusight" },
 } as const;
@@ -19,7 +19,6 @@ const DATASETS = {
 type DatasetId = keyof typeof DATASETS;
 
 interface State {
-  presentation: PresentationMode;
   dataset: DatasetId;
   mode: ViewMode;
   baseline: "wiggle" | "sine";
@@ -35,7 +34,6 @@ interface State {
 }
 
 const state: State = {
-  presentation: "publication",
   dataset: "editable",
   mode: "braided",
   baseline: "wiggle",
@@ -75,7 +73,7 @@ function run(): void {
   const { layers, times } = dataCache;
   const yExtentGuess = Math.max(1, layers.reduce((acc, l) => {
     let m = 0;
-    for (const v of l.q.p50) if (v > m) m = v;
+    for (const v of l.magnitude ?? l.q.p50) if (v > m) m = v;
     return acc + m;
   }, 0));
   const amax = (state.amaxPct / 100) * yExtentGuess;
@@ -119,7 +117,6 @@ function render(): void {
     forceBase: state.forceBase,
     hover: state.hover,
     highlightLayer: state.highlight,
-    presentation: state.presentation,
   });
 }
 
@@ -140,29 +137,6 @@ function renderCosts(): void {
 
 function renderLegend(): void {
   if (!result) return;
-  if (state.presentation === "publication") {
-    legendEl.setAttribute("data-publication-legend", "true");
-    const syntheticSemantics: Record<string, string> = {
-      c0: "consensus", c1: "early high-u", c2: "consensus",
-      c3: "early-mid high-u", c4: "mid high-u", c5: "persistent outlier",
-      c6: "late shift/high-u", c7: "low-u", c8: "thin / high-u",
-    };
-    const layerItems = result.pid.order.map((id, idx) =>
-      `<span class="layer-key" data-layer-legend="${id}"><span class="sw" style="background:${PUBLICATION_PALETTE[idx % PUBLICATION_PALETTE.length]}"></span>${id}${state.dataset === "editable" ? ` ${syntheticSemantics[id] ?? ""}` : ""}</span>`
-    ).join("");
-    const encodingKey = state.dataset === "tcm"
-      ? `<div class="encoding-key"><span class="legend-thickness"></span>color band = median herb amount` +
-        `<span class="legend-corridor"></span>cool-gray corridor = inter-patient dose variation` +
-        `<span class="legend-reference"></span>dashed outline = collapsed median amount</div>`
-      : `<div class="encoding-key"><span class="legend-thickness"></span>color band = q50 thickness` +
-        `<span class="legend-corridor"></span>cool-gray corridor = uncertainty event/display space` +
-        `<span class="legend-reference"></span>dashed outline = collapsed Σq50` +
-        `<span class="legend-event">A–C</span>A–C = selected opening–rejoining events; unmarked corridors remain data-bearing</div>`;
-    legendEl.innerHTML = encodingKey +
-      `<div class="layer-keys" aria-label="layer identities">${layerItems}</div>`;
-    return;
-  }
-  legendEl.removeAttribute("data-publication-legend");
   const order = result.pid.order;
   const html = order
     .map((id, idx) => {
@@ -172,7 +146,10 @@ function renderLegend(): void {
       return `<span class="sw" style="background:${color}"></span>${id} <span style="opacity:.6">D=${d.toFixed(3)}</span>`;
     })
     .join("&nbsp;&nbsp;");
-  legendEl.innerHTML = html;
+  const meaning = state.dataset === "tcm"
+    ? "thickness = mean attended-patient dose (zeros included)"
+    : "thickness = stacked central forecasts (state marginals; not an aggregate predictive distribution)";
+  legendEl.innerHTML = `<div>${meaning}</div>${html}`;
 }
 
 function fmt(v: number): string {
@@ -182,7 +159,7 @@ function fmt(v: number): string {
 }
 
 function onHoverMove(evt: MouseEvent): void {
-  if (!dataCache || !result || state.presentation === "publication") return;
+  if (!dataCache || !result) return;
   const rect = svgEl.getBoundingClientRect();
   const scaleX = W / rect.width;
   const px = (evt.clientX - rect.left) * scaleX;
@@ -261,19 +238,21 @@ function showTooltip(t: number, layerId: string | null): void {
   const aReq = result.corridors.aReq[i][t];
   const aAlloc = result.braided.aAlloc[i][t];
   const d = result.pid.depth[layer.id];
-  const q50 = layer.q.p50[t];
+  const magnitude = (layer.magnitude ?? layer.q.p50)[t];
   const p10 = layer.q.p10[t];
   const p90 = layer.q.p90[t];
+  const sampleSize = layer.sampleSize?.[t];
   const perCapita = layer.perCapita ? ` · ${fmt(layer.perCapita[t])}/cap` : "";
 
   const rows = [
-    [state.dataset === "tcm" ? "median herb amount" : "q50", fmt(q50)],
+    [state.dataset === "tcm" ? "mean herb amount" : "central forecast", fmt(magnitude)],
     [state.dataset === "tcm" ? "80% dose range" : "80% PI", `[${fmt(p10)}, ${fmt(p90)}]`],
     [state.dataset === "tcm" ? "dose range" : "width w", fmt(w)],
     [state.dataset === "tcm" ? "variation u" : "uncertainty u", u.toFixed(3)],
     ["PID depth", d.toFixed(3)],
     ["corridor req", fmt(aReq)],
     ["corridor alloc", fmt(aAlloc)],
+    ...(sampleSize === null || sampleSize === undefined ? [] : [["patient sample", String(sampleSize)]]),
   ];
   tt.innerHTML =
     `<div class="tt-title">${times[t]} · ${layer.id}${perCapita}</div>` +
@@ -324,27 +303,6 @@ function bindControls(): void {
   });
   $("btn-svg").addEventListener("click", () => exportSvg(svgEl));
   $("btn-png").addEventListener("click", () => { void exportPng(svgEl).catch(console.error); });
-  $("btn-pub-svg").addEventListener("click", () => exportSvg(svgEl));
-  $("btn-pub-png").addEventListener("click", () => { void exportPng(svgEl).catch(console.error); });
-
-  const setPresentation = (presentation: PresentationMode): void => {
-    state.presentation = presentation;
-    document.body.dataset.presentation = presentation;
-    for (const mode of ["publication", "diagnostic"] as const) {
-      const button = $(`btn-${mode}`);
-      const selected = mode === presentation;
-      button.classList.toggle("active", selected);
-      button.setAttribute("aria-pressed", String(selected));
-    }
-    state.hover = null;
-    state.highlight = null;
-    tooltip.classList.add("hidden");
-    render();
-    renderLegend();
-  };
-  $("btn-publication").addEventListener("click", () => setPresentation("publication"));
-  $("btn-diagnostic").addEventListener("click", () => setPresentation("diagnostic"));
-
   // collapsible left panel
   const panel = $("panel");
   const btnPanel = $("btn-panel");

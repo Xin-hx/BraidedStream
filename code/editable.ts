@@ -40,7 +40,7 @@ export function parseEditableCsv(text: string): { layers: Layer[]; times: string
         if (!values) throw new Error(`missing layer ${id} at ${time}`);
         KEYS.forEach((key, i) => q[key].push(values[i]));
       }
-      return { id, q };
+      return { id, magnitude: q.p50.slice(), sampleSize: times.map(() => null), sourceKind: "quantile" as const, q };
     }),
   };
 }

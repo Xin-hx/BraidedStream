@@ -22,7 +22,7 @@ export interface RouteAComparison {
 export function createRouteAComparison(): RouteAComparison {
   const { layers } = generateSynthetic({ seed: ROUTE_A_SEED });
   const times = Array.from({ length: layers[0].q.p50.length }, (_, t) => `t${t}`);
-  const yExtent = Math.max(...times.map((_, t) => layers.reduce((sum, layer) => sum + layer.q.p50[t], 0)));
+  const yExtent = Math.max(...times.map((_, t) => layers.reduce((sum, layer) => sum + (layer.magnitude ?? layer.q.p50)[t], 0)));
   const result = runPipeline(layers, {
     normalize: "global",
     smoothWindow: 0,

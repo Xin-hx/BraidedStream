@@ -6,11 +6,9 @@
   "description": "Budgeted braided streamgraphs for uncertain temporal compositions — framework-free demo",
   "scripts": {
     "dev": "vite",
-    "prebuild": "node scripts/copy-dataset.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
-    "diagnostics:publication": "vite-node scripts/publication-diagnostics.ts"
+    "test": "vitest run"
   },
   "devDependencies": {
     "@rollup/rollup-win32-x64-msvc": "^4.62.4",

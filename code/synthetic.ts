@@ -120,7 +120,7 @@ export function generateSynthetic(spec: SyntheticSpec = {}): { layers: Layer[]; 
         q[KEY[k]].push(v);
       }
     }
-    return { id: ls.id, color: ls.color, q };
+    return { id: ls.id, color: ls.color, magnitude: q.p50.slice(), sampleSize: q.p50.map(() => null), sourceKind: "quantile", q };
   });
 
   return {

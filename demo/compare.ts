@@ -5,7 +5,7 @@
  *   2. Star markers (glyph size ∝ u)
  *   3. Glow (blurred boundary halo, "zhou's paper" style)
  *   4. Color + blur (segment fill saturation ∝ u; layer blur ∝ u)
- * Static render for side-by-side inspection / publication figures.
+ * Static render for side-by-side inspection.
  */
 import { runPipeline } from "../code/index";
 import { area, axisBottom, curveBasis, hsl, scaleLinear, select, symbol, symbolStar } from "d3";
@@ -229,7 +229,7 @@ export function initCompare(): void {
   const times = Array.from({ length: layers[0].q.p50.length }, (_, t) => `t${t}`);
   const yExtent = Math.max(1, layers.reduce((acc, l) => {
     let m = 0;
-    for (const v of l.q.p50) if (v > m) m = v;
+    for (const v of l.magnitude ?? l.q.p50) if (v > m) m = v;
     return acc + m;
   }, 0));
   const result = runPipeline(layers, {
@@ -251,7 +251,7 @@ export function initCompare(): void {
   const domain = sharedYDomain(result, times);
 
   const modes: { id: string; mode: CompareMode; title: string; note: string }[] = [
-    { id: "cmp-braided", mode: "braided", title: "Braided (method)", note: "corridor amplitude + oscillation frequency ∝ u; q50 thickness preserved" },
+    { id: "cmp-braided", mode: "braided", title: "Braided (method)", note: "corridor amplitude + oscillation frequency ∝ u; display magnitude preserved" },
     { id: "cmp-star", mode: "star", title: "Star markers", note: "glyph size ∝ u at band center; thickness untouched" },
     { id: "cmp-glow", mode: "glow", title: "Glow halo", note: "blurred boundary glow, width/opacity ∝ u" },
     { id: "cmp-color", mode: "color-blur", title: "Color + blur", note: "segment fill saturation ∝ u; layer blur ∝ mean u" },

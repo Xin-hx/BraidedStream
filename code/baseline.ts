@@ -24,8 +24,8 @@ export type BaselineMode = "wiggle" | "sine";
 
 export function computeWiggleBaseline(layers: Layer[], order: string[]): BaseLayout {
   const n = order.length;
-  const tLen = layers[0].q.p50.length;
-  const m = order.map((id) => layers.find((l) => l.id === id)!.q.p50);
+  const tLen = (layers[0].magnitude ?? layers[0].q.p50).length;
+  const m = order.map((id) => layers.find((l) => l.id === id)!.magnitude ?? layers.find((l) => l.id === id)!.q.p50);
 
   const yBottom: number[][] = Array.from({ length: n }, () => new Array<number>(tLen));
   const yTop: number[][] = Array.from({ length: n }, () => new Array<number>(tLen));
@@ -79,8 +79,8 @@ export function computeSineBaseline(
   cType: "median" | "mean" | "geometric" | "harmonic" = "median"
 ): BaseLayout {
   const n = order.length;
-  const tLen = layers[0].q.p50.length;
-  const m = order.map((id) => layers.find((l) => l.id === id)!.q.p50);
+  const tLen = (layers[0].magnitude ?? layers[0].q.p50).length;
+  const m = order.map((id) => layers.find((l) => l.id === id)!.magnitude ?? layers.find((l) => l.id === id)!.q.p50);
 
   const yBottom: number[][] = Array.from({ length: n }, () => new Array<number>(tLen));
   const yTop: number[][] = Array.from({ length: n }, () => new Array<number>(tLen));
