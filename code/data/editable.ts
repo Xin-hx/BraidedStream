@@ -3,7 +3,7 @@
  * CSV columns: time,layer,p025,p10,p25,p50,p75,p90,p975
  * One row is one layer at one time point. Keep every time/layer pair present.
  */
-import type { Layer } from "./types";
+import type { Layer } from "../types";
 
 const KEYS = ["p025", "p10", "p25", "p50", "p75", "p90", "p975"] as const;
 

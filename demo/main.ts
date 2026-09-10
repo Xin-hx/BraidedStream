@@ -1,60 +1,90 @@
 /**
  * Demo entry: state, controls, hover details, cost panel, export.
  */
-import { runPipeline } from "../code/index";
-import { parseCovidCsv } from "../code/covid";
-import { parseEditableCsv } from "../code/editable";
-import { parseTcmCsv } from "../code/tcm";
-import { PALETTE, baseGeometryInInputOrder, exportPng, exportSvg, renderChart, M, W, H } from "./render";
-import type { Layer, PipelineResult, ViewMode } from "../code/types";
+import { resolveLayerQuantiles, runPipeline } from "../code/index";
+import { DEFAULT_COVID_STATES, parseCovidCaseJson, type CovidStateSelection } from "../code/data/covid";
+import { parseEditableCsv } from "../code/data/editable";
+import { parseTcmCsv } from "../code/data/tcm";
+import {
+  colorForLayer,
+  diseaseDay,
+  exportPng,
+  exportSvg,
+  renderChart,
+  renderTimeFilter,
+  M,
+  W,
+  H,
+  type VisMethod,
+} from "./render";
+import type {
+  BraidedStreamOptions,
+  Layer,
+  PipelineResult,
+} from "../code/types";
 
-// CSV files are served from the vite public/ dir (see scripts/copy-dataset.mjs).
+// Case-study data files are served from vite's public/ directory.
+export const COVID_PARAMETERS: { stateSelection: CovidStateSelection } = {
+  stateSelection: DEFAULT_COVID_STATES,
+};
+
 const DATASETS = {
-  editable: { path: "dataset/editable.csv", label: "editable", parse: parseEditableCsv },
-  tcm: { path: "dataset/TCM_subset.csv", label: "tcm", parse: parseTcmCsv },
-  "covid-inc": { path: "dataset/ensemble_covid_inc_case.csv", label: "covid-inc" },
-  flusight: { path: "dataset/ensemble_flusight_hosp.csv", label: "flusight" },
+  editable: {
+    path: "dataset/editable.csv",
+    label: "editable",
+    parse: parseEditableCsv,
+  },
+  tcm: { path: "dataset/TCMRecord.csv", label: "tcm", parse: parseTcmCsv },
+  "covid-inc": {
+    path: "dataset/covid_inc_case_trained_members.json",
+    label: "covid-inc",
+    parse: (text: string) => parseCovidCaseJson(text, COVID_PARAMETERS.stateSelection),
+  },
 } as const;
 
 type DatasetId = keyof typeof DATASETS;
 
+/** Code-owned parameters; future controls can update this object before run(). */
+export const BRAIDED_PARAMETERS: Partial<BraidedStreamOptions> = {
+  representativeQuantile: 0.5,
+  envelopeQuantile: 0.9,
+  uncertaintyFocusPercent: 10,
+};
+
 interface State {
   dataset: DatasetId;
-  mode: ViewMode;
+  visMethod: VisMethod;
   baseline: "wiggle" | "sine";
   smoothContours: boolean;
-  eta: number;
-  amaxPct: number;
-  tau: number;
-  window: number;
-  showRef: boolean;
-  forceBase: boolean;
+  showOutlines: boolean;
+  collapseBranches: boolean;
   hover: number | null;
   highlight: string | null;
+  timeStart: number;
+  timeEnd: number;
 }
 
 const state: State = {
-  dataset: "editable",
-  mode: "braided",
+  dataset: "covid-inc",
+  visMethod: "braided",
   baseline: "wiggle",
   smoothContours: true,
-  eta: 1.6,
-  amaxPct: 3,
-  tau: 0.3,
-  window: 30,
-  showRef: true,
-  forceBase: false,
+  showOutlines: false,
+  collapseBranches: false,
   hover: null,
   highlight: null,
+  timeStart: 0,
+  timeEnd: 1,
 };
 
 let dataCache: { layers: Layer[]; times: string[] } | null = null;
 let result: PipelineResult | null = null;
-let baseInput: ReturnType<typeof baseGeometryInInputOrder> | null = null;
 let perfMs = 0;
 
-const $ = <T extends Element>(id: string): T => document.getElementById(id) as unknown as T;
+const $ = <T extends Element>(id: string): T =>
+  document.getElementById(id) as unknown as T;
 const svgEl = $<SVGSVGElement>("chart");
+const timeFilterEl = $<SVGSVGElement>("time-filter");
 const tooltip = $("tooltip");
 const costsEl = $("costs");
 const legendEl = $("legend");
@@ -64,39 +94,23 @@ async function loadData(): Promise<void> {
   const res = await fetch(spec.path);
   if (!res.ok) throw new Error(`failed to load ${spec.path}: ${res.status}`);
   const text = await res.text();
-  dataCache = "parse" in spec ? spec.parse(text) : parseCovidCsv(text);
+  dataCache = spec.parse(text);
+  state.timeStart = 0;
+  state.timeEnd = Math.max(0, dataCache.times.length - 1);
+  state.hover = null;
+  state.highlight = null;
 }
 
 function run(): void {
-  if (!dataCache) return;
+  if (!dataCache || dataCache.times.length < 2) return;
   const t0 = performance.now();
-  const { layers, times } = dataCache;
-  const yExtentGuess = Math.max(1, layers.reduce((acc, l) => {
-    let m = 0;
-    for (const v of l.magnitude ?? l.q.p50) if (v > m) m = v;
-    return acc + m;
-  }, 0));
-  const amax = (state.amaxPct / 100) * yExtentGuess;
-  const clearance = 0.002 * yExtentGuess;
 
-  result = runPipeline(layers, {
-    normalize: "global",
-    smoothWindow: 0,
+  result = runPipeline(dataCache.layers, {
     baselineMode: state.baseline,
-    corridors: {
-      participationThreshold: state.tau,
-      amplitudeMax: amax,
-      clearance,
-      gamma: 1,
-      encoding: "amplitude",
-      frequencyMin: 0.5,
-      frequencyMax: 4,
-      windowSmooth: state.window,
-      budgetEta: state.eta,
-      phaseMode: "sine",
+    braided: {
+      ...BRAIDED_PARAMETERS,
     },
   });
-  baseInput = baseGeometryInInputOrder(layers, times, state.baseline);
   perfMs = performance.now() - t0;
 
   render();
@@ -105,18 +119,31 @@ function run(): void {
 }
 
 function render(): void {
-  if (!dataCache || !result || !baseInput) return;
+  if (!dataCache || !result) return;
+  const braided = state.visMethod === "braided";
+  const collapse = $<HTMLButtonElement>("btn-collapse");
+  collapse.hidden = !braided;
+  collapse.disabled = !braided;
+  collapse.textContent = state.collapseBranches ? "Expand branches" : "Collapse branches";
   renderChart(svgEl, {
     layers: dataCache.layers,
     times: dataCache.times,
     result,
-    baseInput,
-    mode: state.mode,
+    start: state.timeStart,
+    end: state.timeEnd,
+    visMethod: state.visMethod,
     smoothContours: state.smoothContours,
-    showRef: state.showRef,
-    forceBase: state.forceBase,
+    showOutlines: state.showOutlines,
+    collapseBranches: state.collapseBranches,
     hover: state.hover,
     highlightLayer: state.highlight,
+  });
+  renderTimeFilter(timeFilterEl, {
+    layers: dataCache!.layers,
+    times: dataCache!.times,
+    start: state.timeStart,
+    end: state.timeEnd,
+    onChange: updateTimeRange,
   });
 }
 
@@ -130,25 +157,30 @@ function renderCosts(): void {
     `curvature  braided ${fmt(c.curvatureBraided)} vs base ${fmt(c.curvatureBase)}`,
     `slope      braided ${fmt(c.slopeBraided)} vs base ${fmt(c.slopeBase)}`,
     `nonlocal displacement ${fmt(c.displacement)}`,
-    `corridor alloc/req ${(c.allocRatio * 100).toFixed(1)}%  (req ${fmt(c.requestedTotal)} → alloc ${fmt(c.allocatedTotal)})`,
+    `extra-space alloc/req ${(c.allocRatio * 100).toFixed(1)}%  (req ${fmt(c.requestedTotal)} → alloc ${fmt(c.allocatedTotal)})`,
+    ...(result.options.debug
+      ? [
+          `relax collisions ${result.braided.collisionRelaxation.beforeCount} → ${result.braided.collisionRelaxation.afterCount}`,
+          `relax max overlap ${fmt(result.braided.collisionRelaxation.maxOverlapBefore)} → ${fmt(result.braided.collisionRelaxation.maxOverlapAfter)}`,
+        ]
+      : []),
   ];
   costsEl.innerHTML = lines.join("\n");
 }
 
 function renderLegend(): void {
   if (!result) return;
-  const order = result.pid.order;
-  const html = order
+  const html = result.pid.ranking
     .map((id, idx) => {
-      const src = dataCache!.layers.find((l) => l.id === id);
-      const color = src?.color ?? PALETTE[idx % PALETTE.length];
+      const color = colorForLayer(dataCache!.layers, id);
       const d = result!.pid.depth[id];
-      return `<span class="sw" style="background:${color}"></span>${id} <span style="opacity:.6">D=${d.toFixed(3)}</span>`;
+      return `<span class="sw" style="background:${color}"></span>#${idx + 1} ${id} <span style="opacity:.6">TPID=${d.toFixed(6)}</span>`;
     })
     .join("&nbsp;&nbsp;");
-  const meaning = state.dataset === "tcm"
-    ? "thickness = mean attended-patient dose (zeros included)"
-    : "thickness = stacked central forecasts (state marginals; not an aggregate predictive distribution)";
+  const meaning =
+    state.dataset === "tcm"
+      ? `thickness = ${quantileName(result!.options.representativeQuantile)} dose among patients observed at each visit number`
+      : `thickness = stacked ${quantileName(result!.options.representativeQuantile)} forecasts (state marginals; not an aggregate predictive distribution)`;
   legendEl.innerHTML = `<div>${meaning}</div>${html}`;
 }
 
@@ -171,47 +203,68 @@ function onHoverMove(evt: MouseEvent): void {
     render();
     return;
   }
-  const tLen = dataCache.times.length;
-  let t = Math.round(((px - M.left) / (W - M.left - M.right)) * (tLen - 1));
-  t = Math.max(0, Math.min(tLen - 1, t));
+  const visibleIndices = Array.from(
+    { length: state.timeEnd - state.timeStart + 1 },
+    (_, offset) => state.timeStart + offset,
+  );
+  const eventDays = visibleIndices.map((t) => diseaseDay(dataCache!.times[t]));
+  let localTime = Math.round(
+    ((px - M.left) / (W - M.left - M.right)) * (visibleIndices.length - 1),
+  );
+  if (eventDays.every(Number.isFinite)) {
+    const target =
+      eventDays[0] +
+      ((px - M.left) / (W - M.left - M.right)) *
+        (eventDays.at(-1)! - eventDays[0]);
+    localTime = eventDays.reduce(
+      (best, day, index) =>
+        Math.abs(day - target) < Math.abs(eventDays[best] - target)
+          ? index
+          : best,
+      0,
+    );
+  }
+  localTime = Math.max(0, Math.min(visibleIndices.length - 1, localTime));
+  const t = visibleIndices[localTime];
   state.hover = t;
 
-  // find layer under cursor (braided geometry when applicable)
-  const braided = state.mode === "braided" && !state.forceBase;
-  const bottom = braided ? result.braided.yBottomStar : state.mode === "base" ? baseInput!.yBottom : result.base.yBottom;
-  const top = braided ? result.braided.yTopStar : state.mode === "base" ? baseInput!.yTop : result.base.yTop;
-  const ids = state.mode === "base" ? dataCache.layers.map((l) => l.id) : result.pid.order;
-  let hit = -1;
-  for (let i = 0; i < ids.length; i += 1) {
-    if (dataY(py, bottom[i][t], top[i][t]) !== null) {
-      hit = i;
-      break;
-    }
-  }
+  const braided = state.visMethod === "braided";
+  const bottom = braided
+    ? result.braided.layers.map((layer) => layer.slotY0)
+    : result.base.yBottom;
+  const top = braided
+    ? result.braided.layers.map((layer) => layer.slotY1)
+    : result.base.yTop;
+  const ids = result.pid.order;
+  const space = (evt.target as Element).closest?.(
+    ".space-hit",
+  ) as SVGElement | null;
+  const owner = space?.dataset.ownerLayer;
+  const hit = owner
+    ? ids.indexOf(owner)
+    : ids.findIndex((_, i) => dataY(py, bottom[i][t], top[i][t]) !== null);
   state.highlight = hit >= 0 ? ids[hit] : null;
-  showTooltip(t, hit >= 0 ? ids[hit] : null);
+  showTooltip(t, hit >= 0 ? ids[hit] : null, space?.dataset.spaceKind);
   render();
 }
 
 /** map cursor y (svg units) back to data units, return null if outside [lo,hi] */
 function dataY(py: number, lo: number, hi: number): number | null {
-  if (!result || !baseInput) return null;
-  const tLen = dataCache!.times.length;
+  if (!dataCache || !result) return null;
+  const tLen = dataCache.times.length;
   let yMin = Infinity;
   let yMax = -Infinity;
-  const braided = state.mode === "braided" && !state.forceBase;
-  const bottom = braided ? result.braided.yBottomStar : state.mode === "base" ? baseInput.yBottom : result.base.yBottom;
-  const top = braided ? result.braided.yTopStar : state.mode === "base" ? baseInput.yTop : result.base.yTop;
+  const braided = state.visMethod === "braided";
+  const bottom = braided
+    ? result.braided.layers.map((layer) => layer.slotY0)
+    : result.base.yBottom;
+  const top = braided
+    ? result.braided.layers.map((layer) => layer.slotY1)
+    : result.base.yTop;
   for (let i = 0; i < top.length; i += 1) {
     for (let t = 0; t < tLen; t += 1) {
       if (bottom[i][t] < yMin) yMin = bottom[i][t];
       if (top[i][t] > yMax) yMax = top[i][t];
-    }
-  }
-  if (state.showRef) {
-    for (let t = 0; t < tLen; t += 1) {
-      const h0 = result.base.yTop[result.base.yTop.length - 1][t];
-      if (h0 > yMax) yMax = h0;
     }
   }
   const pad = (yMax - yMin) * 0.06 || 1;
@@ -221,7 +274,11 @@ function dataY(py: number, lo: number, hi: number): number | null {
   return v >= lo && v <= hi ? v : null;
 }
 
-function showTooltip(t: number, layerId: string | null): void {
+function showTooltip(
+  t: number,
+  layerId: string | null,
+  spaceKind?: string,
+): void {
   if (!dataCache || !result) return;
   const { layers, times } = dataCache;
   const layer = layerId ? layers.find((l) => l.id === layerId) : null;
@@ -233,76 +290,125 @@ function showTooltip(t: number, layerId: string | null): void {
   }
   const i = result.pid.order.indexOf(layer.id);
   const sourceIndex = layers.indexOf(layer);
-  const u = result.uncertainty.u[sourceIndex][t];
-  const w = result.uncertainty.width[sourceIndex][t];
-  const aReq = result.corridors.aReq[i][t];
-  const aAlloc = result.braided.aAlloc[i][t];
+  const u = result.uncertainty.value[sourceIndex][t];
+  const uncertaintyRank = result.uncertainty.rank[sourceIndex][t];
+  const exposure = result.uncertainty.exposure[sourceIndex][t];
+  const geometry = result.braided.layers[i];
   const d = result.pid.depth[layer.id];
-  const magnitude = (layer.magnitude ?? layer.q.p50)[t];
-  const p10 = layer.q.p10[t];
-  const p90 = layer.q.p90[t];
+  const magnitude = result.base.yTop[i][t] - result.base.yBottom[i][t];
+  const quantiles = resolveLayerQuantiles(
+    layer,
+    t,
+    result.options.envelopeQuantile,
+    result.options.representativeQuantile,
+  );
+  const representativeLabel = `representative (${quantileName(result.options.representativeQuantile)})`;
+  const envelopeLabel = `external envelope (${quantileName(result.options.envelopeQuantile)})`;
   const sampleSize = layer.sampleSize?.[t];
   const perCapita = layer.perCapita ? ` · ${fmt(layer.perCapita[t])}/cap` : "";
 
   const rows = [
-    [state.dataset === "tcm" ? "mean herb amount" : "central forecast", fmt(magnitude)],
-    [state.dataset === "tcm" ? "80% dose range" : "80% PI", `[${fmt(p10)}, ${fmt(p90)}]`],
-    [state.dataset === "tcm" ? "dose range" : "width w", fmt(w)],
-    [state.dataset === "tcm" ? "variation u" : "uncertainty u", u.toFixed(3)],
-    ["PID depth", d.toFixed(3)],
-    ["corridor req", fmt(aReq)],
-    ["corridor alloc", fmt(aAlloc)],
-    ...(sampleSize === null || sampleSize === undefined ? [] : [["patient sample", String(sampleSize)]]),
+    [
+      representativeLabel,
+      fmt(magnitude),
+    ],
+    [envelopeLabel, fmt(quantiles.qEnvelope)],
+    ...(layer.sourceKind === "hybrid"
+      ? [["trained Q2.5-Q97.5 (diagnostic)", `[${fmt(quantiles.qLow)}, ${fmt(quantiles.qHigh)}]`]]
+      : []),
+    ["Qη envelope boundary", "always shown"],
+    ["deformation", geometry.active[t] ? "yes" : "no"],
+    ["uncertainty value", u.toFixed(3)],
+    ["global percentile rank", uncertaintyRank.toFixed(3)],
+    ["visual exposure", exposure.toFixed(3)],
+    ["envelope budget", fmt(quantiles.qEnvelope - quantiles.qRepresentative)],
+    ["allocated deformation space", fmt(geometry.allocatedSpace[t])],
+    ["TPID score", d.toFixed(6)],
+    ["visible branches", String(!state.collapseBranches && geometry.active[t] ? geometry.branchCount[t] : 1)],
+    ...(spaceKind ? [["space owner", `${spaceKind} · ${layer.id}`]] : []),
+    ...(sampleSize === null || sampleSize === undefined
+      ? []
+      : [["patient sample", String(sampleSize)]]),
   ];
   tt.innerHTML =
     `<div class="tt-title">${times[t]} · ${layer.id}${perCapita}</div>` +
-    rows.map(([k, v]) => `<div class="tt-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+    rows
+      .map(
+        ([k, v]) =>
+          `<div class="tt-row"><span class="k">${k}</span><span class="v">${v}</span></div>`,
+      )
+      .join("");
   tt.classList.remove("hidden");
 }
 
+function updateTimeRange(start: number, end: number): void {
+  if (!dataCache) return;
+  const max = dataCache.times.length - 1;
+  state.timeStart = Math.max(0, Math.min(start, max - 1));
+  state.timeEnd = Math.min(max, Math.max(end, state.timeStart + 1));
+  state.hover = null;
+  state.highlight = null;
+  tooltip.classList.add("hidden");
+  render();
+}
+
 function bindControls(): void {
-  const bind = <T extends HTMLInputElement | HTMLSelectElement>(id: string, apply: (v: string) => void): void => {
+  const bind = <T extends HTMLInputElement | HTMLSelectElement>(
+    id: string,
+    apply: (v: string) => void,
+  ): void => {
     const el = $(id) as T;
     el.addEventListener("input", () => apply((el as HTMLInputElement).value));
     el.addEventListener("change", () => apply((el as HTMLInputElement).value));
   };
-  const val = (id: string, text: string): void => { $(id).textContent = text; };
-
   bind("ctl-dataset", (v) => {
     state.dataset = v as DatasetId;
     void loadData().then(run);
   });
-  bind("ctl-mode", (v) => {
-    state.mode = v as ViewMode;
-    state.forceBase = false;
+  bind("ctl-vis-method", (v) => {
+    state.visMethod = v as VisMethod;
+    state.collapseBranches = false;
     $("btn-collapse").classList.remove("active");
+    render();
+  });
+  bind("ctl-baseline", (v) => {
+    state.baseline = v as State["baseline"];
     run();
   });
-  bind("ctl-baseline", (v) => { state.baseline = v as State["baseline"]; run(); });
-
-  bind("ctl-eta", (v) => { state.eta = Number(v); val("val-eta", Number(v).toFixed(2)); run(); });
-  bind("ctl-amax", (v) => { state.amaxPct = Number(v); val("val-amax", `${Number(v).toFixed(1)}%`); run(); });
-  bind("ctl-tau", (v) => { state.tau = Number(v); val("val-tau", Number(v).toFixed(2)); run(); });
-  bind("ctl-window", (v) => {
-    state.window = Number(v);
-    val("val-window", (Number(v) / 100).toFixed(2));
+  bind("ctl-representative", (v) => {
+    BRAIDED_PARAMETERS.representativeQuantile = Number(v);
     run();
   });
-
-  const ref = $<HTMLInputElement>("ctl-ref");
-  ref.addEventListener("change", () => { state.showRef = ref.checked; render(); });
+  bind("ctl-envelope", (v) => {
+    BRAIDED_PARAMETERS.envelopeQuantile = Number(v);
+    run();
+  });
+  bind("ctl-uncertainty-focus", (v) => {
+    BRAIDED_PARAMETERS.uncertaintyFocusPercent = Number(v);
+    $("ctl-uncertainty-focus-value").textContent = `${v}%`;
+    run();
+  });
   const smooth = $<HTMLInputElement>("ctl-smooth");
-  smooth.addEventListener("change", () => { state.smoothContours = smooth.checked; render(); });
-
+  smooth.addEventListener("change", () => {
+    state.smoothContours = smooth.checked;
+    render();
+  });
+  const outlines = $<HTMLInputElement>("ctl-outlines");
+  outlines.addEventListener("change", () => {
+    state.showOutlines = outlines.checked;
+    render();
+  });
   $("btn-collapse").addEventListener("click", () => {
-    state.forceBase = !state.forceBase;
-    $("btn-collapse").classList.toggle("active", state.forceBase);
+    state.collapseBranches = !state.collapseBranches;
+    $("btn-collapse").classList.toggle("active", state.collapseBranches);
     state.hover = null;
     tooltip.classList.add("hidden");
     render();
   });
   $("btn-svg").addEventListener("click", () => exportSvg(svgEl));
-  $("btn-png").addEventListener("click", () => { void exportPng(svgEl).catch(console.error); });
+  $("btn-png").addEventListener("click", () => {
+    void exportPng(svgEl).catch(console.error);
+  });
   // collapsible left panel
   const panel = $("panel");
   const btnPanel = $("btn-panel");
@@ -318,6 +424,10 @@ function bindControls(): void {
     tooltip.classList.add("hidden");
     render();
   });
+}
+
+function quantileName(probability: number): string {
+  return `Q${(probability * 100).toFixed(Number.isInteger(probability * 100) ? 0 : 1)}`;
 }
 
 async function main(): Promise<void> {

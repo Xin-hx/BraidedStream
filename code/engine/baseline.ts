@@ -18,7 +18,7 @@
  *    c = median of |dF_j| across layers — layers whose thickness changes
  *    more than the typical scale get down-weighted. baseline[0] is centered.
  */
-import type { BaseLayout, Layer } from "./types";
+import type { BaseLayout, Layer } from "../types";
 
 export type BaselineMode = "wiggle" | "sine";
 

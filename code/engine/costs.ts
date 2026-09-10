@@ -1,7 +1,7 @@
 /**
  * Geometry costs (METHOD.md M9) — report-only, never part of optimization.
  */
-import type { BaseLayout, BraidedLayout, CostReport } from "./types";
+import type { BaseLayout, BraidedLayout, CostReport } from "../types";
 
 /** second difference energy (curvature proxy) of a boundary series */
 function curvatureEnergy(y: number[][]): number {

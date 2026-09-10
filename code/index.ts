@@ -1,20 +1,24 @@
 /**
- * Pipeline: quantiles → uncertainty → PID order → base layout → corridor
- * requests → budget allocation → phase optimization → braided geometry →
- * geometry costs. Pure functions, deterministic, no DOM.
+ * Pipeline: distributions → TPID order → fixed external-envelope layers → layer slots
+ * → branch geometry. Pure functions, deterministic, no DOM.
  */
-import { validateData } from "./quantiles";
-import { computeUncertainty } from "./uncertainty";
-import { computePid, type TpidOptions } from "./pid";
-import { computeSineBaseline, computeWiggleBaseline } from "./baseline";
+import { validateData } from "./engine/quantiles";
+import { computeUncertainty } from "./engine/uncertainty";
+import { computePid, type TpidOptions } from "./engine/pid";
+import { computeSineBaseline, computeWiggleBaseline } from "./engine/baseline";
 import {
-  allocateBudget,
-  buildBraidedGeometry,
-  requestCorridors,
-} from "./corridors";
-import { computeGeometryCosts } from "./costs";
+  DEFAULT_BRAIDED_STREAM_OPTIONS,
+  buildLayerSlotGeometry,
+  computeActiveMask,
+  computeBranchTopology,
+  resolveLayerQuantiles,
+  requestQuantileEnvelope,
+  relaxLayerCollisions,
+} from "./engine/braided";
+import { computeGeometryCosts } from "./engine/costs";
 import type {
   CorridorOptions,
+  BraidedStreamOptions,
   Layer,
   PipelineResult,
   QuantileMatrix,
@@ -32,11 +36,11 @@ export function h0FromLayers(layers: Layer[]): number[] {
 }
 
 export interface PipelineOptions {
-  corridors: CorridorOptions;
+  /** New uncertainty-aware layer-slot configuration. */
+  braided?: Partial<BraidedStreamOptions>;
+  /** Deprecated seam options; accepted but ignored by faithful braided geometry. */
+  corridors?: CorridorOptions;
   tpid?: TpidOptions;
-  /** normalize mode for uncertainty (default "global"). */
-  normalize?: "per-layer" | "global";
-  smoothWindow?: number;
   /** baseline layout algorithm: "wiggle" (Byron-Wattenberg L2) or "sine"
    *  (SineStream Gaussian-weighted L2). Default "wiggle". */
   baselineMode?: "wiggle" | "sine";
@@ -44,7 +48,7 @@ export interface PipelineOptions {
 
 /**
  * Run the full braided pipeline on validated layers.
- * Layers may arrive in any order; the PID inside-out order is applied.
+ * Layers may arrive in any order; the TPID center-out order is applied.
  */
 export function runPipeline(layers: Layer[], options: PipelineOptions): PipelineResult {
   const { layers: valid, result: validation } = validateData(layers, true);
@@ -52,75 +56,81 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
   if (n === 0) {
     throw new Error("runPipeline: no layers");
   }
-  const tLen = (valid[0].magnitude ?? valid[0].q.p50).length;
+  const braidOptions = { ...DEFAULT_BRAIDED_STREAM_OPTIONS, ...options.braided };
+  if (!Number.isFinite(braidOptions.epsilon) || braidOptions.epsilon <= 0) {
+    throw new Error("braided epsilon must be finite and positive");
+  }
+  if (!Number.isFinite(braidOptions.envelopeQuantile) ||
+      braidOptions.envelopeQuantile <= 0.5 || braidOptions.envelopeQuantile > 0.975) {
+    throw new Error("braided envelopeQuantile must be in (0.5, 0.975]");
+  }
+  if (!Number.isFinite(braidOptions.representativeQuantile) ||
+      braidOptions.representativeQuantile < 0.025 ||
+      braidOptions.representativeQuantile >= braidOptions.envelopeQuantile) {
+    throw new Error("braided representativeQuantile must be in [0.025, envelopeQuantile)");
+  }
+  const uncertainty = computeUncertainty(
+    valid,
+    braidOptions.epsilon,
+    braidOptions.uncertaintyFocusPercent,
+  );
 
-  const uncertainty = computeUncertainty(valid, {
-    normalize: options.normalize ?? "global",
-    smoothWindow: options.smoothWindow ?? 0,
-  });
+  const pid = computePid(layers, options.tpid);
 
-  const pid = computePid(valid, options.tpid);
-
-  // stack order: PID inside-out (deepest center), then base layout
+  // Stack order: highest TPID at the center, then lower scores toward the outside.
   const order = pid.order;
-  const ordered = order.map((id) => valid.find((l) => l.id === id)!);
+  const sourceLayers = order.map((id) => valid.find((l) => l.id === id)!);
+  const quantiles = sourceLayers.map((layer) => layer.q.p50.map((_, t) =>
+    resolveLayerQuantiles(layer, t, braidOptions.envelopeQuantile, braidOptions.representativeQuantile)
+  ));
+  const ordered = sourceLayers.map((layer, i) => ({
+    ...layer, magnitude: quantiles[i].map((q) => q.qRepresentative),
+  }));
   const base =
     (options.baselineMode ?? "wiggle") === "sine"
       ? computeSineBaseline(ordered, order)
       : computeWiggleBaseline(ordered, order);
 
-  const h0 = h0FromLayers(valid);
+  const h0 = h0FromLayers(ordered);
   const yExtent = h0Max(h0);
 
-  const corr = options.corridors;
-  const amplitudeMax = corr.amplitudeMax > 0 ? corr.amplitudeMax : 0.03 * yExtent;
-  const clearance = corr.clearance > 0 ? corr.clearance : 0.002 * yExtent;
-
-  // request corridors on STACK order (u aligned to ordered layers)
-  const uOrdered = order.map((id) => uncertainty.u[valid.findIndex((l) => l.id === id)]);
-  const req = requestCorridors(ordered, uOrdered, {
-    gateClose: corr.eventCloseThreshold ?? corr.participationThreshold,
-    gateOpen: Math.max(
-      (corr.eventCloseThreshold ?? corr.participationThreshold) + 0.01,
-      corr.eventOpenThreshold ??
-        (corr.eventCloseThreshold ?? corr.participationThreshold) + corr.windowSmooth / 100
-    ),
-    aMax: amplitudeMax,
-    clearance,
-    gamma: corr.gamma ?? 1,
-    encoding: corr.encoding ?? "both",
-    fMin: corr.frequencyMin,
-    fMax: corr.frequencyMax,
-    layerOverride: corr.layerOverride ?? null,
-  });
-
-  const { rho, aAlloc, seam } = allocateBudget(req.aReq, req.seamReq, corr.budgetEta, h0);
-
-  // Explicit seams fully determine adjacent geometry. Retain deterministic
-  // phase metadata for diagnostics without applying a dead collision objective.
-  const phases = { phi: Array.from({ length: n }, (_, i) => Math.PI * (i % 2)) };
-
-  const braided = buildBraidedGeometry(
-    base,
-    aAlloc,
-    seam,
-    req.gate,
-    rho
+  const uncertaintyOrdered = order.map((id) => uncertainty.value[valid.findIndex((l) => l.id === id)]);
+  const rankOrdered = order.map((id) => uncertainty.rank[valid.findIndex((l) => l.id === id)]);
+  const exposureOrdered = order.map((id) => uncertainty.exposure[valid.findIndex((l) => l.id === id)]);
+  const topology = computeBranchTopology(ordered, quantiles);
+  const requested = requestQuantileEnvelope(quantiles, exposureOrdered, topology);
+  const activeOrdered = computeActiveMask(requested.total);
+  const slotLayers = ordered.map((layer, i) => ({
+    ...layer,
+    magnitude: layer.magnitude.map((value, t) => value + requested.capacity[i][t]),
+  }));
+  const slotBase = (options.baselineMode ?? "wiggle") === "sine"
+    ? computeSineBaseline(slotLayers, order)
+    : computeWiggleBaseline(slotLayers, order);
+  const braided = buildLayerSlotGeometry(
+    ordered, quantiles, topology, slotBase, uncertaintyOrdered, rankOrdered, exposureOrdered,
+    activeOrdered, requested, braidOptions, base
   );
-
-  const costs = computeGeometryCosts(base, braided, req.aReq, h0);
-
-  // phase continuity check (by construction zero; assert for tests)
-  let phaseContinuityMax = 0;
-  const span = Math.max(1, tLen - 1);
-  for (let i = 0; i < n; i += 1) {
-    for (let t = 1; t < tLen; t += 1) {
-      const d = req.theta[i][t] - req.theta[i][t - 1] - (2 * Math.PI * req.freq[i][t - 1]) / span;
-      const a = Math.abs(d);
-      if (a > phaseContinuityMax) phaseContinuityMax = a;
-    }
+  const relaxation = relaxLayerCollisions(braided, braidOptions.epsilon);
+  if (braidOptions.debug) {
+    console.debug(
+      `[braided] collisions ${relaxation.beforeCount} -> ${relaxation.afterCount}; ` +
+      `max overlap ${relaxation.maxOverlapBefore} -> ${relaxation.maxOverlapAfter}; passes ${relaxation.passes}`
+    );
   }
-  costs.phaseContinuityMax = phaseContinuityMax;
+
+  const zeros = uncertaintyOrdered.map((row) => row.map(() => 0));
+  const req = {
+    aReq: requested.total,
+    gate: exposureOrdered,
+    seamReq: [] as number[][],
+    window: exposureOrdered,
+    freq: zeros,
+    theta: zeros,
+    ampConst: requested.total.map((row) => row.reduce((sum, value) => sum + value, 0) / row.length),
+  };
+  const phases = { phi: Array.from({ length: n }, (_, i) => Math.PI * (i % 2)) };
+  const costs = computeGeometryCosts(base, braided, req.aReq, h0);
 
   return {
     validation,
@@ -130,6 +140,7 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
     corridors: req,
     phases,
     braided,
+    options: braidOptions,
     costs,
     yExtent,
   };
@@ -142,6 +153,7 @@ function h0Max(h0: number[]): number {
 }
 
 export type { Layer, QuantileMatrix, ValidationResult };
-export { inputDataset as canonicalizeDataset } from "./dataInput";
-export { compute_tpid_layer_ordering } from "./pid";
-export type { TpidLayerInput, TpidOptions, TpidOrderingEntry } from "./pid";
+export { resolveLayerQuantiles } from "./engine/braided";
+export { inputDataset as canonicalizeDataset } from "./data/dataInput";
+export { compute_tpid_layer_ordering } from "./engine/pid";
+export type { TpidLayerInput, TpidOptions, TpidOrderingEntry } from "./engine/pid";

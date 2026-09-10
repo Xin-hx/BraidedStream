@@ -16,17 +16,16 @@
 
           <label>Dataset
             <select id="ctl-dataset">
-              <option value="editable" selected>Editable CSV</option>
-              <option value="tcm">TCM prescriptions (33 patients)</option>
-              <option value="covid-inc">COVID new cases (8 states)</option>
-              <option value="flusight">FluSight hosp admissions (8 states)</option>
+              <option value="editable">Editable CSV</option>
+              <option value="tcm">TCM prescriptions</option>
+              <option value="covid-inc" selected>COVID-inc</option>
             </select>
           </label>
-          <label>Mode
-            <select id="ctl-mode">
-              <option value="base">Base streamgraph</option>
-              <option value="pid">PID order</option>
-              <option value="braided" selected>PID + Braided</option>
+          <label>Vis method
+            <select id="ctl-vis-method">
+              <option value="braided" selected>Braided stream</option>
+              <option value="star">markers</option>
+              <option value="color-blur">Color + blur</option>
             </select>
           </label>
           <label>Baseline
@@ -35,44 +34,41 @@
               <option value="sine">Sine (Gaussian L2)</option>
             </select>
           </label>
-
-          <div class="sliders">
-            <label>Budget η
-              <input id="ctl-eta" type="range" min="1" max="3" step="0.05" value="1.6" />
-              <span id="val-eta" class="val">1.60</span>
-            </label>
-            <label>Amplitude a<sub>max</sub>
-              <input id="ctl-amax" type="range" min="0" max="10" step="0.5" value="3" />
-              <span id="val-amax" class="val">3.0%</span>
-            </label>
-            <label>Gate close τ
-              <input id="ctl-tau" type="range" min="0" max="1" step="0.05" value="0.3" />
-              <span id="val-tau" class="val">0.30</span>
-            </label>
-            <label>Gate ramp
-              <input id="ctl-window" type="range" min="1" max="40" step="1" value="30" />
-              <span id="val-window" class="val">0.30</span>
-            </label>
-          </div>
+          <label>Representative statistic
+            <select id="ctl-representative">
+              <option value="0.25">Q25</option>
+              <option value="0.5" selected>Q50</option>
+              <option value="0.75">Q75</option>
+            </select>
+          </label>
+          <label>Envelope statistic
+            <select id="ctl-envelope">
+              <option value="0.9" selected>Q90</option>
+              <option value="0.975">Q97.5</option>
+            </select>
+          </label>
+          <label>Expose top <span id="ctl-uncertainty-focus-value">10%</span> uncertainty
+            <input id="ctl-uncertainty-focus" type="range" min="0" max="100" step="1" value="10" />
+          </label>
+          <div id="ctl-parameters" hidden></div>
 
           <label class="chk">
-            <input id="ctl-ref" type="checkbox" checked /> Σq50 reference
+            <input id="ctl-smooth" type="checkbox" checked /> Smooth contours
           </label>
           <label class="chk">
-            <input id="ctl-smooth" type="checkbox" checked /> 平滑轮廓
+            <input id="ctl-outlines" type="checkbox" /> Layer outlines
           </label>
-
           <div class="actions">
             <button id="btn-collapse" title="toggle braid">Collapse</button>
             <button id="btn-svg">SVG</button>
             <button id="btn-png">PNG</button>
           </div>
-          <a class="compare-link" href="/compare.html">Route-A encoding pages</a>
         </div>
       </aside>
 
       <main class="content">
         <svg id="chart" role="img" aria-label="braided streamgraph"></svg>
+        <svg id="time-filter" role="slider" aria-label="Time range filter"></svg>
         <div id="tooltip" class="tooltip hidden"></div>
         <div id="costs" class="costs"></div>
         <div id="legend" class="legend"></div>

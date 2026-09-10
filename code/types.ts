@@ -33,17 +33,21 @@ export interface Layer {
   perCapita?: number[];
   /** Streamgraph thickness. Distinct from distribution quantiles. */
   magnitude?: number[];
-  /** Time-major distribution values: distribution[t][z]. */
-  distribution?: number[][];
+  /** Raw distribution at each time; missing cells are represented by null. */
+  distribution?: Array<DistributionAtTime | null>;
   /** Number of empirical members; null when only quantiles are supplied. */
   sampleSize?: Array<number | null>;
-  sourceKind?: "empirical" | "quantile";
+  /** Optional analyst-supplied uncertainty signal in [0, 1], one value per time. */
+  uncertainty?: number[];
+  sourceKind?: "empirical" | "quantile" | "hybrid";
   q: QuantileMatrix;
 }
 
 export interface EmpiricalDistributionCell {
   kind: "empirical";
   observations: Array<{ memberId: string; value: number; weight?: number }>;
+  /** Representative value when the cell has no observed members. */
+  emptyValue?: number;
 }
 
 export interface QuantileDistributionCell {
@@ -55,9 +59,30 @@ export interface QuantileDistributionCell {
 
 export type DistributionCell = EmpiricalDistributionCell | QuantileDistributionCell;
 
+export type EmpiricalDistribution = {
+  kind: "samples";
+  values: number[];
+  weights?: number[];
+};
+
+export type QuantileDistribution = {
+  kind: "quantiles";
+  probabilities: number[];
+  values: number[];
+};
+
+export type DistributionAtTime = EmpiricalDistribution | QuantileDistribution;
+
+export type WeightedPoint = {
+  value: number;
+  weight: number;
+};
+
 export interface DistributionalLayer {
   id: string;
   cells: Array<DistributionCell | null>;
+  /** Optional analyst-supplied uncertainty signal in [0, 1], one value per time. */
+  uncertainty?: number[];
 }
 
 export interface DistributionalTemporalDataset {
@@ -68,9 +93,9 @@ export interface DistributionalTemporalDataset {
 
 export interface CanonicalLayer extends Omit<Layer, "magnitude" | "distribution" | "sampleSize" | "sourceKind"> {
   magnitude: number[];
-  distribution: number[][];
+  distribution: Array<DistributionAtTime | null>;
   sampleSize: Array<number | null>;
-  sourceKind: "empirical" | "quantile";
+  sourceKind: "empirical" | "quantile" | "hybrid";
 }
 
 export interface ForecastData {
@@ -90,29 +115,106 @@ export interface ValidationResult {
   issues: ValidationIssue[];
 }
 
-/** Uncertainty normalization mode. See DECISIONS.md D1. */
-export type NormalizeMode = "per-layer" | "global";
-
-export interface UncertaintyOptions {
-  /** 80% interval bounds: p_low = p10, p_high = p90. Fixed by METHOD.md M3. */
-  lowKey?: QuantileKey;
-  highKey?: QuantileKey;
-  normalize?: NormalizeMode;
-  /** Optional diagnostic smoothing (0 disables smoothing). Default 0. */
-  smoothWindow?: number;
-}
-
 export interface UncertaintyResult {
-  /** w_i(t): interval width. */
-  width: number[][];
-  /** u_i(t) in [0,1]. */
-  u: number[][];
+  /** Normalized uncertainty signal, supplied by the analyst or derived from quantile width. */
+  value: number[][];
+  /** Global upper empirical-CDF percentile rank of the uncertainty signal. */
+  rank: number[][];
+  /** Visual exposure lambda after the top-p percentile ramp. */
+  exposure: number[][];
 }
+
+export type BranchGeometry = {
+  layerId: string;
+  branchIndex: number;
+  mass: number;
+  masses: number[];
+  y0: number[];
+  y1: number[];
+};
+
+export type BraidedQuantiles = {
+  qLow: number;
+  q25: number;
+  q50: number;
+  q75: number;
+  /** Selected representative statistic Q^rho. */
+  qRepresentative: number;
+  qEnvelope: number;
+  qHigh: number;
+};
+
+export type BraidedPointDebug = BraidedQuantiles & {
+  H: number;
+  HEnvelope: number;
+  uncertainty: number;
+  uncertaintyRank: number;
+  exposure: number;
+  active: boolean;
+  rawBranchCount: 1 | 2 | 3;
+  persistentBranchCount: 1 | 2 | 3;
+  modeLocations: number[];
+  branchMasses: number[];
+  branchCenters: number[];
+  envelopeLow: number;
+  envelopeHigh: number;
+  branchIntervals: Array<{ y0: number; y1: number }>;
+  visibleBranchCount: 1 | 2 | 3;
+};
+
+export type SpaceGeometry = {
+  ownerLayerId: string;
+  kind: "internal";
+  gapIndex: number;
+  y0: number[];
+  y1: number[];
+};
+
+export type BraidedLayerGeometry = {
+  layerId: string;
+  /** Mathematical topology; subpixel branches naturally appear merged. */
+  branchCount: Array<1 | 2 | 3>;
+  active: boolean[];
+  branches: BranchGeometry[];
+  spaces: SpaceGeometry[];
+  visualEnvelopeY0: number[];
+  visualEnvelopeY1: number[];
+  slotY0: number[];
+  slotY1: number[];
+  uncertainty: number[];
+  uncertaintyRank: number[];
+  exposure: number[];
+  requestedSpace: number[];
+  allocatedSpace: number[];
+  /** Present only when debug=true; the same geometry used for rendering. */
+  debug?: BraidedPointDebug[];
+};
+
+export type BraidedStreamOptions = {
+  /** Representative statistic Q^rho; rho must be in [0.025, envelopeQuantile). */
+  representativeQuantile: number;
+  /** Upper quantile Q^eta used as the external slot contour; eta must be in (0.5, 0.975]. */
+  envelopeQuantile: number;
+  /** Percentage of globally highest uncertainty ranks exposed; 0 disables deformation. */
+  uncertaintyFocusPercent: number;
+  epsilon: number;
+  debug: boolean;
+};
+
+export type CollisionRelaxationStats = {
+  beforeCount: number;
+  afterCount: number;
+  maxOverlapBefore: number;
+  maxOverlapAfter: number;
+  passes: number;
+};
 
 /** Temporal probabilistic inclusion depth used by the existing pipeline API. */
 export interface PidResult {
   /** TPID score per layer id. */
   depth: Record<string, number>;
+  /** Layer ids sorted by descending TPID score. */
+  ranking: string[];
   /** Stack order with the highest TPID layers nearest the center. */
   order: string[];
 }
@@ -188,6 +290,8 @@ export interface PhaseOptimizerResult {
 }
 
 export interface BraidedLayout {
+  /** Owner-explicit layer-slot geometry used by the renderer. */
+  layers: BraidedLayerGeometry[];
   /** final boundaries (stack order). */
   yBottomStar: number[][];
   yTopStar: number[][];
@@ -195,19 +299,20 @@ export interface BraidedLayout {
   s: number[][];
   /** oscillation displacement o_i(t). */
   o: number[][];
-  /** allocated amplitude a_i^alloc(t) after budget compression. */
+  /** Compatibility alias of the full, uncompressed envelope extent. */
   aAlloc: number[][];
   /** allocated/displayed adjacent seam width d_j(t), exactly nonnegative. */
   seam: number[][];
-  /** per-time compression ratio rho(t) in [0,1]. */
+  /** Compatibility field: faithful envelopes always use 1. */
   rho: number[];
   /** total envelope height H*(t). */
   totalHeight: number[];
   /** conflict components at each time (report only): list of component sizes. */
   components: number[][];
-  /** final total envelope of each layer: E_high = U+s+aAlloc (data units). */
+  /** Final active external-envelope bounds, including layer translation. */
   envelopeHigh: number[][];
   envelopeLow: number[][];
+  collisionRelaxation: CollisionRelaxationStats;
 }
 
 export interface CostReport {
@@ -234,9 +339,8 @@ export interface PipelineResult {
   corridors: RequestedCorridors;
   phases: PhaseOptimizerResult;
   braided: BraidedLayout;
+  options: BraidedStreamOptions;
   costs: CostReport;
   /** y extent used for parameter scaling (data units). */
   yExtent: number;
 }
-
-export type ViewMode = "base" | "pid" | "braided";

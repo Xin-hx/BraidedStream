@@ -8,7 +8,7 @@ import {
   type Layer,
   type ValidationIssue,
   type ValidationResult,
-} from "./types";
+} from "../types";
 
 const KEYS: QuantileKey[] = [...QUANTILE_KEYS];
 
