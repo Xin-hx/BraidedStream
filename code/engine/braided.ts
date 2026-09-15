@@ -30,7 +30,8 @@ type Interval = { y0: number; y1: number };
 
 export type BranchMode = { location: number; mass: number };
 export type DistributionAnalysis = {
-  median: number;
+  /** Median of the KDE-smoothed analysis distribution P_hat. */
+  kdeMedian: number;
   mean: number;
   deviationLow: number;
   deviationHigh: number;
@@ -70,7 +71,7 @@ export function distributionAt(layer: Layer, time: number): DistributionAtTime |
     : null;
 }
 
-/** Compatibility summary for comparison views; braided geometry uses analyzeDistribution. */
+/** Exact quantile summary of the declared, unsmoothed probability measure. */
 export function getBraidedQuantiles(distribution: DistributionAtTime | null): BraidedQuantiles {
   if (!distribution) return zeroQuantiles();
   const parts = measureParts(distribution);
@@ -116,7 +117,7 @@ export function buildAnalysisDistribution(
   const { mean, variance, maximum } = moments(parts);
   if (variance === 0) {
     const summary = {
-      median: mean,
+      kdeMedian: mean,
       mean,
       deviationLow: 0,
       deviationHigh: 0,
@@ -139,8 +140,8 @@ export function buildAnalysisDistribution(
   const cdf = (x: number) => reflectedCdf(parts, bandwidth, x);
   let upper = maximum + 8 * bandwidth;
   while (cdf(upper) < 1 - 1e-10) upper *= 2;
-  const median = bisectCdf(cdf, upper, 0.5);
-  const deviationLow = simpson(cdf, 0, median, ANALYSIS_INTEGRATION_STEPS);
+  const kdeMedian = bisectCdf(cdf, upper, 0.5);
+  const deviationLow = simpson(cdf, 0, kdeMedian, ANALYSIS_INTEGRATION_STEPS);
   const smoothedMean = parts.reduce((sum, part) => sum + part.mass * (
     part.kind === "atom"
       ? foldedNormalMean(part.value, bandwidth)
@@ -151,7 +152,7 @@ export function buildAnalysisDistribution(
           ANALYSIS_INTEGRATION_STEPS,
         ) / (part.high - part.low)
   ), 0);
-  const deviationHigh = Math.max(0, smoothedMean - median + deviationLow);
+  const deviationHigh = Math.max(0, smoothedMean - kdeMedian + deviationLow);
   const dispersion = deviationLow + deviationHigh;
   const balance = dispersion > 0
     ? (deviationHigh - deviationLow) / dispersion
@@ -172,7 +173,7 @@ export function buildAnalysisDistribution(
     lowDensitySeparation(grid, left, peakIndices[index + 1])
   );
   const summary = {
-    median,
+    kdeMedian,
     mean: smoothedMean,
     deviationLow,
     deviationHigh,
@@ -327,7 +328,7 @@ export function buildLayerSlotGeometry(
       const point = topology[i][t];
       const low = slotBase.yBottom[i][t];
       const high = slotBase.yTop[i][t];
-      const H = point?.median ?? 0;
+      const H = orderedLayers[i].magnitude?.[t] ?? 0;
       const modes = point?.modes ?? [{ location: 0, mass: 1 }];
       const localGaps = point ? requested.gaps[i][t] : [0, 0];
       const placement = placeBranches(modes, H, localGaps);
@@ -368,7 +369,7 @@ export function buildLayerSlotGeometry(
         debug[t] = {
           ...quantiles[i][t],
           H,
-          median: point?.median ?? Number.NaN,
+          kdeMedian: point?.kdeMedian ?? Number.NaN,
           mean: point?.mean ?? Number.NaN,
           deviationLow: point?.deviationLow ?? 0,
           deviationHigh: point?.deviationHigh ?? 0,
