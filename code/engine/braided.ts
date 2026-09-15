@@ -30,9 +30,12 @@ type Interval = { y0: number; y1: number };
 
 export type BranchMode = { location: number; mass: number };
 export type DistributionAnalysis = {
+  /** Median of the declared, unsmoothed probability measure P. */
+  representative: number;
   /** Median of the KDE-smoothed analysis distribution P_hat. */
   kdeMedian: number;
   mean: number;
+  /** Exact lower and upper first partial moments of P around representative. */
   deviationLow: number;
   deviationHigh: number;
   dispersion: number;
@@ -114,15 +117,22 @@ export function buildAnalysisDistribution(
   }
   const parts = measureParts(distribution);
   if (!parts.length) return null;
+  const representative = measureQuantile(parts, 0.5);
+  const { deviationLow, deviationHigh } = partialMoments(parts, representative);
+  const dispersion = deviationLow + deviationHigh;
+  const balance = dispersion > 0
+    ? (deviationHigh - deviationLow) / dispersion
+    : 0;
   const { mean, variance, maximum } = moments(parts);
   if (variance === 0) {
     const summary = {
+      representative,
       kdeMedian: mean,
       mean,
-      deviationLow: 0,
-      deviationHigh: 0,
-      dispersion: 0,
-      balance: 0,
+      deviationLow,
+      deviationHigh,
+      dispersion,
+      balance,
       bandwidth: 0,
       modes: [{ location: mean, mass: 1 }],
       separations: [],
@@ -141,7 +151,6 @@ export function buildAnalysisDistribution(
   let upper = maximum + 8 * bandwidth;
   while (cdf(upper) < 1 - 1e-10) upper *= 2;
   const kdeMedian = bisectCdf(cdf, upper, 0.5);
-  const deviationLow = simpson(cdf, 0, kdeMedian, ANALYSIS_INTEGRATION_STEPS);
   const smoothedMean = parts.reduce((sum, part) => sum + part.mass * (
     part.kind === "atom"
       ? foldedNormalMean(part.value, bandwidth)
@@ -152,11 +161,6 @@ export function buildAnalysisDistribution(
           ANALYSIS_INTEGRATION_STEPS,
         ) / (part.high - part.low)
   ), 0);
-  const deviationHigh = Math.max(0, smoothedMean - kdeMedian + deviationLow);
-  const dispersion = deviationLow + deviationHigh;
-  const balance = dispersion > 0
-    ? (deviationHigh - deviationLow) / dispersion
-    : 0;
   const grid = kdeGrid(density, upper);
   const peakIndices = findPeaks(grid);
   const valleyIndices = peakIndices.slice(0, -1).map((peak, index) =>
@@ -173,6 +177,7 @@ export function buildAnalysisDistribution(
     lowDensitySeparation(grid, left, peakIndices[index + 1])
   );
   const summary = {
+    representative,
     kdeMedian,
     mean: smoothedMean,
     deviationLow,
@@ -516,6 +521,34 @@ function moments(parts: MeasurePart[]): { mean: number; variance: number; maximu
     return sum + part.mass * ((partMean - mean) ** 2 + within);
   }, 0);
   return { mean, variance, maximum };
+}
+
+/** Exact first partial moments of the original atom/uniform measure around r. */
+function partialMoments(
+  parts: MeasurePart[],
+  representative: number,
+): { deviationLow: number; deviationHigh: number } {
+  let deviationLow = 0;
+  let deviationHigh = 0;
+  for (const part of parts) {
+    if (part.kind === "atom") {
+      deviationLow += part.mass * Math.max(representative - part.value, 0);
+      deviationHigh += part.mass * Math.max(part.value - representative, 0);
+      continue;
+    }
+    const split = Math.max(part.low, Math.min(representative, part.high));
+    const density = part.mass / (part.high - part.low);
+    deviationLow += density * (
+      representative * (split - part.low) - (split ** 2 - part.low ** 2) / 2
+    );
+    deviationHigh += density * (
+      (part.high ** 2 - split ** 2) / 2 - representative * (part.high - split)
+    );
+  }
+  return {
+    deviationLow: Math.max(0, deviationLow),
+    deviationHigh: Math.max(0, deviationHigh),
+  };
 }
 
 function reflectedDensity(parts: MeasurePart[], bandwidth: number, x: number): number {

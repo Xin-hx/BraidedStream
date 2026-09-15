@@ -304,8 +304,8 @@ function showTooltip(
 
   const rows = [
     ["representative thickness H = raw P median", fmt(magnitude)],
-    ["dispersion U", fmt(geometry.actualSpace[t])],
-    ["directional deviation A- / A+", point ? `${fmt(point.deviationLow)} / ${fmt(point.deviationHigh)}` : "n/a"],
+    ["raw-P dispersion U", fmt(geometry.actualSpace[t])],
+    ["raw-P deviation A- / A+", point ? `${fmt(point.deviationLow)} / ${fmt(point.deviationHigh)}` : "n/a"],
     ["asymmetry b", geometry.balance[t].toFixed(3)],
     ["KDE beta / bandwidth h", point ? `${point.bandwidthRatio.toFixed(2)} / ${fmt(point.bandwidth)}` : "n/a"],
     ["modes K", String(geometry.branchCount[t])],

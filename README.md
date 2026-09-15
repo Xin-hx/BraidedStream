@@ -2,7 +2,7 @@
 
 This TypeScript/D3 prototype treats every category-time cell as a distribution.
 Colored thickness shows its raw-measure median; a lighter same-hue tint shows space
-allocated from the mean absolute deviation to exterior asymmetry and KDE-derived
+allocated from raw-measure partial moments to exterior asymmetry and KDE-derived
 low-density separations. Modal basin probability partitions the colored
 thickness into branches; a neutral outline marks the complete envelope.
 
