@@ -3,7 +3,7 @@
  */
 import { resolveLayerQuantiles, runPipeline } from "../code/index";
 import { DEFAULT_COVID_STATES, parseCovidCaseJson, type CovidStateSelection } from "../code/data/covid";
-import { parseEditableCsv } from "../code/data/editable";
+import { parseIllustrationCsv } from "../code/data/illustration";
 import { parseTcmCsv } from "../code/data/tcm";
 import {
   colorForLayer,
@@ -30,10 +30,10 @@ export const COVID_PARAMETERS: { stateSelection: CovidStateSelection } = {
 };
 
 const DATASETS = {
-  editable: {
-    path: "dataset/editable.csv",
-    label: "editable",
-    parse: parseEditableCsv,
+  illustration: {
+    path: "dataset/illustration.csv",
+    label: "illustration",
+    parse: parseIllustrationCsv,
   },
   tcm: { path: "dataset/TCMRecord.csv", label: "tcm", parse: parseTcmCsv },
   "covid-inc": {
@@ -65,7 +65,7 @@ interface State {
 }
 
 const state: State = {
-  dataset: "covid-inc",
+  dataset: "illustration",
   visMethod: "braided",
   baseline: "wiggle",
   smoothContours: true,
@@ -174,8 +174,10 @@ function renderLegend(): void {
     })
     .join("&nbsp;&nbsp;");
   const meaning = state.dataset === "tcm"
-    ? "each layer-time cell = patient-dose distribution; thickness = smoothed median"
-    : "each layer-time cell = weighted reconstructed predictive mixture; thickness = smoothed median";
+    ? "each layer-time cell = patient-dose distribution; thickness = raw-measure median"
+    : state.dataset === "illustration"
+      ? "each layer-time cell = generated ensemble distribution; thickness = raw-measure median"
+      : "each layer-time cell = weighted reconstructed predictive mixture; thickness = raw-measure median";
   const sampleColor = colorForLayer(dataCache!.layers, result.pid.ranking[0]);
   const geometryKey = state.visMethod === "braided"
     ? `<div><span class="sw" style="background:${sampleColor}"></span>solid = representative thickness H&nbsp;&nbsp;` +
@@ -301,7 +303,7 @@ function showTooltip(
   const perCapita = layer.perCapita ? ` · ${fmt(layer.perCapita[t])}/cap` : "";
 
   const rows = [
-    ["representative thickness H = median", fmt(magnitude)],
+    ["representative thickness H = raw P median", fmt(magnitude)],
     ["dispersion U", fmt(geometry.actualSpace[t])],
     ["directional deviation A- / A+", point ? `${fmt(point.deviationLow)} / ${fmt(point.deviationHigh)}` : "n/a"],
     ["asymmetry b", geometry.balance[t].toFixed(3)],
@@ -322,7 +324,9 @@ function showTooltip(
     ...(spaceKind ? [["space owner", `${spaceKind} · ${layer.id}`]] : []),
     ...(sampleSize === null || sampleSize === undefined
       ? []
-      : [[layer.sourceKind === "quantile-mixture" ? "model members" : "patient sample", String(sampleSize)]]),
+      : [[layer.sourceKind === "quantile-mixture"
+        ? "model members"
+        : state.dataset === "illustration" ? "ensemble members" : "patient sample", String(sampleSize)]]),
   ];
   tt.innerHTML =
     `<div class="tt-title">${times[t]} · ${layer.id}${perCapita}</div>` +

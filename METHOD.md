@@ -32,19 +32,22 @@ Grid size and quadrature steps are numerical accuracy settings, not filters or
 statistical thresholds. A point mass is retained directly with `h=0`, `K=1`,
 `pi=[1]`, and all dispersion and gap quantities equal to zero.
 
-The analysis distribution supplies every visual quantity:
+The representative thickness comes from the original measure `P`; KDE analysis
+of `P_hat` supplies only deformation and branch structure:
 
 ```text
-m  = median
-A- = E[(m-X)+]
-A+ = E[(X-m)+]
+m      = median(P)
+H      = m
+m_hat  = median(P_hat)
+A-     = E_P_hat[(m_hat-X)+]
+A+     = E_P_hat[(X-m_hat)+]
 U  = A- + A+
 b  = (A+ - A-) / U       (0 when U=0)
 ```
 
-Colored thickness is `H=m` and the deformation budget is `D=U`; the demo uses
-one layout unit per data unit. There is no Q90 capacity, uncertainty rank,
-activation threshold, or channel-specific gain.
+The deformation budget is `D=U`; the demo uses one layout unit per data unit.
+There is no Q90 capacity, uncertainty rank, activation threshold, or
+channel-specific gain.
 
 ## Probability inclusion order
 

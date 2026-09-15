@@ -152,7 +152,8 @@ export type BraidedQuantiles = {
 
 export type BraidedPointDebug = BraidedQuantiles & {
   H: number;
-  median: number;
+  /** Median of the KDE-smoothed analysis distribution; not the representative thickness. */
+  kdeMedian: number;
   mean: number;
   deviationLow: number;
   deviationHigh: number;

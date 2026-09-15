@@ -39,7 +39,7 @@ export interface RenderInput {
   visMethod: VisMethod;
   smoothContours: boolean;
   showSlotBoundary: boolean;
-  /** Pack colored branches back into the representative Q50 band. */
+  /** Pack colored branches back into the raw-measure median band. */
   collapseBranches: boolean;
   hover: number | null;
   highlightLayer: string | null;
