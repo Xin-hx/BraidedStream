@@ -32,15 +32,14 @@ Grid size and quadrature steps are numerical accuracy settings, not filters or
 statistical thresholds. A point mass is retained directly with `h=0`, `K=1`,
 `pi=[1]`, and all dispersion and gap quantities equal to zero.
 
-The representative thickness comes from the original measure `P`; KDE analysis
-of `P_hat` supplies only deformation and branch structure:
+The representative thickness and directional deformation budget come from the
+original measure `P`; KDE analysis of `P_hat` supplies only branch structure:
 
 ```text
 m      = median(P)
 H      = m
-m_hat  = median(P_hat)
-A-     = E_P_hat[(m_hat-X)+]
-A+     = E_P_hat[(X-m_hat)+]
+A-     = E_P[(m-X)+]
+A+     = E_P[(X-m)+]
 U  = A- + A+
 b  = (A+ - A-) / U       (0 when U=0)
 ```
@@ -70,8 +69,9 @@ The time-value numerator is the weighted sum of `E[min(X_it,X_jt)]`, while the
 source denominator is the weighted sum of `E[X_it]`. Equal observation-time
 weights are used. Missing cells restrict the common reference set; a real
 point mass at zero remains observed and follows PID's zero-mask convention.
-The input representation, KDE ratio `beta`, reflected boundary treatment, and
-degenerate-distribution rules are therefore identical in TPID and braiding.
+TPID and branch extraction use the same KDE ratio `beta`, reflected boundary
+treatment, and degenerate-distribution rules. Representative and envelope
+statistics are computed from `P` before this KDE step.
 
 ## Modes, branches, and gaps
 
@@ -87,8 +87,9 @@ For adjacent peaks `c_k,c_(k+1)`, the implementation integrates
 d_k = integral[c_k,c_(k+1)] max(0, 1 - f(x)/min(f(c_k),f(c_(k+1)))) dx
 ```
 
-The single allocation vector is `[A-, d_1, ..., d_(K-1), A+]`. It is normalized
-once into gaps whose sum is exactly `D`. Placement is cumulative in the order
+The single allocation vector is `[A-, d_1, ..., d_(K-1), A+]`, where `A-` and
+`A+` come from `P` and each `d_k` comes from the KDE. It is normalized once
+into gaps whose sum is exactly the raw-measure budget `D`. Placement is cumulative in the order
 
 ```text
 lower gap, branch 1, internal gap 1, ..., branch K, upper gap

@@ -11,8 +11,6 @@ import {
   branchTopologyFromAnalysis,
   buildLayerSlotGeometry,
   computeAnalysisTopology,
-  distributionAt,
-  getBraidedQuantiles,
   resolveLayerQuantiles,
   requestDynamicSpaces,
 } from "./engine/braided";
@@ -72,13 +70,10 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
   const quantiles = sourceLayers.map((layer) => layer.q.p50.map((_, t) =>
     resolveLayerQuantiles(layer, t)
   ));
-  const representative = sourceLayers.map((layer) => layer.q.p50.map((_, t) =>
-    getBraidedQuantiles(distributionAt(layer, t)).q50
-  ));
   const topology = branchTopologyFromAnalysis(orderedAnalysis);
   const ordered = sourceLayers.map((layer, i) => ({
     ...layer,
-    magnitude: representative[i],
+    magnitude: topology[i].map((point) => point?.representative ?? 0),
   }));
   const base =
     (options.baselineMode ?? "wiggle") === "sine"
