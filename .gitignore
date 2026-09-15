@@ -6,6 +6,5 @@ coverage/
 public/*
 outputs/
 .tmp_check/
-dataset/
 scripts/
 tests/
