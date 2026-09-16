@@ -111,7 +111,8 @@ cells.
 
 ## Rendering semantics
 
-The envelope has a neutral outline and is not an interval estimate. Solid
+The envelope is not an interval estimate; its neutral outer stroke is an
+optional, default-off rendering aid. Solid
 branches use the category color; allocated gaps use a lighter tint of the same
 hue. The tint establishes category ownership, but does not encode probability
 mass or an additional uncertainty statistic. The vertical coordinate is a
@@ -120,6 +121,18 @@ shows a shared thickness ruler plus a high-value orientation cue. TCM uses
 ordinal visit positions; ISO COVID target dates use their actual temporal
 spacing. The complete envelope is an interaction target, while internal-gap
 targets retain their lower, internal, or upper semantic label.
+
+The demo also provides an optional, default-off KDE density color layer for
+exploration outside the core braiding encoding. It samples density at equal
+probability bins, uses one color scale per layer shared across all times, and
+clips the resulting strips to the representative branches. It changes no
+geometry, ordering, deformation budget, or cost. The strip count is the
+`DENSITY_GRADIENT_BINS` constant in `demo/main.ts`. Density colors are opaque
+and span a light-to-dark range. Four independent, default-off rendering aids
+can show the envelope outline, representative-layer bounds, time-cell vertical
+lines, and individual branch bounds. These strokes draw only their upper and
+lower curves, never cell-edge vertical segments. When branches are collapsed,
+only the envelope and representative-layer stroke controls remain available.
 
 Run `npm test` to check PID directionality and analytic point-mass values as
 well as mass conservation, budget conservation, asymmetry shift, mixture

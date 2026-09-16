@@ -11,6 +11,7 @@ import {
   branchTopologyFromAnalysis,
   buildLayerSlotGeometry,
   computeAnalysisTopology,
+  densityProfilesFromAnalysis,
   resolveLayerQuantiles,
   requestDynamicSpaces,
 } from "./engine/braided";
@@ -39,6 +40,8 @@ export interface PipelineOptions {
   /** baseline layout algorithm: "wiggle" (Byron-Wattenberg L2) or "sine"
    *  (SineStream Gaussian-weighted L2). Default "wiggle". */
   baselineMode?: "wiggle" | "sine";
+  /** Sampling resolution for the optional density-color rendering layer. */
+  densityProfileBins?: number;
 }
 
 /**
@@ -67,6 +70,9 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
   const order = pid.order;
   const sourceLayers = order.map((id) => valid.find((l) => l.id === id)!);
   const orderedAnalysis = order.map((id) => analysis[valid.findIndex((layer) => layer.id === id)]);
+  const densityProfiles = options.densityProfileBins === undefined
+    ? undefined
+    : densityProfilesFromAnalysis(orderedAnalysis, options.densityProfileBins);
   const quantiles = sourceLayers.map((layer) => layer.q.p50.map((_, t) =>
     resolveLayerQuantiles(layer, t)
   ));
@@ -103,6 +109,7 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
     uncertainty,
     base,
     braided,
+    densityProfiles,
     options: braidOptions,
     costs,
     yExtent,

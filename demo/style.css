@@ -150,6 +150,11 @@ button.active { background: var(--accent); border-color: var(--accent); color: w
 
 #chart .layer { cursor: pointer; }
 #chart .layer.dim { opacity: 0.28; }
+#chart .density-bands.dim { opacity: 0.28; }
+#chart .envelope-stroke.dim,
+#chart .representative-stroke.dim,
+#chart .branch-stroke.dim,
+#chart .time-cell.dim { opacity: 0.28; }
 #chart .allocated-space.dim { opacity: 0.28; }
 #chart .envelope-hit { cursor: pointer; }
 #chart .space-hit { cursor: help; }

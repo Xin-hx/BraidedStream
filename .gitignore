@@ -8,3 +8,5 @@ outputs/
 .tmp_check/
 scripts/
 tests/
+outputs/
+outputs/*

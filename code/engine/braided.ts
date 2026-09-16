@@ -46,6 +46,10 @@ export type DistributionAnalysis = {
 };
 export type AnalysisDistribution = {
   summary: DistributionAnalysis;
+  /** KDE density on the original value scale; zero for a retained point mass. */
+  density: (value: number) => number;
+  /** Quantile of the KDE-smoothed distribution. */
+  quantile: (probability: number) => number;
   /** Survival mask S(x)=P_hat(X>x) on the shared non-negative value domain. */
   survival: (value: number) => number;
   /** Numerical upper bound used for integrals over the smoothed tail. */
@@ -139,6 +143,8 @@ export function buildAnalysisDistribution(
     };
     return {
       summary,
+      density: () => 0,
+      quantile: () => mean,
       survival: (value) => value >= 0 && value < mean ? 1 : 0,
       upper: mean,
       pointMass: mean,
@@ -190,6 +196,8 @@ export function buildAnalysisDistribution(
   };
   return {
     summary,
+    density,
+    quantile: (probability) => bisectCdf(cdf, upper, clamp(probability, 0, 1)),
     survival: (value) => value < 0 ? 0 : clamp(1 - cdf(value), 0, 1),
     upper,
     pointMass: null,
@@ -231,6 +239,32 @@ export function computeAnalysisTopology(
 
 export function branchTopologyFromAnalysis(analysis: AnalysisTopology): BranchTopology {
   return analysis.map((layer) => layer.map((cell) => cell?.summary ?? null));
+}
+
+/** Sample true KDE density at equal-probability bins; one scale is shared across time per layer. */
+export function densityProfilesFromAnalysis(
+  analysis: AnalysisTopology,
+  bins: number,
+): Array<Array<number[] | null>> {
+  if (!Number.isInteger(bins) || bins < 2) {
+    throw new Error("density profile bins must be an integer >= 2");
+  }
+  return analysis.map((layer) => {
+    const raw = layer.map((cell) => {
+      if (!cell) return null;
+      if (cell.pointMass !== null) return new Array<number>(bins).fill(Number.NaN);
+      return Array.from({ length: bins }, (_, bin) => {
+        const probability = (bin + 0.5) / bins;
+        return cell.density(cell.quantile(probability));
+      });
+    });
+    const maximum = Math.max(0, ...raw.flatMap((profile) =>
+      profile?.filter(Number.isFinite) ?? []
+    ));
+    return raw.map((profile) => profile?.map((value) =>
+      Number.isNaN(value) ? 1 : maximum > 0 ? clamp(value / maximum, 0, 1) : 0
+    ) ?? null);
+  });
 }
 
 export function computeBranchTopology(

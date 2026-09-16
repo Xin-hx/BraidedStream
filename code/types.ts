@@ -270,6 +270,8 @@ export interface PipelineResult {
   uncertainty: UncertaintyResult;
   base: BaseLayout;
   braided: BraidedLayout;
+  /** Per-layer KDE density sampled at equal-probability bins and normalized across time. */
+  densityProfiles?: Array<Array<number[] | null>>;
   options: BraidedStreamOptions;
   costs: CostReport;
   /** y extent used for parameter scaling (data units). */

@@ -8,6 +8,8 @@ import {
   curveBasis,
   curveLinear,
   hsl,
+  interpolateLab,
+  line,
   scaleLinear,
   select,
   stack,
@@ -38,8 +40,13 @@ export interface RenderInput {
   end: number;
   visMethod: VisMethod;
   smoothContours: boolean;
-  showSlotBoundary: boolean;
-  /** Pack colored branches back into the raw-measure median band. */
+  showEnvelopeStroke: boolean;
+  showRepresentativeStroke: boolean;
+  showTimeCell: boolean;
+  showBranchStroke: boolean;
+  showYAxis: boolean;
+  showDensityGradient: boolean;
+  /** Render each envelope as a single, unsplit band. */
   collapseBranches: boolean;
   hover: number | null;
   highlightLayer: string | null;
@@ -136,23 +143,34 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
       .x((index) => x(interpolated!.x[index]))
       .y0((index) => y(band.y0[index]))
       .y1((index) => y(band.y1[index]))(renderIndices.slice(start, end)) ?? "").join("");
+  const makeBraidedLine = (values: number[], defined: boolean[]) =>
+    interpolated!.segments.map(([start, end]) => line<number>()
+      .defined((index) => defined[index] && Number.isFinite(values[index]))
+      .curve(curveLinear)
+      .x((index) => x(interpolated!.x[index]))
+      .y((index) => y(values[index]))(renderIndices.slice(start, end)) ?? "").join("");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("width", "100%");
   const root = select(svg);
   root.selectAll("*").remove();
+  const densityEnabled = braided && input.showDensityGradient && !input.collapseBranches &&
+    Boolean(input.result.densityProfiles);
+  const definitions = densityEnabled ? root.append("defs") : null;
   const ticks = 5;
-  root
-    .append("g")
-    .attr("class", "grid")
-    .attr("transform", `translate(${M.left},0)`)
-    .call(
-      axisLeft(y)
-        .ticks(ticks)
-        .tickSize(-IW)
-        .tickFormat(() => ""),
-    )
-    .select(".domain")
-    .remove();
+  if (input.showYAxis) {
+    root
+      .append("g")
+      .attr("class", "grid")
+      .attr("transform", `translate(${M.left},0)`)
+      .call(
+        axisLeft(y)
+          .ticks(ticks)
+          .tickSize(-IW)
+          .tickFormat(() => ""),
+      )
+      .select(".domain")
+      .remove();
+  }
   const xTicks: number[] = [];
   const step = Math.max(1, Math.ceil(indices.length / 10));
   for (let t = firstTime; t <= lastTime; t += step) xTicks.push(t);
@@ -172,16 +190,18 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
         return tickLabel(input.times[index] ?? "");
       }),
   );
-  root
-    .append("g")
-    .attr("class", "axis axis-y")
-    .attr("transform", `translate(${M.left},0)`)
-    .call(
-      axisLeft(y)
-        .ticks(ticks)
-        .tickFormat((value) => braided ? "" : fmtNum(Number(value))),
-    );
-  if (braided) {
+  if (input.showYAxis) {
+    root
+      .append("g")
+      .attr("class", "axis axis-y")
+      .attr("transform", `translate(${M.left},0)`)
+      .call(
+        axisLeft(y)
+          .ticks(ticks)
+          .tickFormat((value) => braided ? "" : fmtNum(Number(value))),
+      );
+  }
+  if (braided && input.showYAxis) {
     const maxThickness = Math.max(...input.result.base.yTop.flatMap((row, i) =>
       row.map((top, t) => top - input.result.base.yBottom[i][t])
     ));
@@ -212,16 +232,6 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
         input.highlightLayer && geometry.layerId !== input.highlightLayer
           ? " dim"
           : "";
-      if (input.showSlotBoundary) {
-        layers
-          .append("path")
-          .attr("d", makeBraidedArea(visual.envelope, visual.defined))
-          .attr("class", `envelope${dim}`)
-          .attr("fill", "none")
-          .attr("stroke", "#7a8793")
-          .attr("stroke-dasharray", "4 3")
-          .attr("pointer-events", "none");
-      }
       layers
         .append("path")
         .attr("d", makeBraidedArea(visual.envelope, visual.defined))
@@ -230,17 +240,8 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
         .attr("stroke", "none")
         .attr("pointer-events", "all")
         .attr("data-owner-layer", geometry.layerId);
-      // A single compound fill keeps the shared edge of packed channels invisible.
-      const collapsedBand = {
-        y0: visual.branches[0].y0,
-        y1: visual.branches[0].y0.map((bottom, sample) =>
-          bottom + visual.branches.reduce(
-            (sum, branch) => sum + branch.y1[sample] - branch.y0[sample],
-            0,
-          )),
-      };
       const branchAreas = input.collapseBranches
-        ? [makeBraidedArea(collapsedBand, visual.defined)]
+        ? [makeBraidedArea(visual.envelope, visual.defined)]
         : visual.branches.map((branch) =>
             renderIndices.some((sample) => branch.y1[sample] > branch.y0[sample])
               ? makeBraidedArea(branch, visual.defined)
@@ -250,32 +251,136 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
         .append("path")
         .attr("d", branchAreas.join(""))
         .attr("class", `layer branch${dim}`)
-        .attr("fill", colorOf(i))
-        .attr("fill-opacity", 0.82)
+        .attr("fill", densityEnabled ? densityColor(colorOf(i), 0) : colorOf(i))
+        .attr("fill-opacity", densityEnabled ? 1 : 0.82)
         .attr("stroke", "none")
         .attr("data-id", geometry.layerId)
         .attr("data-owner-layer", geometry.layerId);
-      const tint = lighterFamilyColor(colorOf(i));
-      for (const [spaceIndex, space] of geometry.spaces.entries()) {
-        const visualSpace = visual.spaces[spaceIndex];
-        layers
+      if (densityEnabled) {
+        const clipId = `density-clip-${i}`;
+        definitions!
+          .append("clipPath")
+          .attr("id", clipId)
           .append("path")
-          .attr("d", makeBraidedArea(visualSpace, visual.defined))
-          .attr("class", `allocated-space${dim}`)
-          .attr("fill", tint)
-          .attr("fill-opacity", 0.68)
-          .attr("stroke", "none")
+          .attr("d", branchAreas.join(""));
+        const densityGroup = layers
+          .append("g")
+          .attr("class", `density-bands${dim}`)
+          .attr("clip-path", `url(#${clipId})`)
           .attr("pointer-events", "none");
-        layers
-          .append("path")
-          .attr("d", makeBraidedArea(visualSpace, visual.defined))
-          .attr("class", "space-hit")
-          .attr("fill", "transparent")
-          .attr("stroke", "none")
-          .attr("pointer-events", "all")
-          .attr("data-owner-layer", space.ownerLayerId)
-          .attr("data-space-kind", space.kind)
-          .attr("data-gap-index", space.gapIndex);
+        const profiles = input.result.densityProfiles?.[i] ?? [];
+        const bins = profiles.find((profile) => profile !== null)?.length ?? 0;
+        for (let bin = 0; bin < bins; bin += 1) {
+          const gradientId = `density-gradient-${i}-${bin}`;
+          const gradient = definitions!
+            .append("linearGradient")
+            .attr("id", gradientId)
+            .attr("gradientUnits", "userSpaceOnUse")
+            .attr("x1", x(xValues[firstTime]))
+            .attr("x2", x(xValues[lastTime]));
+          for (const time of indices) {
+            gradient
+              .append("stop")
+              .attr("offset", `${100 * (x(xValues[time]) - M.left) / IW}%`)
+              .attr("stop-color", densityColor(colorOf(i), profiles[time]?.[bin] ?? 0));
+          }
+          densityGroup
+            .append("path")
+            .attr("d", makeBraidedArea(
+              densityQuantileBand(visual.branches, bin / bins, (bin + 1) / bins),
+              visual.defined,
+            ))
+            .attr("fill", `url(#${gradientId})`)
+            .attr("fill-opacity", 1)
+            .attr("stroke", "none");
+        }
+      }
+      if (!input.collapseBranches) {
+        const tint = lighterFamilyColor(colorOf(i));
+        for (const [spaceIndex, space] of geometry.spaces.entries()) {
+          const visualSpace = visual.spaces[spaceIndex];
+          layers
+            .append("path")
+            .attr("d", makeBraidedArea(visualSpace, visual.defined))
+            .attr("class", `allocated-space${dim}`)
+            .attr("fill", tint)
+            .attr("fill-opacity", 0.68)
+            .attr("stroke", "none")
+            .attr("pointer-events", "none");
+          layers
+            .append("path")
+            .attr("d", makeBraidedArea(visualSpace, visual.defined))
+            .attr("class", "space-hit")
+            .attr("fill", "transparent")
+            .attr("stroke", "none")
+            .attr("pointer-events", "all")
+            .attr("data-owner-layer", space.ownerLayerId)
+            .attr("data-space-kind", space.kind)
+            .attr("data-gap-index", space.gapIndex);
+        }
+      }
+      if (input.showEnvelopeStroke) {
+        for (const boundary of [visual.envelope.y0, visual.envelope.y1]) {
+          layers
+            .append("path")
+            .attr("d", makeBraidedLine(boundary, visual.defined))
+            .attr("class", `envelope-stroke${dim}`)
+            .attr("fill", "none")
+            .attr("stroke", "#7a8793")
+            .attr("stroke-width", 0.9)
+            .attr("vector-effect", "non-scaling-stroke")
+            .attr("pointer-events", "none");
+        }
+      }
+      if (input.showBranchStroke && !input.collapseBranches) {
+        for (const branch of visual.branches) {
+          const defined = visual.defined.map((value, sample) =>
+            value && branch.y1[sample] > branch.y0[sample]
+          );
+          if (!defined.some(Boolean)) continue;
+          for (const boundary of [branch.y0, branch.y1]) {
+            layers
+              .append("path")
+              .attr("d", makeBraidedLine(boundary, defined))
+              .attr("class", `branch-stroke${dim}`)
+              .attr("fill", "none")
+              .attr("stroke", densityColor(colorOf(i), 1))
+              .attr("stroke-width", 0.75)
+              .attr("stroke-opacity", 0.82)
+              .attr("vector-effect", "non-scaling-stroke")
+              .attr("pointer-events", "none");
+          }
+        }
+      }
+      if (input.showRepresentativeStroke) {
+        const boundaries = representativeBoundaries(visual.branches);
+        for (const boundary of [boundaries.lower, boundaries.upper]) {
+          layers
+            .append("path")
+            .attr("d", makeBraidedLine(boundary, visual.defined))
+            .attr("class", `representative-stroke${dim}`)
+            .attr("fill", "none")
+            .attr("stroke", "#4f5b66")
+            .attr("stroke-width", 0.9)
+            .attr("vector-effect", "non-scaling-stroke")
+            .attr("pointer-events", "none");
+        }
+      }
+      if (input.showTimeCell && !input.collapseBranches) {
+        for (const time of indices) {
+          const sample = interpolated!.x.findIndex((value) => value === xValues[time]);
+          if (sample < 0 || !visual.defined[sample]) continue;
+          layers
+            .append("line")
+            .attr("class", `time-cell${dim}`)
+            .attr("x1", x(xValues[time])).attr("x2", x(xValues[time]))
+            .attr("y1", y(visual.envelope.y0[sample])).attr("y2", y(visual.envelope.y1[sample]))
+            .attr("stroke", "#4f5b66")
+            .attr("stroke-width", 0.7)
+            .attr("stroke-opacity", 0.55)
+            .attr("vector-effect", "non-scaling-stroke")
+            .attr("pointer-events", "none");
+        }
       }
     }
   } else {
@@ -559,6 +664,63 @@ export function interpolateBraidedGeometry(
   return { x: samples.map((sample) => sample.x), segments, layers };
 }
 
+function densityQuantileBand(
+  branches: RenderBand[],
+  lower: number,
+  upper: number,
+): RenderBand {
+  const length = branches[0]?.y0.length ?? 0;
+  return {
+    y0: Array.from({ length }, (_, sample) => solidQuantileY(branches, sample, lower, false)),
+    y1: Array.from({ length }, (_, sample) => solidQuantileY(branches, sample, upper, true)),
+  };
+}
+
+function representativeBoundaries(branches: RenderBand[]): { lower: number[]; upper: number[] } {
+  const length = branches[0]?.y0.length ?? 0;
+  const boundaryAt = (sample: number, upper: boolean): number => {
+    const indices = upper
+      ? Array.from({ length: branches.length }, (_, index) => branches.length - 1 - index)
+      : Array.from({ length: branches.length }, (_, index) => index);
+    for (const index of indices) {
+      if (branches[index].y1[sample] > branches[index].y0[sample]) {
+        return upper ? branches[index].y1[sample] : branches[index].y0[sample];
+      }
+    }
+    return branches[0]?.y0[sample] ?? 0;
+  };
+  return {
+    lower: Array.from({ length }, (_, sample) => boundaryAt(sample, false)),
+    upper: Array.from({ length }, (_, sample) => boundaryAt(sample, true)),
+  };
+}
+
+/** Map a cumulative probability position onto packed branch thickness, skipping allocated gaps. */
+function solidQuantileY(
+  branches: RenderBand[],
+  sample: number,
+  probability: number,
+  upperEdge: boolean,
+): number {
+  const heights = branches.map((branch) => Math.max(0, branch.y1[sample] - branch.y0[sample]));
+  const total = heights.reduce((sum, height) => sum + height, 0);
+  if (!(total > 0)) return branches[0]?.y0[sample] ?? 0;
+  const target = Math.max(0, Math.min(1, probability)) * total;
+  let cumulative = 0;
+  for (let index = 0; index < branches.length; index += 1) {
+    const height = heights[index];
+    const end = cumulative + height;
+    if (height > 0 && (target < end || (upperEdge && target <= end))) {
+      return branches[index].y0[sample] + target - cumulative;
+    }
+    cumulative = end;
+  }
+  for (let index = branches.length - 1; index >= 0; index -= 1) {
+    if (heights[index] > 0) return branches[index].y1[sample];
+  }
+  return branches[0]?.y0[sample] ?? 0;
+}
+
 function drawStars(
   svg: SVGSVGElement,
   bottom: number[][],
@@ -695,6 +857,17 @@ export function lighterFamilyColor(input: string): string {
   return tint.formatHex();
 }
 
+function densityColor(input: string, level: number): string {
+  const normalized = Math.max(0, Math.min(1, level));
+  const light = hsl(input);
+  light.s *= 0.45;
+  light.l = 0.95;
+  const dark = hsl(input);
+  dark.s = Math.min(1, dark.s * 1.12);
+  dark.l = Math.max(0.16, dark.l * 0.55);
+  return interpolateLab(light.formatHex(), dark.formatHex())(normalized ** 0.65);
+}
+
 function seriesInterpolator(x: number[], y: number[], smooth: boolean): (value: number) => number {
   if (x.length !== y.length || !x.length) throw new Error("invalid interpolation series");
   if (x.length === 1) return () => y[0];
@@ -734,43 +907,14 @@ function el(tag: string, attrs: Record<string, string | number>): SVGElement {
   return node;
 }
 export function exportSvg(svg: SVGElement): void {
+  const graphic = svg.cloneNode(true) as SVGElement;
+  graphic.querySelectorAll(".grid, .axis, .axis-label, .hover-line, text, line").forEach((node) => node.remove());
   downloadBlob(
-    new Blob([new XMLSerializer().serializeToString(svg)], {
+    new Blob([new XMLSerializer().serializeToString(graphic)], {
       type: "image/svg+xml;charset=utf-8",
     }),
     "braided-streamgraph.svg",
   );
-}
-export function exportPng(svg: SVGElement): Promise<void> {
-  const url = URL.createObjectURL(
-    new Blob([new XMLSerializer().serializeToString(svg)], {
-      type: "image/svg+xml;charset=utf-8",
-    }),
-  );
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = W * 2;
-      canvas.height = H * 2;
-      const context = canvas.getContext("2d");
-      if (!context) return reject(new Error("canvas 2d unavailable"));
-      context.fillStyle = "#fff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => {
-        URL.revokeObjectURL(url);
-        if (!blob) return reject(new Error("toBlob failed"));
-        downloadBlob(blob, "braided-streamgraph.png");
-        resolve();
-      }, "image/png");
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("svg rasterization failed"));
-    };
-    image.src = url;
-  });
 }
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
