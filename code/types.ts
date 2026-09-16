@@ -205,6 +205,8 @@ export type BraidedLayerGeometry = {
 export type BraidedStreamOptions = {
   /** KDE bandwidth ratio beta in h = beta * standard deviation. */
   bandwidthRatio: number;
+  /** Dimensionless visual gain in D' = spaceBudgetGain * (A- + A+). */
+  spaceBudgetGain: number;
   epsilon: number;
   debug: boolean;
 };
@@ -260,7 +262,7 @@ export interface CostReport {
   slopeBraided: number;
   slopeBase: number;
   displacement: number;
-  /** Sum of cellwise D=U deformation budgets. */
+  /** Sum of cellwise visual deformation budgets D'. */
   dispersionTotal: number;
 }
 

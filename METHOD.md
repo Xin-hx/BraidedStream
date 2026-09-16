@@ -44,9 +44,11 @@ U  = A- + A+
 b  = (A+ - A-) / U       (0 when U=0)
 ```
 
-The deformation budget is `D=U`; the demo uses one layout unit per data unit.
-There is no Q90 capacity, uncertainty rank, activation threshold, or
-channel-specific gain.
+The visual deformation budget is `D'=lambda_D U`, where the dimensionless
+`spaceBudgetGain=lambda_D` defaults to 1 and is shared across all layers and
+times. This layout parameter does not modify `P`, `A-`, `A+`, KDE modes, or
+branch masses. There is no Q90 capacity, uncertainty rank, activation
+threshold, or channel-specific gain.
 
 ## Probability inclusion order
 
@@ -89,13 +91,13 @@ d_k = integral[c_k,c_(k+1)] max(0, 1 - f(x)/min(f(c_k),f(c_(k+1)))) dx
 
 The single allocation vector is `[A-, d_1, ..., d_(K-1), A+]`, where `A-` and
 `A+` come from `P` and each `d_k` comes from the KDE. It is normalized once
-into gaps whose sum is exactly the raw-measure budget `D`. Placement is cumulative in the order
+into gaps whose sum is exactly the visual budget `D'`. Placement is cumulative in the order
 
 ```text
 lower gap, branch 1, internal gap 1, ..., branch K, upper gap
 ```
 
-This construction fills a slot of height `H+D` directly and therefore needs no
+This construction fills a slot of height `H+D'` directly and therefore needs no
 collision or repacking pass. Across time, branch and internal-gap arrays are
 aligned by centered contiguous internal-gap matching. If two centered offsets
 are possible, squared envelope-relative gap-center distance chooses one;

@@ -60,6 +60,9 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
   if (!Number.isFinite(braidOptions.bandwidthRatio) || braidOptions.bandwidthRatio <= 0) {
     throw new Error("braided bandwidthRatio beta must be finite and positive");
   }
+  if (!Number.isFinite(braidOptions.spaceBudgetGain) || braidOptions.spaceBudgetGain < 0) {
+    throw new Error("braided spaceBudgetGain must be finite and non-negative");
+  }
   // Retained for the two non-braided comparison views; it never affects braided geometry.
   const uncertainty = computeUncertainty(valid, braidOptions.epsilon, 0);
 
@@ -89,7 +92,7 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
   const h0 = h0FromLayers(ordered);
   const yExtent = h0Max(h0);
 
-  const requested = requestDynamicSpaces(topology);
+  const requested = requestDynamicSpaces(topology, braidOptions.spaceBudgetGain);
   const slotLayers = ordered.map((layer, i) => ({
     ...layer,
     magnitude: layer.magnitude.map((value, t) => value + requested.actual[i][t]),

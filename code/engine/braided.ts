@@ -14,6 +14,7 @@ import type {
 
 export const DEFAULT_BRAIDED_STREAM_OPTIONS: BraidedStreamOptions = {
   bandwidthRatio: 0.3,
+  spaceBudgetGain: 1,
   epsilon: 1e-9,
   debug: false,
 };
@@ -274,8 +275,11 @@ export function computeBranchTopology(
   return branchTopologyFromAnalysis(computeAnalysisTopology(orderedLayers, bandwidthRatio));
 }
 
-/** Allocate D=U once across A_-, d_1,...,d_(K-1), A_+. */
-export function requestDynamicSpaces(topology: BranchTopology): DynamicSpaceRequests {
+/** Allocate D'=gain*U once across A_-, d_1,...,d_(K-1), A_+. */
+export function requestDynamicSpaces(
+  topology: BranchTopology,
+  spaceBudgetGain = 1,
+): DynamicSpaceRequests {
   const actual: number[][] = [];
   const balance: number[][] = [];
   const gaps: number[][][] = [];
@@ -293,10 +297,10 @@ export function requestDynamicSpaces(topology: BranchTopology): DynamicSpaceRequ
       }
       const weights = [point.deviationLow, ...point.separations, point.deviationHigh];
       const total = weights.reduce((sum, value) => sum + value, 0);
-      actual[i][t] = point.dispersion;
+      actual[i][t] = spaceBudgetGain * point.dispersion;
       balance[i][t] = point.balance;
       gaps[i][t] = total > 0
-        ? weights.map((value) => point.dispersion * value / total)
+        ? weights.map((value) => actual[i][t] * value / total)
         : weights.map(() => 0);
     }
   }
@@ -426,7 +430,7 @@ export function buildLayerSlotGeometry(
           envelopeLow: low,
           envelopeHigh: high,
           balance: point?.balance ?? 0,
-          actualSpace: point?.dispersion ?? 0,
+          actualSpace: requested.actual[i][t],
           branchIntervals: absolute,
           visibleBranchCount: count,
         };
