@@ -40,8 +40,8 @@
             </select>
           </label>
           <label
-            >KDE resolution β
-            <span id="ctl-bandwidth-ratio-value">0.30</span>
+            >KDE bandwidth control
+            <span>KDE bandwidth: h = &beta;&sigma;<sub>P</sub> &middot; &beta; = <span id="ctl-bandwidth-ratio-value">0.30</span> &middot; &sigma;<sub>P</sub> = sd(P), per cell</span>
             <input
               id="ctl-bandwidth-ratio"
               type="range"
@@ -55,13 +55,26 @@
             <input id="ctl-smooth" type="checkbox" checked /> Smooth contours
           </label>
           <label class="chk">
-            <input id="ctl-slot-boundary" type="checkbox" checked /> Show
-            envelope boundary
+            <input id="ctl-envelope-stroke" type="checkbox" /> Show envelope stroke
+          </label>
+          <label class="chk">
+            <input id="ctl-representative-stroke" type="checkbox" /> Show representative layer stroke
+          </label>
+          <label class="chk">
+            <input id="ctl-time-cell" type="checkbox" /> Show time cell
+          </label>
+          <label class="chk">
+            <input id="ctl-branch-stroke" type="checkbox" /> Show branch stroke
+          </label>
+          <label class="chk">
+            <input id="ctl-y-axis" type="checkbox" checked /> Show y-axis
+          </label>
+          <label class="chk">
+            <input id="ctl-density-gradient" type="checkbox" /> Density color gradient
           </label>
           <div class="actions">
             <button id="btn-collapse" title="toggle braid">Collapse</button>
             <button id="btn-svg">SVG</button>
-            <button id="btn-png">PNG</button>
           </div>
         </div>
       </aside>

@@ -1,14 +1,13 @@
 /**
  * Demo entry: state, controls, hover details, cost panel, export.
  */
-import { resolveLayerQuantiles, runPipeline } from "../code/index";
+import { runPipeline } from "../code/index";
 import { DEFAULT_COVID_STATES, parseCovidCaseJson, type CovidStateSelection } from "../code/data/covid";
 import { parseIllustrationCsv } from "../code/data/illustration";
 import { parseTcmCsv } from "../code/data/tcm";
 import {
   colorForLayer,
   diseaseDay,
-  exportPng,
   exportSvg,
   lighterFamilyColor,
   renderChart,
@@ -51,12 +50,20 @@ export const BRAIDED_PARAMETERS: Partial<BraidedStreamOptions> = {
   debug: true,
 };
 
+/** Number of equal-probability color strips used by the optional KDE density encoding. */
+export const DENSITY_GRADIENT_BINS = 16;
+
 interface State {
   dataset: DatasetId;
   visMethod: VisMethod;
   baseline: "wiggle" | "sine";
   smoothContours: boolean;
-  showSlotBoundary: boolean;
+  showEnvelopeStroke: boolean;
+  showRepresentativeStroke: boolean;
+  showTimeCell: boolean;
+  showBranchStroke: boolean;
+  showYAxis: boolean;
+  showDensityGradient: boolean;
   collapseBranches: boolean;
   hover: number | null;
   highlight: string | null;
@@ -69,7 +76,12 @@ const state: State = {
   visMethod: "braided",
   baseline: "wiggle",
   smoothContours: true,
-  showSlotBoundary: true,
+  showEnvelopeStroke: false,
+  showRepresentativeStroke: false,
+  showTimeCell: false,
+  showBranchStroke: false,
+  showYAxis: true,
+  showDensityGradient: false,
   collapseBranches: false,
   hover: null,
   highlight: null,
@@ -107,6 +119,7 @@ function run(): void {
 
   result = runPipeline(dataCache.layers, {
     baselineMode: state.baseline,
+    densityProfileBins: state.showDensityGradient ? DENSITY_GRADIENT_BINS : undefined,
     braided: {
       ...BRAIDED_PARAMETERS,
     },
@@ -125,6 +138,16 @@ function render(): void {
   collapse.hidden = !braided;
   collapse.disabled = !braided;
   collapse.textContent = state.collapseBranches ? "Expand branches" : "Collapse branches";
+  const densityGradient = $<HTMLInputElement>("ctl-density-gradient");
+  const envelopeStroke = $<HTMLInputElement>("ctl-envelope-stroke");
+  const representativeStroke = $<HTMLInputElement>("ctl-representative-stroke");
+  const timeCell = $<HTMLInputElement>("ctl-time-cell");
+  const branchStroke = $<HTMLInputElement>("ctl-branch-stroke");
+  densityGradient.disabled = !braided || state.collapseBranches;
+  envelopeStroke.disabled = !braided;
+  representativeStroke.disabled = !braided;
+  timeCell.disabled = !braided || state.collapseBranches;
+  branchStroke.disabled = !braided || state.collapseBranches;
   renderChart(svgEl, {
     layers: dataCache.layers,
     times: dataCache.times,
@@ -133,7 +156,12 @@ function render(): void {
     end: state.timeEnd,
     visMethod: state.visMethod,
     smoothContours: state.smoothContours,
-    showSlotBoundary: state.showSlotBoundary,
+    showEnvelopeStroke: state.showEnvelopeStroke,
+    showRepresentativeStroke: state.showRepresentativeStroke,
+    showTimeCell: state.showTimeCell,
+    showBranchStroke: state.showBranchStroke,
+    showYAxis: state.showYAxis,
+    showDensityGradient: state.showDensityGradient,
     collapseBranches: state.collapseBranches,
     hover: state.hover,
     highlightLayer: state.highlight,
@@ -183,10 +211,13 @@ function renderLegend(): void {
     ? `<div><span class="sw" style="background:${sampleColor}"></span>solid = representative thickness H&nbsp;&nbsp;` +
       `<span class="sw" style="background:${lighterFamilyColor(sampleColor)}"></span>light = allocated deformation space (not probability mass or a confidence interval)</div>`
     : "";
+  const densityKey = state.visMethod === "braided" && state.showDensityGradient && !state.collapseBranches
+    ? "<div>branch color intensity = KDE density (one scale per layer, shared across time)</div>"
+    : "";
   const orderKey = result.pid.defined
     ? `<div>center-out order = decreasing TPID over ${result.pid.referenceTimeIndices.length} common time points</div>`
     : "<div>TPID undefined for this reference set; stable ID fallback order</div>";
-  legendEl.innerHTML = `<div>${meaning}</div>${orderKey}${geometryKey}${html}`;
+  legendEl.innerHTML = `<div>${meaning}</div>${orderKey}${geometryKey}${densityKey}${html}`;
 }
 
 function fmt(v: number): string {
@@ -296,31 +327,19 @@ function showTooltip(
   const i = result.pid.order.indexOf(layer.id);
   const geometry = result.braided.layers[i];
   const point = geometry.debug?.[t];
-  const d = result.pid.depth[layer.id];
   const magnitude = result.base.yTop[i][t] - result.base.yBottom[i][t];
-  const quantiles = resolveLayerQuantiles(layer, t);
   const sampleSize = layer.sampleSize?.[t];
   const perCapita = layer.perCapita ? ` · ${fmt(layer.perCapita[t])}/cap` : "";
 
   const rows = [
     ["representative thickness H = raw P median", fmt(magnitude)],
-    ["raw-P dispersion U", fmt(geometry.actualSpace[t])],
-    ["raw-P deviation A- / A+", point ? `${fmt(point.deviationLow)} / ${fmt(point.deviationHigh)}` : "n/a"],
-    ["asymmetry b", geometry.balance[t].toFixed(3)],
-    ["KDE beta / bandwidth h", point ? `${point.bandwidthRatio.toFixed(2)} / ${fmt(point.bandwidth)}` : "n/a"],
-    ["modes K", String(geometry.branchCount[t])],
-    ["basin masses pi", point ? point.branchMasses.map((mass) => mass.toFixed(3)).join(", ") : "n/a"],
-    ["mode separations d", point ? point.separations.map(fmt).join(", ") || "none" : "n/a"],
+    ["raw P: U / A- / A+ / b", point
+      ? `${fmt(geometry.actualSpace[t])} / ${fmt(point.deviationLow)} / ${fmt(point.deviationHigh)} / ${geometry.balance[t].toFixed(3)}`
+      : "n/a"],
+    ["modes K / basin masses π", point
+      ? `${geometry.branchCount[t]} / ${point.branchMasses.map((mass) => mass.toFixed(3)).join(", ")}`
+      : "n/a"],
     ["allocated gaps g", point ? point.gaps.map(fmt).join(", ") : "n/a"],
-    ...(layer.sourceKind === "quantile-mixture"
-      ? [["official submitted Q2.5-Q97.5 (reference only)", `[${fmt(quantiles.qLow)}, ${fmt(quantiles.qHigh)}]`]]
-      : []),
-    ["dynamic-slot boundary", state.showSlotBoundary ? "shown" : "hidden"],
-    ["TPID = min(IN-in, IN-out)", result.pid.defined ? d.toFixed(6) : "undefined"],
-    ["directional IN-in / IN-out", result.pid.defined
-      ? `${result.pid.inclusionIn[layer.id].toFixed(6)} / ${result.pid.inclusionOut[layer.id].toFixed(6)}`
-      : "undefined"],
-    ["visible branches", String(!state.collapseBranches ? geometry.branchCount[t] : 1)],
     ...(spaceKind ? [["space owner", `${spaceKind} · ${layer.id}`]] : []),
     ...(sampleSize === null || sampleSize === undefined
       ? []
@@ -380,10 +399,35 @@ function bindControls(): void {
     state.smoothContours = smooth.checked;
     render();
   });
-  const slotBoundary = $<HTMLInputElement>("ctl-slot-boundary");
-  slotBoundary.addEventListener("change", () => {
-    state.showSlotBoundary = slotBoundary.checked;
+  const envelopeStroke = $<HTMLInputElement>("ctl-envelope-stroke");
+  envelopeStroke.addEventListener("change", () => {
+    state.showEnvelopeStroke = envelopeStroke.checked;
     render();
+  });
+  const representativeStroke = $<HTMLInputElement>("ctl-representative-stroke");
+  representativeStroke.addEventListener("change", () => {
+    state.showRepresentativeStroke = representativeStroke.checked;
+    render();
+  });
+  const timeCell = $<HTMLInputElement>("ctl-time-cell");
+  timeCell.addEventListener("change", () => {
+    state.showTimeCell = timeCell.checked;
+    render();
+  });
+  const branchStroke = $<HTMLInputElement>("ctl-branch-stroke");
+  branchStroke.addEventListener("change", () => {
+    state.showBranchStroke = branchStroke.checked;
+    render();
+  });
+  const yAxis = $<HTMLInputElement>("ctl-y-axis");
+  yAxis.addEventListener("change", () => {
+    state.showYAxis = yAxis.checked;
+    render();
+  });
+  const densityGradient = $<HTMLInputElement>("ctl-density-gradient");
+  densityGradient.addEventListener("change", () => {
+    state.showDensityGradient = densityGradient.checked;
+    run();
   });
   $("btn-collapse").addEventListener("click", () => {
     state.collapseBranches = !state.collapseBranches;
@@ -391,11 +435,9 @@ function bindControls(): void {
     state.hover = null;
     tooltip.classList.add("hidden");
     render();
+    renderLegend();
   });
   $("btn-svg").addEventListener("click", () => exportSvg(svgEl));
-  $("btn-png").addEventListener("click", () => {
-    void exportPng(svgEl).catch(console.error);
-  });
   // collapsible left panel
   const panel = $("panel");
   const btnPanel = $("btn-panel");
