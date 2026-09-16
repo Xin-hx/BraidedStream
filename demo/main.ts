@@ -9,7 +9,6 @@ import {
   colorForLayer,
   diseaseDay,
   exportSvg,
-  lighterFamilyColor,
   renderChart,
   renderTimeFilter,
   M,
@@ -47,6 +46,7 @@ type DatasetId = keyof typeof DATASETS;
 /** Code-owned parameters; future controls can update this object before run(). */
 export const BRAIDED_PARAMETERS: Partial<BraidedStreamOptions> = {
   bandwidthRatio: 0.3,
+  spaceBudgetGain: 1,
   debug: true,
 };
 
@@ -176,18 +176,7 @@ function render(): void {
 }
 
 function renderCosts(): void {
-  if (!result) return;
-  const c = result.costs;
-  const lines = [
-    `<b>geometry cost</b>  (recompute ${perfMs.toFixed(1)} ms)`,
-    `height ratio  max ${c.maxHeightRatio.toFixed(3)} · mean ${c.meanHeightRatio.toFixed(3)}`,
-    `collisions ${c.collisionCount} · min gap ${c.minGap.toFixed(3)}`,
-    `curvature  braided ${fmt(c.curvatureBraided)} vs base ${fmt(c.curvatureBase)}`,
-    `slope      braided ${fmt(c.slopeBraided)} vs base ${fmt(c.slopeBase)}`,
-    `nonlocal displacement ${fmt(c.displacement)}`,
-    `deformation total  ΣD=ΣU ${fmt(c.dispersionTotal)}`,
-  ];
-  costsEl.innerHTML = lines.join("\n");
+  costsEl.innerHTML = `<b>recompute</b> in ${perfMs.toFixed(1)} ms`;
 }
 
 function renderLegend(): void {
@@ -201,23 +190,10 @@ function renderLegend(): void {
       return `<span class="sw" style="background:${color}"></span>#${idx + 1} ${id} <span style="opacity:.6">${depthLabel}</span>`;
     })
     .join("&nbsp;&nbsp;");
-  const meaning = state.dataset === "tcm"
-    ? "each layer-time cell = patient-dose distribution; thickness = raw-measure median"
-    : state.dataset === "illustration"
-      ? "each layer-time cell = generated ensemble distribution; thickness = raw-measure median"
-      : "each layer-time cell = weighted reconstructed predictive mixture; thickness = raw-measure median";
-  const sampleColor = colorForLayer(dataCache!.layers, result.pid.ranking[0]);
-  const geometryKey = state.visMethod === "braided"
-    ? `<div><span class="sw" style="background:${sampleColor}"></span>solid = representative thickness H&nbsp;&nbsp;` +
-      `<span class="sw" style="background:${lighterFamilyColor(sampleColor)}"></span>light = allocated deformation space (not probability mass or a confidence interval)</div>`
-    : "";
   const densityKey = state.visMethod === "braided" && state.showDensityGradient && !state.collapseBranches
     ? "<div>branch color intensity = KDE density (one scale per layer, shared across time)</div>"
     : "";
-  const orderKey = result.pid.defined
-    ? `<div>center-out order = decreasing TPID over ${result.pid.referenceTimeIndices.length} common time points</div>`
-    : "<div>TPID undefined for this reference set; stable ID fallback order</div>";
-  legendEl.innerHTML = `<div>${meaning}</div>${orderKey}${geometryKey}${densityKey}${html}`;
+  legendEl.innerHTML = `${densityKey}${html}`;
 }
 
 function fmt(v: number): string {
@@ -334,7 +310,7 @@ function showTooltip(
   const rows = [
     ["representative thickness H = raw P median", fmt(magnitude)],
     ["raw P: U / A- / A+ / b", point
-      ? `${fmt(geometry.actualSpace[t])} / ${fmt(point.deviationLow)} / ${fmt(point.deviationHigh)} / ${geometry.balance[t].toFixed(3)}`
+      ? `${fmt(point.dispersion)} / ${fmt(point.deviationLow)} / ${fmt(point.deviationHigh)} / ${geometry.balance[t].toFixed(3)}`
       : "n/a"],
     ["modes K / basin masses π", point
       ? `${geometry.branchCount[t]} / ${point.branchMasses.map((mass) => mass.toFixed(3)).join(", ")}`
