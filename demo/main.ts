@@ -143,11 +143,13 @@ function render(): void {
   const representativeStroke = $<HTMLInputElement>("ctl-representative-stroke");
   const timeCell = $<HTMLInputElement>("ctl-time-cell");
   const branchStroke = $<HTMLInputElement>("ctl-branch-stroke");
+  const spaceBudgetGain = $<HTMLInputElement>("ctl-space-budget-gain");
   densityGradient.disabled = !braided || state.collapseBranches;
   envelopeStroke.disabled = !braided;
   representativeStroke.disabled = !braided;
   timeCell.disabled = !braided || state.collapseBranches;
   branchStroke.disabled = !braided || state.collapseBranches;
+  spaceBudgetGain.disabled = !braided;
   renderChart(svgEl, {
     layers: dataCache.layers,
     times: dataCache.times,
@@ -367,7 +369,11 @@ function bindControls(): void {
   });
   bind("ctl-bandwidth-ratio", (v) => {
     BRAIDED_PARAMETERS.bandwidthRatio = Number(v);
-    $("ctl-bandwidth-ratio-value").textContent = Number(v).toFixed(2);
+    run();
+  });
+  bind("ctl-space-budget-gain", (v) => {
+    BRAIDED_PARAMETERS.spaceBudgetGain = Number(v);
+    $("ctl-space-budget-gain-value").textContent = Number(v).toFixed(2);
     run();
   });
   const smooth = $<HTMLInputElement>("ctl-smooth");
