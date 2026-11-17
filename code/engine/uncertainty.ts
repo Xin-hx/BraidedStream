@@ -1,31 +1,14 @@
-/** Resolve normalized values used only by non-braided comparison encodings. */
-import type { Layer, UncertaintyResult } from "../types";
+/** Derived summaries used only by the two non-braided comparison encodings. */
+import type { BraidedQuantiles, UncertaintyResult } from "./types";
 
 export function computeUncertainty(
-  layers: Layer[],
+  quantiles: Array<Array<BraidedQuantiles | null>>,
   epsilon = 1e-9,
   threshold = 0.9,
 ): UncertaintyResult {
-  const tLen = layers[0].q.p50.length;
-  const value = layers.map((layer) => {
-    if (layer.uncertainty) {
-      if (layer.uncertainty.length !== tLen) {
-        throw new Error(`layer ${layer.id}: uncertainty length mismatch`);
-      }
-      return layer.uncertainty.map((u, t) => {
-        if (!Number.isFinite(u) || u < 0 || u > 1) {
-          throw new Error(`layer ${layer.id}: uncertainty[${t}] must be in [0, 1]`);
-        }
-        return u;
-      });
-    }
-    const lo = layer.q.p025;
-    const hi = layer.q.p975;
-    return Array.from({ length: tLen }, (_, t) => {
-      const value = (hi[t] - lo[t]) / (hi[t] + epsilon);
-      return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-    });
-  });
+  const value = quantiles.map((layer) => layer.map((cell) => cell
+    ? Math.max(0, Math.min(1, (cell.qHigh - cell.qLow) / (cell.qHigh + epsilon)))
+    : 0));
 
   const rank = percentileRanks(value);
   return { value, rank, exposure: exposureFromRanks(value, rank, threshold) };

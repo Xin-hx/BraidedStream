@@ -7,6 +7,10 @@ public/*
 outputs/
 .tmp_check/
 scripts/
-tests/
 output/*
+!output/*.ts
+!output/*.d.ts
+!output/tsconfig.json
+!output/covid-selection.json
+!output/measure-refactor-report.md
 *.zip

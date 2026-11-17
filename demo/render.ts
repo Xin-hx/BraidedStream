@@ -1,5 +1,4 @@
 /** SVG renderer. */
-import { computeSineBaseline } from "../code/engine/baseline";
 import {
   area,
   axisBottom,
@@ -15,12 +14,10 @@ import {
   schemePaired,
   schemeSet2,
   schemeTableau10,
-  stack,
-  stackOffsetWiggle,
   symbol,
   symbolStar,
 } from "d3";
-import type { BaseLayout, Layer, PipelineResult } from "../code/types";
+import type { PipelineResult } from "../code/engine/types";
 
 export const W = 1180;
 export const H = 620;
@@ -28,6 +25,7 @@ export const M = { top: 24, right: 28, bottom: 64, left: 64 };
 const IW = W - M.left - M.right;
 const NS = "http://www.w3.org/2000/svg";
 export type VisMethod = "braided" | "star" | "color-blur";
+export interface DisplayLayer { readonly id: string; readonly color?: string }
 
 
 export const REFERENCE_PALETTE = [
@@ -44,7 +42,7 @@ export const LAYER_PALETTES = {
 export type PaletteId = keyof typeof LAYER_PALETTES;
 
 export interface RenderInput {
-  layers: Layer[];
+  layers: readonly DisplayLayer[];
   times: string[];
   result: PipelineResult;
   colorOverrides?: Readonly<Record<string, string>>;
@@ -66,8 +64,9 @@ export interface RenderInput {
 }
 
 export interface TimeFilterInput {
-  layers: Layer[];
+  layers: readonly DisplayLayer[];
   times: string[];
+  result: PipelineResult;
   layoutOrder?: string[];
   colorOverrides?: Readonly<Record<string, string>>;
   palette?: PaletteId;
@@ -78,12 +77,12 @@ export interface TimeFilterInput {
 
 /** Stable within a dataset and independent of input/stack order. */
 export function colorForLayer(
-  layers: Layer[],
+  layers: readonly DisplayLayer[],
   id: string,
   colorOverrides: Readonly<Record<string, string>> = {},
   paletteId: PaletteId = "reference",
 ): string {
-  const override = colorOverrides[id];
+  const override = Object.hasOwn(colorOverrides, id) ? colorOverrides[id] : undefined;
   if (override) return override;
   const layer = layers.find((item) => item.id === id);
   if (paletteId === "reference" && layer?.color) return layer.color;
@@ -149,8 +148,10 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
     hi: number[],
     start: number,
     end: number,
+    defined?: boolean[],
   ) =>
     area<number>()
+      .defined((t) => (defined ? defined[t] : true) && Number.isFinite(lo[t]) && Number.isFinite(hi[t]))
       .curve(curve)
       .x((t) => x(xValues[t]))
       .y0((t) => y(lo[t]))
@@ -366,7 +367,8 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
             .attr("stroke", "var(--muted)")
             .attr("stroke-width", 0.9)
             .attr("vector-effect", "non-scaling-stroke")
-            .attr("pointer-events", "none");
+            .attr("pointer-events", "none")
+            .attr("data-owner-layer", geometry.layerId);
         }
       }
       if (input.showBranchStroke && !input.collapseBranches) {
@@ -427,7 +429,11 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
       .selectAll("path")
       .data(layerIds)
       .join("path")
-      .attr("d", (_, i) => makeArea(bottom[i], top[i]))
+      .attr("d", (_, i) => makeArea(
+        bottom[i],
+        top[i],
+        input.result.braided.layers[i].missing.map((missing) => !missing),
+      ))
       .attr(
         "class",
         (id) =>
@@ -448,7 +454,17 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
     if (input.visMethod === "star")
       drawStars(svg, bottom, top, exposure, indices, xAt, y, colorOf);
     else if (input.visMethod === "color-blur")
-      drawColorBlur(svg, bottom, top, exposure, firstTime, lastTime, makeAreaRange, colorOf);
+      drawColorBlur(
+        svg,
+        bottom,
+        top,
+        exposure,
+        input.result.braided.layers.map((layer) => layer.missing.map((missing) => !missing)),
+        firstTime,
+        lastTime,
+        makeAreaRange,
+        colorOf,
+      );
   }
   if (input.hover !== null)
     svg.appendChild(
@@ -474,14 +490,15 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): vo
   if (tLen < 2) return;
 
   const layersById = new Map(input.layers.map((layer) => [layer.id, layer]));
-  const orderedLayers = input.layoutOrder
-    ? input.layoutOrder.map((id) => {
+  const order = input.layoutOrder ?? input.result.layoutOrder;
+  const orderedLayers = order
+    ? order.map((id) => {
         const layer = layersById.get(id);
         if (!layer) throw new Error(`time filter received unknown layer id: ${id}`);
         return layer;
       })
     : input.layers;
-  const overview = baseGeometryInInputOrder(orderedLayers, input.times);
+  const overview = input.result.base;
   const values = [...overview.yBottom.flat(), ...overview.yTop.flat()];
   const pad = (Math.max(...values) - Math.min(...values)) * 0.08 || 1;
   const x = scaleLinear().domain([0, tLen - 1]).range([M.left, W - M.right]);
@@ -504,6 +521,7 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): vo
       .attr(
         "d",
         area<number>()
+          .defined((time) => !input.result.braided.layers[i].missing[time])
           .curve(curveLinear)
           .x((t) => x(t))
           .y0((t) => y(overview.yBottom[i][t]))
@@ -803,9 +821,10 @@ function drawColorBlur(
   bottom: number[][],
   top: number[][],
   u: number[][],
+  defined: boolean[][],
   firstTime: number,
   lastTime: number,
-  areaRange: (lo: number[], hi: number[], start: number, end: number) => string,
+  areaRange: (lo: number[], hi: number[], start: number, end: number, defined?: boolean[]) => string,
   colorOf: (i: number) => string,
 ): void {
   const defs = el("defs", {});
@@ -836,7 +855,7 @@ function drawColorBlur(
         (end - start + 1);
       svg.appendChild(
         el("path", {
-          d: areaRange(bottom[i], top[i], visibleStart, visibleEnd),
+          d: areaRange(bottom[i], top[i], visibleStart, visibleEnd, defined[i]),
           fill: `hsl(${h}, ${(12 + 78 * local).toFixed(0)}%, ${(l * 100).toFixed(0)}%)`,
           "fill-opacity": 0.85,
           filter: `url(#${filterId})`,
@@ -844,36 +863,6 @@ function drawColorBlur(
       );
     }
   }
-}
-
-export function baseGeometryInInputOrder(
-  layers: Layer[],
-  times: string[],
-  baselineMode: "wiggle" | "sine" = "wiggle",
-): BaseLayout {
-  if (baselineMode === "sine")
-    return computeSineBaseline(
-      layers,
-      layers.map((layer) => layer.id),
-    );
-  const ids = layers.map((layer) => layer.id);
-  const rows = times.map(
-    (_, t) =>
-      Object.fromEntries(
-        layers.map((layer) => [layer.id, (layer.magnitude ?? layer.q.p50)[t]]),
-      ) as Record<string, number>,
-  );
-  const series = stack<Record<string, number>>()
-    .keys(ids)
-    .offset(stackOffsetWiggle)(rows);
-  const yBottom = series.map((layer) => layer.map(([bottom]) => bottom));
-  const yTop = series.map((layer) => layer.map(([, top]) => top));
-  const shift = -(Math.min(...yBottom.flat()) + Math.max(...yTop.flat())) / 2;
-  return {
-    baseline: yBottom[0].map((value) => value + shift),
-    yBottom: yBottom.map((layer) => layer.map((value) => value + shift)),
-    yTop: yTop.map((layer) => layer.map((value) => value + shift)),
-  };
 }
 
 function tickLabel(label: string): string {

@@ -1,7 +1,14 @@
 /** Loader for the generated illustration ensembles: category,time,value. */
-import { inputDataset } from "./dataInput";
+import { validateInput, type InputDataset } from "../input";
 
-export function parseIllustrationCsv(text: string) {
+export function convertIllustrationCsv(text: string): InputDataset {
+  return convertIllustrationCase(text).dataset;
+}
+
+export function convertIllustrationCase(text: string): {
+  dataset: InputDataset;
+  metadata: { readonly sampleSize: Readonly<Record<string, readonly number[]>> };
+} {
   const [header, ...rows] = text.replace(/^\uFEFF/, "").trim().split(/\r?\n/);
   if (header !== "category,time,value") {
     throw new Error("illustration CSV header must be category,time,value");
@@ -16,7 +23,7 @@ export function parseIllustrationCsv(text: string) {
     const fields = row.split(",").map((value) => value.trim());
     const [category, time, rawValue] = fields;
     const value = Number(rawValue);
-    if (fields.length !== 3 || !category || !time || !Number.isFinite(value) || value < 0) {
+    if (fields.length !== 3 || !category || !time || !rawValue || !Number.isFinite(value) || value < 0) {
       throw new Error(`invalid illustration CSV row ${rowIndex + 2}`);
     }
     if (!samples.has(category)) {
@@ -33,19 +40,23 @@ export function parseIllustrationCsv(text: string) {
   }
   if (!categories.length || !times.length) throw new Error("illustration CSV has no data rows");
 
-  return inputDataset({
+  const dataset = validateInput({
     times,
-    magnitudePolicy: "median",
     layers: categories.map((id) => ({
       id,
-      cells: times.map((time) => {
+      measures: times.map((time) => {
         const values = samples.get(id)!.get(time);
         if (!values?.length) throw new Error(`missing category ${id} at ${time}`);
         return {
-          kind: "empirical" as const,
-          observations: values.map((value, index) => ({ memberId: `member-${index + 1}`, value })),
+          components: values.map((value) => ({ kind: "atom" as const, value, mass: 1 / values.length })),
         };
       }),
     })),
   });
+  return {
+    dataset,
+    metadata: {
+      sampleSize: Object.fromEntries(categories.map((id) => [id, times.map((time) => samples.get(id)!.get(time)!.length)])),
+    },
+  };
 }

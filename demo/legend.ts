@@ -1,11 +1,10 @@
-import type { Layer } from "../code/types";
-import { colorForLayer, LAYER_PALETTES, M, W, type PaletteId } from "./render";
+import { colorForLayer, LAYER_PALETTES, M, W, type DisplayLayer, type PaletteId } from "./render";
 
 type LegendSort = "tpid" | "category";
 
 export interface LegendModel {
   datasetId: string;
-  layers: Layer[];
+  layers: readonly DisplayLayer[];
   layoutOrder: string[];
   tpidRanking: string[];
   tpidDepth: Record<string, number>;

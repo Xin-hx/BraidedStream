@@ -18,14 +18,14 @@
  *    c = median of |dF_j| across layers — layers whose thickness changes
  *    more than the typical scale get down-weighted. baseline[0] is centered.
  */
-import type { BaseLayout, Layer } from "../types";
+import type { BaseLayout, LayoutLayer } from "./types";
 
 export type BaselineMode = "wiggle" | "sine";
 
-export function computeWiggleBaseline(layers: Layer[], order: string[]): BaseLayout {
+export function computeWiggleBaseline(layers: LayoutLayer[], order: string[]): BaseLayout {
   const n = order.length;
-  const tLen = (layers[0].magnitude ?? layers[0].q.p50).length;
-  const m = order.map((id) => layers.find((l) => l.id === id)!.magnitude ?? layers.find((l) => l.id === id)!.q.p50);
+  const tLen = layers[0].magnitude.length;
+  const m = order.map((id) => layers.find((layer) => layer.id === id)!.magnitude);
 
   const yBottom: number[][] = Array.from({ length: n }, () => new Array<number>(tLen));
   const yTop: number[][] = Array.from({ length: n }, () => new Array<number>(tLen));
@@ -74,13 +74,13 @@ export function computeWiggleBaseline(layers: Layer[], order: string[]): BaseLay
 
 /** SineStream Gaussian-weighted L2 baseline. */
 export function computeSineBaseline(
-  layers: Layer[],
+  layers: LayoutLayer[],
   order: string[],
   cType: "median" | "mean" | "geometric" | "harmonic" = "median"
 ): BaseLayout {
   const n = order.length;
-  const tLen = (layers[0].magnitude ?? layers[0].q.p50).length;
-  const m = order.map((id) => layers.find((l) => l.id === id)!.magnitude ?? layers.find((l) => l.id === id)!.q.p50);
+  const tLen = layers[0].magnitude.length;
+  const m = order.map((id) => layers.find((layer) => layer.id === id)!.magnitude);
 
   const yBottom: number[][] = Array.from({ length: n }, () => new Array<number>(tLen));
   const yTop: number[][] = Array.from({ length: n }, () => new Array<number>(tLen));

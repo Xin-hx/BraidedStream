@@ -1,8 +1,4 @@
-/**
- * Pipeline: distributions → TPID order → dynamic slots → branch geometry
- * → branch geometry. Pure functions, deterministic, no DOM.
- */
-import { validateData } from "./engine/quantiles";
+import { validateInput, type InputDataset } from "./input";
 import { computeUncertainty } from "./engine/uncertainty";
 import { computePidFromAnalysis } from "./engine/pid";
 import { computeSineBaseline, computeWiggleBaseline } from "./engine/baseline";
@@ -12,135 +8,103 @@ import {
   buildLayerSlotGeometry,
   computeAnalysisTopology,
   densityProfilesFromAnalysis,
-  resolveLayerQuantiles,
+  getBraidedQuantiles,
   requestDynamicSpaces,
 } from "./engine/braided";
 import { computeGeometryCosts } from "./engine/costs";
 import type {
   BraidedStreamOptions,
-  Layer,
+  LayoutLayer,
   PipelineResult,
-  QuantileMatrix,
-  ValidationResult,
-} from "./types";
-
-export function h0FromLayers(layers: Layer[]): number[] {
-  const tLen = (layers[0].magnitude ?? layers[0].q.p50).length;
-  const h0 = new Array<number>(tLen).fill(0);
-  for (const layer of layers) {
-    const magnitude = layer.magnitude ?? layer.q.p50;
-    for (let t = 0; t < tLen; t += 1) h0[t] += magnitude[t];
-  }
-  return h0;
-}
+} from "./engine/types";
 
 export interface PipelineOptions {
-  /** Optional bottom-to-top layout order. Defaults to the computed TPID order. */
-  layoutOrder?: string[];
-  /** New uncertainty-aware layer-slot configuration. */
-  braided?: Partial<BraidedStreamOptions>;
-  /** baseline layout algorithm: "wiggle" (Byron-Wattenberg L2) or "sine"
-   *  (SineStream Gaussian-weighted L2). Default "wiggle". */
-  baselineMode?: "wiggle" | "sine";
-  /** Sampling resolution for the optional density-color rendering layer. */
-  densityProfileBins?: number;
+  /** Optional bottom-to-top layout order. Defaults to computed TPID order. */
+  readonly layoutOrder?: readonly string[];
+  readonly braided?: Partial<BraidedStreamOptions>;
+  readonly baselineMode?: "wiggle" | "sine";
+  readonly densityProfileBins?: number;
 }
 
-/**
- * Run the full braided pipeline on validated layers.
- * Layers may arrive in any order; the TPID center-out order is applied unless
- * an explicit layout order is provided.
- */
-export function runPipeline(layers: Layer[], options: PipelineOptions): PipelineResult {
-  const { layers: valid, result: validation } = validateData(layers, true);
-  if (valid.length === 0) {
-    throw new Error("runPipeline: no layers");
-  }
-  const validIds = new Set(valid.map((layer) => layer.id));
+/** The single public analysis entry point. */
+export function runPipeline(dataset: InputDataset, options: PipelineOptions): PipelineResult {
+  const valid = validateInput(dataset);
+  const ids = valid.layers.map((layer) => layer.id);
   const requestedOrder = options.layoutOrder ? [...options.layoutOrder] : undefined;
-  if (
-    requestedOrder &&
-    (requestedOrder.length !== validIds.size ||
-      new Set(requestedOrder).size !== validIds.size ||
-      requestedOrder.some((id) => !validIds.has(id)))
-  ) {
-    throw new Error("layoutOrder must contain each valid layer id exactly once");
+  if (requestedOrder && (requestedOrder.length !== ids.length ||
+      new Set(requestedOrder).size !== ids.length ||
+      requestedOrder.some((id) => !ids.includes(id)))) {
+    throw new Error("layoutOrder must contain each layer id exactly once");
   }
-  const braidOptions = { ...DEFAULT_BRAIDED_STREAM_OPTIONS, ...options.braided };
-  if (!Number.isFinite(braidOptions.epsilon) || braidOptions.epsilon <= 0) {
-    throw new Error("braided epsilon must be finite and positive");
-  }
-  if (!Number.isFinite(braidOptions.bandwidthRatio) || braidOptions.bandwidthRatio <= 0) {
+  const braidedOptions = { ...DEFAULT_BRAIDED_STREAM_OPTIONS, ...options.braided };
+  if (!Number.isFinite(braidedOptions.bandwidthRatio) || braidedOptions.bandwidthRatio <= 0) {
     throw new Error("braided bandwidthRatio beta must be finite and positive");
   }
-  if (!Number.isFinite(braidOptions.spaceBudgetGain) || braidOptions.spaceBudgetGain < 0) {
-    throw new Error("braided spaceBudgetGain must be finite and non-negative");
-  }
-  // Retained for the two non-braided comparison views; it never affects braided geometry.
-  const uncertainty = computeUncertainty(valid, braidOptions.epsilon, 0);
 
-  const analysis = computeAnalysisTopology(valid, braidOptions.bandwidthRatio);
-  const pid = computePidFromAnalysis(valid.map((layer) => layer.id), analysis);
-
-  // Higher TPID ranks occupy progressively more interior ordinal shells by default.
+  const analysis = computeAnalysisTopology(valid.layers, braidedOptions.bandwidthRatio);
+  const pid = computePidFromAnalysis(ids, analysis);
   const order = requestedOrder ?? pid.order;
-  const sourceLayers = order.map((id) => valid.find((layer) => layer.id === id)!);
-  const orderedAnalysis = order.map((id) => analysis[valid.findIndex((layer) => layer.id === id)]);
+  const orderedIndices = order.map((id) => ids.indexOf(id));
+  const orderedAnalysis = orderedIndices.map((index) => analysis[index]);
+  const topology = branchTopologyFromAnalysis(orderedAnalysis);
+  const orderedQuantiles = orderedIndices.map((index) => valid.layers[index].measures.map(getBraidedQuantiles));
+  const orderedLayers: LayoutLayer[] = orderedIndices.map((index) => ({
+    id: valid.layers[index].id,
+    magnitude: analysis[index].map((cell) => cell?.summary.representative ?? 0),
+  }));
+  const base = baseline(orderedLayers, order, options.baselineMode);
+  const h0 = h0FromLayers(orderedLayers);
+  const requested = requestDynamicSpaces(topology);
+  const slotLayers: LayoutLayer[] = orderedLayers.map((layer, layerIndex) => ({
+    id: layer.id,
+    magnitude: layer.magnitude.map((value, time) => value + requested.actual[layerIndex][time]),
+  }));
+  const slotBase = baseline(slotLayers, order, options.baselineMode);
+  const braided = buildLayerSlotGeometry(
+    orderedLayers,
+    orderedQuantiles,
+    topology,
+    slotBase,
+    requested,
+    braidedOptions,
+  );
   const densityProfiles = options.densityProfileBins === undefined
     ? undefined
     : densityProfilesFromAnalysis(orderedAnalysis, options.densityProfileBins);
-  const quantiles = sourceLayers.map((layer) => layer.q.p50.map((_, t) =>
-    resolveLayerQuantiles(layer, t)
+  const inputOrderQuantiles = valid.layers.map((layer) => layer.measures.map((measure) =>
+    measure ? getBraidedQuantiles(measure) : null
   ));
-  const topology = branchTopologyFromAnalysis(orderedAnalysis);
-  const ordered = sourceLayers.map((layer, i) => ({
-    ...layer,
-    magnitude: topology[i].map((point) => point?.representative ?? 0),
-  }));
-  const base =
-    (options.baselineMode ?? "wiggle") === "sine"
-      ? computeSineBaseline(ordered, order)
-      : computeWiggleBaseline(ordered, order);
-
-  const h0 = h0FromLayers(ordered);
-  const yExtent = h0Max(h0);
-
-  const requested = requestDynamicSpaces(topology, braidOptions.spaceBudgetGain);
-  const slotLayers = ordered.map((layer, i) => ({
-    ...layer,
-    magnitude: layer.magnitude.map((value, t) => value + requested.actual[i][t]),
-  }));
-  const slotBase = (options.baselineMode ?? "wiggle") === "sine"
-    ? computeSineBaseline(slotLayers, order)
-    : computeWiggleBaseline(slotLayers, order);
-  const braided = buildLayerSlotGeometry(
-    ordered, quantiles, topology, slotBase, requested, braidOptions
-  );
-
-  const costs = computeGeometryCosts(base, braided, h0);
-
   return {
-    validation,
+    validation: { ok: true, issues: [] },
     pid,
     layoutOrder: order,
-    uncertainty,
+    uncertainty: computeUncertainty(inputOrderQuantiles, 1e-9, 0),
     base,
     braided,
     densityProfiles,
-    options: braidOptions,
-    costs,
-    yExtent,
+    options: braidedOptions,
+    costs: computeGeometryCosts(base, braided, h0),
+    yExtent: Math.max(1, ...h0),
   };
 }
 
-function h0Max(h0: number[]): number {
-  let m = 0;
-  for (const v of h0) if (v > m) m = v;
-  return m > 0 ? m : 1;
+export function h0FromLayers(layers: readonly LayoutLayer[]): number[] {
+  const height = new Array<number>(layers[0].magnitude.length).fill(0);
+  for (const layer of layers) {
+    for (let time = 0; time < height.length; time += 1) height[time] += layer.magnitude[time];
+  }
+  return height;
 }
 
-export type { Layer, QuantileMatrix, ValidationResult };
-export { resolveLayerQuantiles } from "./engine/braided";
-export { inputDataset as canonicalizeDataset } from "./data/dataInput";
-export { compute_tpid_layer_ordering } from "./engine/pid";
-export type { TpidLayerInput, TpidOptions, TpidOrderingEntry } from "./engine/pid";
+function baseline(
+  layers: LayoutLayer[],
+  order: string[],
+  mode: PipelineOptions["baselineMode"],
+) {
+  return (mode ?? "wiggle") === "sine"
+    ? computeSineBaseline(layers, order)
+    : computeWiggleBaseline(layers, order);
+}
+
+export type { InputDataset, InputLayer, MeasureComponent, ProbabilityMeasure } from "./input";
+export type { BraidedStreamOptions, PipelineResult } from "./engine/types";

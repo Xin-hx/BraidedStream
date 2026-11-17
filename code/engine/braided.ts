@@ -1,4 +1,6 @@
-/** Distribution-derived layer geometry from the definitions in visual_design.tex. */
+/** Probability-measure analysis and layer geometry. */
+import type { InputLayer, MeasureComponent, ProbabilityMeasure } from "../input";
+import { measureDeviations, measureMoments, measureQuantile } from "./measure";
 import type {
   BaseLayout,
   BraidedLayerGeometry,
@@ -6,26 +8,19 @@ import type {
   BraidedPointDebug,
   BraidedQuantiles,
   BraidedStreamOptions,
-  DistributionAtTime,
-  Layer,
+  LayoutLayer,
   SpaceGeometry,
-  WeightedPoint,
-} from "../types";
+} from "./types";
 
 export const DEFAULT_BRAIDED_STREAM_OPTIONS: BraidedStreamOptions = {
   bandwidthRatio: 0.3,
-  spaceBudgetGain: 1,
-  epsilon: 1e-9,
   debug: false,
 };
 
-const QUANTILE_PROBABILITIES = [0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.975];
-const KDE_GRID_SIZE = 257;
+const KDE_LOCAL_STEPS = 128;
 export const ANALYSIS_INTEGRATION_STEPS = 128;
 
-type Atom = { kind: "atom"; value: number; mass: number };
-type UniformSegment = { kind: "uniform"; low: number; high: number; mass: number };
-type MeasurePart = Atom | UniformSegment;
+type MeasurePart = MeasureComponent;
 type KdeGrid = { x: number[]; density: number[] };
 type Interval = { y0: number; y1: number };
 
@@ -55,6 +50,10 @@ export type AnalysisDistribution = {
   survival: (value: number) => number;
   /** Numerical upper bound used for integrals over the smoothed tail. */
   upper: number;
+  /** Support-aware knots that keep translated narrow tails numerically resolved. */
+  integrationBreakpoints: readonly number[];
+  /** Integral of the smoothed CCDF, used by TPID. */
+  smoothedMean: number;
   /** Exact location for the zero-bandwidth case; null for a smoothed density. */
   pointMass: number | null;
 };
@@ -67,68 +66,47 @@ export type DynamicSpaceRequests = {
   gaps: number[][][];
 };
 
-/** Return the declared distribution. A missing declared cell stays missing. */
-export function distributionAt(layer: Layer, time: number): DistributionAtTime | null {
-  if (layer.distribution) return layer.distribution[time] ?? null;
-  const values = [
-    layer.q.p025[time], layer.q.p10[time], layer.q.p25[time], layer.q.p50[time],
-    layer.q.p75[time], layer.q.p90[time], layer.q.p975[time],
-  ];
-  return values.every(Number.isFinite)
-    ? { kind: "quantiles", probabilities: QUANTILE_PROBABILITIES, values }
-    : null;
-}
-
 /** Exact quantile summary of the declared, unsmoothed probability measure. */
-export function getBraidedQuantiles(distribution: DistributionAtTime | null): BraidedQuantiles {
-  if (!distribution) return zeroQuantiles();
-  const parts = measureParts(distribution);
+export function getBraidedQuantiles(measure: ProbabilityMeasure | null): BraidedQuantiles {
+  if (!measure) return zeroQuantiles();
   return {
-    qLow: measureQuantile(parts, 0.025),
-    q10: measureQuantile(parts, 0.1),
-    q25: measureQuantile(parts, 0.25),
-    q50: measureQuantile(parts, 0.5),
-    q75: measureQuantile(parts, 0.75),
-    q90: measureQuantile(parts, 0.9),
-    qHigh: measureQuantile(parts, 0.975),
+    qLow: measureQuantile(measure, 0.025),
+    q10: measureQuantile(measure, 0.1),
+    q25: measureQuantile(measure, 0.25),
+    q50: measureQuantile(measure, 0.5),
+    q75: measureQuantile(measure, 0.75),
+    q90: measureQuantile(measure, 0.9),
+    qHigh: measureQuantile(measure, 0.975),
   };
 }
 
-export function resolveLayerQuantiles(layer: Layer, time: number): BraidedQuantiles {
-  const values = layer.q;
-  return {
-    qLow: values.p025[time], q10: values.p10[time], q25: values.p25[time],
-    q50: values.p50[time], q75: values.p75[time], q90: values.p90[time],
-    qHigh: values.p975[time],
-  };
-}
-
-/** Analyze one empirical set, quantile function, or weighted quantile mixture. */
+/** Analyze the one public atom/uniform probability-measure representation. */
 export function analyzeDistribution(
-  distribution: DistributionAtTime | null,
+  measure: ProbabilityMeasure | null,
   bandwidthRatio: number,
 ): DistributionAnalysis | null {
-  return buildAnalysisDistribution(distribution, bandwidthRatio)?.summary ?? null;
+  return buildAnalysisDistribution(measure, bandwidthRatio)?.summary ?? null;
 }
 
 /** Build the one analysis distribution consumed by both TPID and braiding. */
 export function buildAnalysisDistribution(
-  distribution: DistributionAtTime | null,
+  measure: ProbabilityMeasure | null,
   bandwidthRatio: number,
 ): AnalysisDistribution | null {
-  if (!distribution) return null;
+  if (!measure) return null;
   if (!Number.isFinite(bandwidthRatio) || bandwidthRatio <= 0) {
     throw new Error("bandwidthRatio beta must be finite and positive");
   }
-  const parts = measureParts(distribution);
-  if (!parts.length) return null;
-  const representative = measureQuantile(parts, 0.5);
-  const { deviationLow, deviationHigh } = partialMoments(parts, representative);
+  const parts = measure.components;
+  const representative = measureQuantile(measure, 0.5);
+  const { deviationLow, deviationHigh } = measureDeviations(measure, representative);
   const dispersion = deviationLow + deviationHigh;
   const balance = dispersion > 0
     ? (deviationHigh - deviationLow) / dispersion
     : 0;
-  const { mean, variance, maximum } = moments(parts);
+  const { mean, variance } = measureMoments(measure);
+  const minimum = Math.min(...parts.map((part) => part.kind === "atom" ? part.value : part.low));
+  const maximum = Math.max(...parts.map((part) => part.kind === "atom" ? part.value : part.high));
   if (variance === 0) {
     const summary = {
       representative,
@@ -148,6 +126,8 @@ export function buildAnalysisDistribution(
       quantile: () => mean,
       survival: (value) => value >= 0 && value < mean ? 1 : 0,
       upper: mean,
+      integrationBreakpoints: [0, mean],
+      smoothedMean: mean,
       pointMass: mean,
     };
   }
@@ -157,7 +137,8 @@ export function buildAnalysisDistribution(
   const cdf = (x: number) => reflectedCdf(parts, bandwidth, x);
   let upper = maximum + 8 * bandwidth;
   while (cdf(upper) < 1 - 1e-10) upper *= 2;
-  const kdeMedian = bisectCdf(cdf, upper, 0.5);
+  const integrationBreakpoints = kdeBreakpoints(parts, bandwidth, upper);
+  const kdeMedian = bisectCdf(cdf, integrationBreakpoints, 0.5);
   const smoothedMean = parts.reduce((sum, part) => sum + part.mass * (
     part.kind === "atom"
       ? foldedNormalMean(part.value, bandwidth)
@@ -168,7 +149,7 @@ export function buildAnalysisDistribution(
           ANALYSIS_INTEGRATION_STEPS,
         ) / (part.high - part.low)
   ), 0);
-  const grid = kdeGrid(density, upper);
+  const grid = kdeGrid(density, parts, bandwidth, minimum, upper);
   const peakIndices = findPeaks(grid);
   const valleyIndices = peakIndices.slice(0, -1).map((peak, index) =>
     indexOfMinimum(grid.density, peak, peakIndices[index + 1])
@@ -186,7 +167,7 @@ export function buildAnalysisDistribution(
   const summary = {
     representative,
     kdeMedian,
-    mean: smoothedMean,
+    mean,
     deviationLow,
     deviationHigh,
     dispersion,
@@ -198,9 +179,11 @@ export function buildAnalysisDistribution(
   return {
     summary,
     density,
-    quantile: (probability) => bisectCdf(cdf, upper, clamp(probability, 0, 1)),
+    quantile: (probability) => bisectCdf(cdf, integrationBreakpoints, clamp(probability, 0, 1)),
     survival: (value) => value < 0 ? 0 : clamp(1 - cdf(value), 0, 1),
     upper,
+    integrationBreakpoints,
+    smoothedMean,
     pointMass: null,
   };
 }
@@ -212,28 +195,32 @@ export function analysisOverlap(a: AnalysisDistribution, b: AnalysisDistribution
   }
   if (a.pointMass !== null) {
     return a.pointMass > 0
-      ? simpson(b.survival, 0, Math.min(a.pointMass, b.upper), ANALYSIS_INTEGRATION_STEPS)
+      ? integrateAtBreakpoints(b.survival, Math.min(a.pointMass, b.upper), b.integrationBreakpoints)
       : 0;
   }
   if (b.pointMass !== null) {
     return b.pointMass > 0
-      ? simpson(a.survival, 0, Math.min(b.pointMass, a.upper), ANALYSIS_INTEGRATION_STEPS)
+      ? integrateAtBreakpoints(a.survival, Math.min(b.pointMass, a.upper), a.integrationBreakpoints)
       : 0;
   }
   // The product vanishes with the shorter tail; a larger peer must not coarsen this grid.
   const upper = Math.min(a.upper, b.upper);
   return upper > 0
-    ? simpson((value) => a.survival(value) * b.survival(value), 0, upper, ANALYSIS_INTEGRATION_STEPS)
+    ? integrateAtBreakpoints(
+        (value) => a.survival(value) * b.survival(value),
+        upper,
+        [...a.integrationBreakpoints, ...b.integrationBreakpoints],
+      )
     : 0;
 }
 
 export function computeAnalysisTopology(
-  layers: Layer[],
+  layers: readonly InputLayer[],
   bandwidthRatio: number,
 ): AnalysisTopology {
   return layers.map((layer) =>
-    layer.q.p50.map((_, time) =>
-      buildAnalysisDistribution(distributionAt(layer, time), bandwidthRatio)
+    layer.measures.map((measure) =>
+      buildAnalysisDistribution(measure, bandwidthRatio)
     )
   );
 }
@@ -268,17 +255,9 @@ export function densityProfilesFromAnalysis(
   });
 }
 
-export function computeBranchTopology(
-  orderedLayers: Layer[],
-  bandwidthRatio: number,
-): BranchTopology {
-  return branchTopologyFromAnalysis(computeAnalysisTopology(orderedLayers, bandwidthRatio));
-}
-
-/** Allocate D'=gain*U once across A_-, d_1,...,d_(K-1), A_+. */
+/** Allocate D=U once across A_-, d_1,...,d_(K-1), A_+. */
 export function requestDynamicSpaces(
   topology: BranchTopology,
-  spaceBudgetGain = 1,
 ): DynamicSpaceRequests {
   const actual: number[][] = [];
   const balance: number[][] = [];
@@ -297,7 +276,7 @@ export function requestDynamicSpaces(
       }
       const weights = [point.deviationLow, ...point.separations, point.deviationHigh];
       const total = weights.reduce((sum, value) => sum + value, 0);
-      actual[i][t] = spaceBudgetGain * point.dispersion;
+      actual[i][t] = point.dispersion;
       balance[i][t] = point.balance;
       gaps[i][t] = total > 0
         ? weights.map((value) => actual[i][t] * value / total)
@@ -334,7 +313,7 @@ function placeBranches(modes: BranchMode[], height: number, gaps: number[]): Pla
 }
 
 export function buildLayerSlotGeometry(
-  orderedLayers: Layer[],
+  orderedLayers: LayoutLayer[],
   quantiles: BraidedQuantiles[][],
   topology: BranchTopology,
   slotBase: BaseLayout,
@@ -371,7 +350,7 @@ export function buildLayerSlotGeometry(
       const point = topology[i][t];
       const low = slotBase.yBottom[i][t];
       const high = slotBase.yTop[i][t];
-      const H = orderedLayers[i].magnitude?.[t] ?? 0;
+      const H = orderedLayers[i].magnitude[t] ?? 0;
       const modes = point?.modes ?? [{ location: 0, mass: 1 }];
       const localGaps = point ? requested.gaps[i][t] : [0, 0];
       const placement = placeBranches(modes, H, localGaps);
@@ -476,120 +455,7 @@ function activeFromTopology(points: Array<DistributionAnalysis | null>): boolean
   return points.map((point) => Boolean(point && point.dispersion > 0));
 }
 
-function measureParts(distribution: DistributionAtTime): MeasurePart[] {
-  if (distribution.kind === "samples") {
-    return normalizedSamples(distribution.values, distribution.weights).map((point) => ({
-      kind: "atom", value: point.value, mass: point.weight,
-    }));
-  }
-  if (distribution.kind === "quantiles") {
-    return quantileParts(distribution.probabilities, distribution.values, 1);
-  }
-  const members = distribution.members.filter((member) => Number.isFinite(member.weight) && member.weight > 0);
-  const total = members.reduce((sum, member) => sum + member.weight, 0);
-  if (!total) return [];
-  return members.flatMap((member) =>
-    quantileParts(member.probabilities, member.values, member.weight / total)
-  );
-}
-
-function normalizedSamples(values: number[], weights?: number[]): WeightedPoint[] {
-  if (weights && weights.length !== values.length) throw new Error("sample weights length mismatch");
-  const points: WeightedPoint[] = [];
-  for (let index = 0; index < values.length; index += 1) {
-    const value = values[index];
-    const weight = weights?.[index] ?? 1;
-    if (!Number.isFinite(value)) continue;
-    if (value < 0) throw new Error("distribution values must be non-negative");
-    if (!Number.isFinite(weight) || weight <= 0) throw new Error("sample weights must be finite and positive");
-    points.push({ value, weight });
-  }
-  const total = points.reduce((sum, point) => sum + point.weight, 0);
-  return total ? points.map((point) => ({ ...point, weight: point.weight / total })) : [];
-}
-
-function quantileParts(probabilities: number[], values: number[], totalMass: number): MeasurePart[] {
-  const knots = validatedKnots(probabilities, values);
-  const parts: MeasurePart[] = [];
-  addAtom(parts, knots[0].value, totalMass * knots[0].probability);
-  for (let index = 0; index + 1 < knots.length; index += 1) {
-    const left = knots[index];
-    const right = knots[index + 1];
-    const mass = totalMass * (right.probability - left.probability);
-    if (right.value === left.value) addAtom(parts, left.value, mass);
-    else parts.push({ kind: "uniform", low: left.value, high: right.value, mass });
-  }
-  addAtom(parts, knots.at(-1)!.value, totalMass * (1 - knots.at(-1)!.probability));
-  return parts;
-}
-
-function validatedKnots(probabilities: number[], values: number[]) {
-  if (!probabilities.length || probabilities.length !== values.length) {
-    throw new Error("invalid quantile distribution");
-  }
-  const knots = probabilities.map((probability, index) => ({ probability, value: values[index] }))
-    .sort((a, b) => a.probability - b.probability);
-  for (let index = 0; index < knots.length; index += 1) {
-    const knot = knots[index];
-    const previous = knots[index - 1];
-    if (!Number.isFinite(knot.probability) || knot.probability <= 0 || knot.probability >= 1 ||
-        !Number.isFinite(knot.value) || knot.value < 0 ||
-        (index > 0 && (knot.probability <= previous.probability || knot.value < previous.value))) {
-      throw new Error("quantile probabilities must be strictly ordered in (0,1) and values non-negative and monotone");
-    }
-  }
-  return knots;
-}
-
-function addAtom(parts: MeasurePart[], value: number, mass: number): void {
-  if (mass > 0) parts.push({ kind: "atom", value, mass });
-}
-
-function moments(parts: MeasurePart[]): { mean: number; variance: number; maximum: number } {
-  let mean = 0;
-  let maximum = 0;
-  for (const part of parts) {
-    const partMean = part.kind === "atom" ? part.value : (part.low + part.high) / 2;
-    mean += part.mass * partMean;
-    maximum = Math.max(maximum, part.kind === "atom" ? part.value : part.high);
-  }
-  const variance = parts.reduce((sum, part) => {
-    const partMean = part.kind === "atom" ? part.value : (part.low + part.high) / 2;
-    const within = part.kind === "atom" ? 0 : (part.high - part.low) ** 2 / 12;
-    return sum + part.mass * ((partMean - mean) ** 2 + within);
-  }, 0);
-  return { mean, variance, maximum };
-}
-
-/** Exact first partial moments of the original atom/uniform measure around r. */
-function partialMoments(
-  parts: MeasurePart[],
-  representative: number,
-): { deviationLow: number; deviationHigh: number } {
-  let deviationLow = 0;
-  let deviationHigh = 0;
-  for (const part of parts) {
-    if (part.kind === "atom") {
-      deviationLow += part.mass * Math.max(representative - part.value, 0);
-      deviationHigh += part.mass * Math.max(part.value - representative, 0);
-      continue;
-    }
-    const split = Math.max(part.low, Math.min(representative, part.high));
-    const density = part.mass / (part.high - part.low);
-    deviationLow += density * (
-      representative * (split - part.low) - (split ** 2 - part.low ** 2) / 2
-    );
-    deviationHigh += density * (
-      (part.high ** 2 - split ** 2) / 2 - representative * (part.high - split)
-    );
-  }
-  return {
-    deviationLow: Math.max(0, deviationLow),
-    deviationHigh: Math.max(0, deviationHigh),
-  };
-}
-
-function reflectedDensity(parts: MeasurePart[], bandwidth: number, x: number): number {
+function reflectedDensity(parts: readonly MeasurePart[], bandwidth: number, x: number): number {
   if (x < 0) return 0;
   return parts.reduce((sum, part) => {
     if (part.kind === "atom") {
@@ -603,7 +469,7 @@ function reflectedDensity(parts: MeasurePart[], bandwidth: number, x: number): n
   }, 0);
 }
 
-function reflectedCdf(parts: MeasurePart[], bandwidth: number, x: number): number {
+function reflectedCdf(parts: readonly MeasurePart[], bandwidth: number, x: number): number {
   if (x <= 0) return 0;
   const value = parts.reduce((sum, part) => {
     if (part.kind === "atom") {
@@ -631,8 +497,27 @@ function foldedNormalMean(value: number, bandwidth: number): number {
     value * (2 * normalCdf(z) - 1);
 }
 
-function kdeGrid(density: (x: number) => number, upper: number): KdeGrid {
-  const x = Array.from({ length: KDE_GRID_SIZE }, (_, index) => upper * index / (KDE_GRID_SIZE - 1));
+function kdeGrid(
+  density: (x: number) => number,
+  parts: readonly MeasurePart[],
+  bandwidth: number,
+  minimum: number,
+  upper: number,
+): KdeGrid {
+  const merged = supportWindows(parts, bandwidth, upper);
+  const x: number[] = [];
+  for (const [index, window] of merged.entries()) {
+    if (index && window.low > merged[index - 1].high) {
+      x.push((merged[index - 1].high + window.low) / 2);
+    }
+    const steps = Math.max(KDE_LOCAL_STEPS, Math.min(4096, Math.ceil(
+      (window.high - window.low) / (bandwidth / 8),
+    )));
+    for (let step = 0; step <= steps; step += 1) {
+      x.push(window.low + (window.high - window.low) * step / steps);
+    }
+  }
+  if (!x.length) x.push(Math.max(0, minimum - 8 * bandwidth), upper);
   return { x, density: x.map(density) };
 }
 
@@ -669,27 +554,61 @@ function normalizeModeMasses(modes: BranchMode[]): void {
   if (total > 0) for (const mode of modes) mode.mass /= total;
 }
 
-function measureQuantile(parts: MeasurePart[], probability: number): number {
-  if (!parts.length) return Number.NaN;
-  const upper = Math.max(...parts.map((part) => part.kind === "atom" ? part.value : part.high));
-  const cdf = (value: number) => parts.reduce((sum, part) => {
-    if (part.kind === "atom") return sum + (part.value <= value ? part.mass : 0);
-    if (value <= part.low) return sum;
-    if (value >= part.high) return sum + part.mass;
-    return sum + part.mass * (value - part.low) / (part.high - part.low);
-  }, 0);
-  return bisectCdf(cdf, upper, probability);
-}
-
-function bisectCdf(cdf: (x: number) => number, upper: number, probability: number): number {
+function bisectCdf(cdf: (x: number) => number, breakpoints: readonly number[], probability: number): number {
+  if (probability <= 0) return 0;
   let low = 0;
-  let high = upper;
+  let high = breakpoints.at(-1)!;
+  for (let index = 1; index < breakpoints.length; index += 1) {
+    if (cdf(breakpoints[index]) >= probability) {
+      low = breakpoints[index - 1];
+      high = breakpoints[index];
+      break;
+    }
+  }
   for (let iteration = 0; iteration < 80; iteration += 1) {
     const midpoint = (low + high) / 2;
     if (cdf(midpoint) < probability) low = midpoint;
     else high = midpoint;
   }
   return (low + high) / 2;
+}
+
+function kdeBreakpoints(parts: readonly MeasurePart[], bandwidth: number, upper: number): number[] {
+  const points = [0, upper, ...supportWindows(parts, bandwidth, upper)
+    .flatMap((window) => [window.low, window.high])];
+  return [...new Set(points)].sort((a, b) => a - b);
+}
+
+function supportWindows(
+  parts: readonly MeasurePart[],
+  bandwidth: number,
+  upper: number,
+): Array<{ low: number; high: number }> {
+  const windows = parts.map((part) => ({
+    low: Math.max(0, (part.kind === "atom" ? part.value : part.low) - 8 * bandwidth),
+    high: Math.min(upper, (part.kind === "atom" ? part.value : part.high) + 8 * bandwidth),
+  })).sort((a, b) => a.low - b.low);
+  const merged: Array<{ low: number; high: number }> = [];
+  for (const window of windows) {
+    const previous = merged.at(-1);
+    if (previous && window.low <= previous.high) previous.high = Math.max(previous.high, window.high);
+    else merged.push({ ...window });
+  }
+  return merged;
+}
+
+function integrateAtBreakpoints(
+  fn: (value: number) => number,
+  upper: number,
+  breakpoints: readonly number[],
+): number {
+  const points = [...new Set([0, upper, ...breakpoints.filter((point) => point > 0 && point < upper)])]
+    .sort((a, b) => a - b);
+  let integral = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    integral += simpson(fn, points[index - 1], points[index], ANALYSIS_INTEGRATION_STEPS);
+  }
+  return integral;
 }
 
 function simpson(fn: (value: number) => number, low: number, high: number, steps: number): number {

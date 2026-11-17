@@ -2,9 +2,10 @@
  * Demo entry: state, controls, hover details, cost panel, export.
  */
 import { runPipeline } from "../code/index";
-import { DEFAULT_COVID_STATES, parseCovidCaseJson, type CovidStateSelection } from "../code/data/covid";
-import { parseIllustrationCsv } from "../code/data/illustration";
-import { parseTcmCsv } from "../code/data/tcm";
+import { DEFAULT_COVID_STATES, convertCovidCase, type CovidStateSelection } from "../code/data/covidConverter";
+import { convertIllustrationCase } from "../code/data/illustration";
+import { convertTcmCase, TCM_COLORS } from "../code/data/tcmConverter";
+import type { InputDataset } from "../code/input";
 import {
   diseaseDay,
   exportSvg,
@@ -13,14 +14,11 @@ import {
   M,
   W,
   H,
+  type DisplayLayer,
   type VisMethod,
 } from "./render";
 import { createLegendController } from "./legend";
-import type {
-  BraidedStreamOptions,
-  Layer,
-  PipelineResult,
-} from "../code/types";
+import type { BraidedStreamOptions, PipelineResult } from "../code/engine/types";
 
 // Case-study data files are served from vite's public/ directory.
 export const COVID_PARAMETERS: { stateSelection: CovidStateSelection } = {
@@ -31,13 +29,13 @@ const DATASETS = {
   illustration: {
     path: "dataset/illustration.csv",
     label: "illustration",
-    parse: parseIllustrationCsv,
+    parse: convertIllustrationCase,
   },
-  tcm: { path: "dataset/TCMRecord.csv", label: "tcm", parse: parseTcmCsv },
+  tcm: { path: "dataset/TCMRecord.csv", label: "tcm", parse: convertTcmCase },
   "covid-inc": {
     path: "dataset/covid_inc_case_trained_members.json",
     label: "covid-inc",
-    parse: (text: string) => parseCovidCaseJson(text, COVID_PARAMETERS.stateSelection),
+    parse: (text: string) => convertCovidCase(text, { states: COVID_PARAMETERS.stateSelection }),
   },
 } as const;
 
@@ -46,7 +44,6 @@ type DatasetId = keyof typeof DATASETS;
 /** Code-owned parameters; future controls can update this object before run(). */
 export const BRAIDED_PARAMETERS: Partial<BraidedStreamOptions> = {
   bandwidthRatio: 0.3,
-  spaceBudgetGain: 1,
   debug: true,
 };
 
@@ -91,9 +88,16 @@ const state: State = {
   timeEnd: 1,
 };
 
-let dataCache: { layers: Layer[]; times: string[] } | null = null;
+let dataCache: {
+  dataset: InputDataset;
+  layers: DisplayLayer[];
+  times: string[];
+  sampleSize: Readonly<Record<string, readonly number[]>>;
+} | null = null;
 let result: PipelineResult | null = null;
 let perfMs = 0;
+let loadVersion = 0;
+let loadController: AbortController | null = null;
 
 const $ = <T extends Element>(id: string): T =>
   document.getElementById(id) as unknown as T;
@@ -111,17 +115,40 @@ const legend = createLegendController({
   },
 });
 
-async function loadData(): Promise<void> {
-  const spec = DATASETS[state.dataset];
-  const res = await fetch(spec.path);
-  if (!res.ok) throw new Error(`failed to load ${spec.path}: ${res.status}`);
-  const text = await res.text();
-  dataCache = spec.parse(text);
-  state.timeStart = 0;
-  state.timeEnd = Math.max(0, dataCache.times.length - 1);
-  state.hover = null;
-  state.highlight = null;
-  state.selectedLayer = null;
+async function loadData(requestedDataset: DatasetId): Promise<void> {
+  const version = ++loadVersion;
+  loadController?.abort();
+  const controller = new AbortController();
+  loadController = controller;
+  const spec = DATASETS[requestedDataset];
+  try {
+    const res = await fetch(spec.path, { signal: controller.signal });
+    if (!res.ok) throw new Error(`failed to load ${spec.path}: ${res.status}`);
+    const text = await res.text();
+    if (version !== loadVersion) return;
+    const converted = spec.parse(text);
+    if (version !== loadVersion) return;
+    dataCache = {
+      dataset: converted.dataset,
+      times: [...converted.dataset.times],
+      layers: converted.dataset.layers.map((layer) => ({
+        id: layer.id,
+        ...(requestedDataset === "tcm" && Object.hasOwn(TCM_COLORS, layer.id)
+          ? { color: TCM_COLORS[layer.id] } : {}),
+      })),
+      sampleSize: converted.metadata.sampleSize,
+    };
+    state.timeStart = 0;
+    state.timeEnd = Math.max(0, dataCache.times.length - 1);
+    state.hover = null;
+    state.highlight = null;
+    state.selectedLayer = null;
+    run();
+  } catch (error) {
+    if (version !== loadVersion || (error instanceof DOMException && error.name === "AbortError")) return;
+    const message = error instanceof Error ? error.message : String(error);
+    costsEl.textContent = `data load failed: ${message}`;
+  }
 }
 
 function run(): void {
@@ -129,7 +156,7 @@ function run(): void {
   const t0 = performance.now();
   const layoutOrder = legend.getLayoutOrder(dataCache.layers.map((layer) => layer.id));
 
-  result = runPipeline(dataCache.layers, {
+  result = runPipeline(dataCache.dataset, {
     layoutOrder,
     baselineMode: state.baseline,
     densityProfileBins: state.showDensityGradient ? DENSITY_GRADIENT_BINS : undefined,
@@ -157,13 +184,11 @@ function render(): void {
   const representativeStroke = $<HTMLInputElement>("ctl-representative-stroke");
   const timeCell = $<HTMLInputElement>("ctl-time-cell");
   const branchStroke = $<HTMLInputElement>("ctl-branch-stroke");
-  const spaceBudgetGain = $<HTMLInputElement>("ctl-space-budget-gain");
   densityGradient.disabled = !braided || state.collapseBranches;
   envelopeStroke.disabled = !braided;
   representativeStroke.disabled = !braided;
   timeCell.disabled = !braided || state.collapseBranches;
   branchStroke.disabled = !braided || state.collapseBranches;
-  spaceBudgetGain.disabled = !braided;
   renderChart(svgEl, {
     layers: dataCache.layers,
     times: dataCache.times,
@@ -187,6 +212,7 @@ function render(): void {
   renderTimeFilter(timeFilterEl, {
     layers: dataCache!.layers,
     times: dataCache!.times,
+    result,
     layoutOrder: result.layoutOrder,
     colorOverrides: legendAppearance.colorOverrides,
     palette: legendAppearance.palette,
@@ -309,7 +335,7 @@ function dataY(py: number, lo: number, hi: number): number | null {
   return v >= lo && v <= hi ? v : null;
 }
 
-function showTooltip(
+export function showTooltip(
   t: number,
   layerId: string | null,
   spaceKind?: string,
@@ -319,7 +345,12 @@ function showTooltip(
   const layer = layerId ? layers.find((l) => l.id === layerId) : null;
   const tt = tooltip as HTMLElement;
   if (!layer) {
-    tt.innerHTML = `<div class="tt-title">${times[t]}</div><div>no layer under cursor (corridor gap)</div>`;
+    const title = document.createElement("div");
+    title.className = "tt-title";
+    title.textContent = times[t];
+    const message = document.createElement("div");
+    message.textContent = "no layer under cursor (corridor gap)";
+    tt.replaceChildren(title, message);
     tt.classList.remove("hidden");
     return;
   }
@@ -327,8 +358,7 @@ function showTooltip(
   const geometry = result.braided.layers[i];
   const point = geometry.debug?.[t];
   const magnitude = result.base.yTop[i][t] - result.base.yBottom[i][t];
-  const sampleSize = layer.sampleSize?.[t];
-  const perCapita = layer.perCapita ? ` · ${fmt(layer.perCapita[t])}/cap` : "";
+  const sampleSize = dataCache.sampleSize[layer.id]?.[t];
 
   const rows = [
     ["representative thickness H = raw P median", fmt(magnitude)],
@@ -342,15 +372,26 @@ function showTooltip(
     ...(spaceKind ? [["space owner", `${spaceKind} · ${layer.id}`]] : []),
     ...(sampleSize === null || sampleSize === undefined
       ? []
-      : [[layer.sourceKind === "quantile-mixture"
+      : [[state.dataset === "covid-inc"
         ? "model members"
         : state.dataset === "illustration" ? "ensemble members" : "patient sample", String(sampleSize)]]),
   ];
-  tt.innerHTML =
-    `<div class="tt-title">${times[t]} · ${layer.id}${perCapita}</div>` +
-    rows
-      .map(([k, v]) => `<div class="tt-row"><span class="k">${k}</span><span class="v">${v}</span></div>`)
-      .join("");
+  const title = document.createElement("div");
+  title.className = "tt-title";
+  title.textContent = `${times[t]} · ${layer.id}`;
+  const rowElements = rows.map(([key, value]) => {
+    const row = document.createElement("div");
+    row.className = "tt-row";
+    const keyElement = document.createElement("span");
+    keyElement.className = "k";
+    keyElement.textContent = key;
+    const valueElement = document.createElement("span");
+    valueElement.className = "v";
+    valueElement.textContent = value;
+    row.append(keyElement, valueElement);
+    return row;
+  });
+  tt.replaceChildren(title, ...rowElements);
   tt.classList.remove("hidden");
 }
 
@@ -376,7 +417,7 @@ function bindControls(): void {
   };
   bind("ctl-dataset", (v) => {
     state.dataset = v as DatasetId;
-    void loadData().then(run);
+    void loadData(state.dataset);
   });
   bind("ctl-vis-method", (v) => {
     state.visMethod = v as VisMethod;
@@ -391,11 +432,6 @@ function bindControls(): void {
   });
   bind("ctl-bandwidth-ratio", (v) => {
     BRAIDED_PARAMETERS.bandwidthRatio = Number(v);
-    run();
-  });
-  bind("ctl-space-budget-gain", (v) => {
-    BRAIDED_PARAMETERS.spaceBudgetGain = Number(v);
-    $("ctl-space-budget-gain-value").textContent = Number(v).toFixed(2);
     run();
   });
   const smooth = $<HTMLInputElement>("ctl-smooth");
@@ -461,8 +497,7 @@ function bindControls(): void {
 
 async function main(): Promise<void> {
   bindControls();
-  await loadData();
-  run();
+  await loadData(state.dataset);
 }
 
 void main();
