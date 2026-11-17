@@ -12,6 +12,9 @@ import {
   line,
   scaleLinear,
   select,
+  schemePaired,
+  schemeSet2,
+  schemeTableau10,
   stack,
   stackOffsetWiggle,
   symbol,
@@ -32,10 +35,20 @@ export const REFERENCE_PALETTE = [
   "#FDB462", "#FB8072", "#80B1D3", "#D9D9D9", "#BC80BD",
 ];
 
+export const LAYER_PALETTES = {
+  reference: REFERENCE_PALETTE,
+  tableau10: schemeTableau10,
+  set2: schemeSet2,
+  paired: schemePaired,
+} as const;
+export type PaletteId = keyof typeof LAYER_PALETTES;
+
 export interface RenderInput {
   layers: Layer[];
   times: string[];
   result: PipelineResult;
+  colorOverrides?: Readonly<Record<string, string>>;
+  palette?: PaletteId;
   start: number;
   end: number;
   visMethod: VisMethod;
@@ -55,18 +68,32 @@ export interface RenderInput {
 export interface TimeFilterInput {
   layers: Layer[];
   times: string[];
+  layoutOrder?: string[];
+  colorOverrides?: Readonly<Record<string, string>>;
+  palette?: PaletteId;
   start: number;
   end: number;
   onChange: (start: number, end: number) => void;
 }
 
 /** Stable within a dataset and independent of input/stack order. */
-export function colorForLayer(layers: Layer[], id: string): string {
+export function colorForLayer(
+  layers: Layer[],
+  id: string,
+  colorOverrides: Readonly<Record<string, string>> = {},
+  paletteId: PaletteId = "reference",
+): string {
+  const override = colorOverrides[id];
+  if (override) return override;
   const layer = layers.find((item) => item.id === id);
-  if (layer?.color) return layer.color;
-  const ids = layers.filter((item) => !item.color).map((item) => item.id).sort();
+  if (paletteId === "reference" && layer?.color) return layer.color;
+  const ids = layers
+    .filter((item) => paletteId !== "reference" || !item.color)
+    .map((item) => item.id)
+    .sort();
   const index = Math.max(0, ids.indexOf(id));
-  return REFERENCE_PALETTE[index % REFERENCE_PALETTE.length];
+  const palette = LAYER_PALETTES[paletteId];
+  return palette[index % palette.length];
 }
 
 export function visibleTimeIndices(length: number, start: number, end: number): number[] {
@@ -84,7 +111,7 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
   const top = braided
     ? input.result.braided.layers.map((layer) => layer.slotY1)
     : input.result.base.yTop;
-  const layerIds = input.result.pid.order;
+  const layerIds = input.result.layoutOrder;
   const indices = visibleTimeIndices(tLen, input.start, input.end);
   const values = [
     ...bottom.flatMap((layer) => indices.map((time) => layer[time])),
@@ -215,7 +242,7 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
     root.append("line")
       .attr("x1", rulerX).attr("x2", rulerX)
       .attr("y1", rulerBottom).attr("y2", rulerBottom - rulerPixels)
-      .attr("stroke", "#48576a").attr("stroke-width", 2);
+      .attr("stroke", "var(--muted)").attr("stroke-width", 2);
     root.append("text")
       .attr("x", rulerX - 6).attr("y", rulerBottom - rulerPixels / 2)
       .attr("text-anchor", "end").attr("dominant-baseline", "middle")
@@ -226,11 +253,18 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
       .attr("text-anchor", "end").attr("class", "axis-label")
       .text("high-value side ↑");
   }
-  const colorOf = (idx: number): string => colorForLayer(input.layers, layerIds[idx]);
+  const colorOf = (idx: number): string =>
+    colorForLayer(input.layers, layerIds[idx], input.colorOverrides, input.palette);
   if (braided) {
     const layers = root.append("g").attr("class", "layers");
     for (const [i, geometry] of input.result.braided.layers.entries()) {
       const visual = interpolated!.layers[i];
+      const layerColor = colorForLayer(
+        input.layers,
+        geometry.layerId,
+        input.colorOverrides,
+        input.palette,
+      );
       const dim =
         input.highlightLayer && geometry.layerId !== input.highlightLayer
           ? " dim"
@@ -254,7 +288,7 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
         .append("path")
         .attr("d", branchAreas.join(""))
         .attr("class", `layer branch${dim}`)
-        .attr("fill", densityEnabled ? densityColor(colorOf(i), 0) : colorOf(i))
+        .attr("fill", densityEnabled ? densityColor(layerColor, 0) : layerColor)
         .attr("fill-opacity", densityEnabled ? 1 : 0.82)
         .attr("stroke", "none")
         .attr("data-id", geometry.layerId)
@@ -299,7 +333,7 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
         }
       }
       if (!input.collapseBranches) {
-        const tint = lighterFamilyColor(colorOf(i));
+        const tint = lighterFamilyColor(layerColor);
         for (const [spaceIndex, space] of geometry.spaces.entries()) {
           const visualSpace = visual.spaces[spaceIndex];
           layers
@@ -329,7 +363,7 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
             .attr("d", makeBraidedLine(boundary, visual.defined))
             .attr("class", `envelope-stroke${dim}`)
             .attr("fill", "none")
-            .attr("stroke", "#7a8793")
+            .attr("stroke", "var(--muted)")
             .attr("stroke-width", 0.9)
             .attr("vector-effect", "non-scaling-stroke")
             .attr("pointer-events", "none");
@@ -347,7 +381,7 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
               .attr("d", makeBraidedLine(boundary, defined))
               .attr("class", `branch-stroke${dim}`)
               .attr("fill", "none")
-              .attr("stroke", densityColor(colorOf(i), 1))
+              .attr("stroke", densityColor(layerColor, 1))
               .attr("stroke-width", 0.75)
               .attr("stroke-opacity", 0.82)
               .attr("vector-effect", "non-scaling-stroke")
@@ -363,7 +397,7 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
             .attr("d", makeBraidedLine(boundary, visual.defined))
             .attr("class", `representative-stroke${dim}`)
             .attr("fill", "none")
-            .attr("stroke", "#4f5b66")
+            .attr("stroke", "var(--ink)")
             .attr("stroke-width", 0.9)
             .attr("vector-effect", "non-scaling-stroke")
             .attr("pointer-events", "none");
@@ -378,7 +412,7 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
             .attr("class", `time-cell${dim}`)
             .attr("x1", x(xValues[time])).attr("x2", x(xValues[time]))
             .attr("y1", y(visual.envelope.y0[sample])).attr("y2", y(visual.envelope.y1[sample]))
-            .attr("stroke", "#4f5b66")
+            .attr("stroke", "var(--ink)")
             .attr("stroke-width", 0.7)
             .attr("stroke-opacity", 0.55)
             .attr("vector-effect", "non-scaling-stroke")
@@ -439,7 +473,15 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): vo
   root.selectAll("*").remove();
   if (tLen < 2) return;
 
-  const overview = baseGeometryInInputOrder(input.layers, input.times);
+  const layersById = new Map(input.layers.map((layer) => [layer.id, layer]));
+  const orderedLayers = input.layoutOrder
+    ? input.layoutOrder.map((id) => {
+        const layer = layersById.get(id);
+        if (!layer) throw new Error(`time filter received unknown layer id: ${id}`);
+        return layer;
+      })
+    : input.layers;
+  const overview = baseGeometryInInputOrder(orderedLayers, input.times);
   const values = [...overview.yBottom.flat(), ...overview.yTop.flat()];
   const pad = (Math.max(...values) - Math.min(...values)) * 0.08 || 1;
   const x = scaleLinear().domain([0, tLen - 1]).range([M.left, W - M.right]);
@@ -454,9 +496,9 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): vo
     .attr("y", 8)
     .attr("width", IW)
     .attr("height", 54)
-    .attr("fill", "#f8fafc")
-    .attr("stroke", "#e5e7eb");
-  for (let i = 0; i < input.layers.length; i += 1) {
+    .attr("fill", "var(--accent-soft)")
+    .attr("stroke", "var(--line)");
+  for (let i = 0; i < orderedLayers.length; i += 1) {
     root
       .append("path")
       .attr(
@@ -467,7 +509,10 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): vo
           .y0((t) => y(overview.yBottom[i][t]))
           .y1((t) => y(overview.yTop[i][t]))(indices) ?? "",
       )
-      .attr("fill", colorForLayer(input.layers, input.layers[i].id))
+      .attr(
+        "fill",
+        colorForLayer(orderedLayers, orderedLayers[i].id, input.colorOverrides, input.palette),
+      )
       .attr("fill-opacity", 0.76);
   }
 
@@ -475,10 +520,7 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): vo
   root
     .append("g")
     .attr("transform", "translate(0,62)")
-    .call(axisBottom(x).tickValues(ticks).tickFormat((t) => tickLabel(input.times[Number(t)] ?? "")))
-    .selectAll("text")
-    .attr("fill", "#6b7280")
-    .attr("font-size", 10);
+    .call(axisBottom(x).tickValues(ticks).tickFormat((t) => tickLabel(input.times[Number(t)] ?? "")));
 
   const brush = brushX()
     .extent([[M.left, 8], [W - M.right, 62]])
@@ -493,8 +535,8 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): vo
     .append("g")
     .call(brush)
     .call(brush.move, [x(input.start), x(input.end)]);
-  selection.select(".selection").attr("fill", "#0072b2").attr("fill-opacity", 0.18);
-  selection.selectAll(".handle").attr("fill", "#ffffff").attr("stroke", "#0072b2");
+  selection.select(".selection").attr("fill", "var(--accent)").attr("fill-opacity", 0.18);
+  selection.selectAll(".handle").attr("fill", "var(--accent-soft)").attr("stroke", "var(--accent)");
   selection.select(".overlay").attr("cursor", "crosshair");
 }
 
@@ -747,7 +789,7 @@ function drawStars(
               .size(radius * radius * 7)() ?? "",
           transform: `translate(${x(t)},${y((bottom[i][t] + top[i][t]) / 2)})`,
           fill: colorOf(i),
-          stroke: "#ffffff",
+          stroke: "var(--accent-soft)",
           "stroke-width": 0.8,
           "fill-opacity": 0.9,
         }),
@@ -911,6 +953,12 @@ function el(tag: string, attrs: Record<string, string | number>): SVGElement {
 }
 export function exportSvg(svg: SVGElement): void {
   const graphic = svg.cloneNode(true) as SVGElement;
+  for (const token of ["ink", "muted", "line", "accent", "accent-soft"]) {
+    graphic.style.setProperty(
+      `--${token}`,
+      getComputedStyle(document.documentElement).getPropertyValue(`--${token}`).trim(),
+    );
+  }
   graphic.querySelectorAll(".grid, .axis, .axis-label, .hover-line, text, line").forEach((node) => node.remove());
   downloadBlob(
     new Blob([new XMLSerializer().serializeToString(graphic)], {

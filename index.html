@@ -4,7 +4,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Braided Streamgraph — Demo</title>
+    <title>BraidedStream - Demo</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="stylesheet" href="/demo/style.css" />
   </head>
   <body>
@@ -14,6 +15,9 @@
           «
         </button>
         <div class="panel-body">
+          <div class="brand" aria-label="BraidedStream">
+            <span class="brand-name">BraidedStream</span>
+          </div>
           <div class="p-title">Controls</div>
 
           <label
@@ -82,6 +86,9 @@
           <label class="chk">
             <input id="ctl-density-gradient" type="checkbox" /> Density color gradient
           </label>
+          <label class="chk">
+            <input id="ctl-legend" type="checkbox" checked /> Show legend
+          </label>
           <div class="actions">
             <button id="btn-collapse" title="toggle braid">Collapse</button>
             <button id="btn-svg">SVG</button>
@@ -98,8 +105,38 @@
         ></svg>
         <div id="tooltip" class="tooltip hidden"></div>
         <div id="costs" class="costs"></div>
-        <div id="legend" class="legend"></div>
       </main>
+      <aside id="legend" class="legend" aria-label="Layer legend">
+        <button id="btn-legend-restore" class="legend-restore" type="button" aria-label="Restore legend" title="Expand legend" hidden>
+          «
+        </button>
+        <div class="legend-header">
+          <strong>Legend</strong>
+          <button id="btn-legend-minimize" type="button" aria-label="Minimize legend">−</button>
+          <button id="btn-legend-hide" type="button" aria-label="Hide legend">×</button>
+        </div>
+        <div class="legend-tools">
+          <label>
+            Order
+            <select id="ctl-legend-sort">
+              <option value="tpid">TPID</option>
+              <option value="category">Category (A–Z)</option>
+            </select>
+          </label>
+          <label>
+            Palette
+            <select id="ctl-legend-palette">
+              <option value="reference">BraidedStream</option>
+              <option value="tableau10">Tableau 10</option>
+              <option value="set2">ColorBrewer Set 2</option>
+              <option value="paired">ColorBrewer Paired</option>
+            </select>
+          </label>
+        </div>
+        <div id="legend-note" class="legend-note"></div>
+        <div id="legend-items" class="legend-grid"></div>
+        <div id="legend-status" class="legend-status" aria-live="polite"></div>
+      </aside>
     </div>
 
     <script type="module" src="/demo/main.ts"></script>

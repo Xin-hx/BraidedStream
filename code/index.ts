@@ -35,6 +35,8 @@ export function h0FromLayers(layers: Layer[]): number[] {
 }
 
 export interface PipelineOptions {
+  /** Optional bottom-to-top layout order. Defaults to the computed TPID order. */
+  layoutOrder?: string[];
   /** New uncertainty-aware layer-slot configuration. */
   braided?: Partial<BraidedStreamOptions>;
   /** baseline layout algorithm: "wiggle" (Byron-Wattenberg L2) or "sine"
@@ -46,12 +48,23 @@ export interface PipelineOptions {
 
 /**
  * Run the full braided pipeline on validated layers.
- * Layers may arrive in any order; the TPID center-out order is applied.
+ * Layers may arrive in any order; the TPID center-out order is applied unless
+ * an explicit layout order is provided.
  */
 export function runPipeline(layers: Layer[], options: PipelineOptions): PipelineResult {
   const { layers: valid, result: validation } = validateData(layers, true);
   if (valid.length === 0) {
     throw new Error("runPipeline: no layers");
+  }
+  const validIds = new Set(valid.map((layer) => layer.id));
+  const requestedOrder = options.layoutOrder ? [...options.layoutOrder] : undefined;
+  if (
+    requestedOrder &&
+    (requestedOrder.length !== validIds.size ||
+      new Set(requestedOrder).size !== validIds.size ||
+      requestedOrder.some((id) => !validIds.has(id)))
+  ) {
+    throw new Error("layoutOrder must contain each valid layer id exactly once");
   }
   const braidOptions = { ...DEFAULT_BRAIDED_STREAM_OPTIONS, ...options.braided };
   if (!Number.isFinite(braidOptions.epsilon) || braidOptions.epsilon <= 0) {
@@ -69,9 +82,9 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
   const analysis = computeAnalysisTopology(valid, braidOptions.bandwidthRatio);
   const pid = computePidFromAnalysis(valid.map((layer) => layer.id), analysis);
 
-  // Higher TPID ranks occupy progressively more interior ordinal shells.
-  const order = pid.order;
-  const sourceLayers = order.map((id) => valid.find((l) => l.id === id)!);
+  // Higher TPID ranks occupy progressively more interior ordinal shells by default.
+  const order = requestedOrder ?? pid.order;
+  const sourceLayers = order.map((id) => valid.find((layer) => layer.id === id)!);
   const orderedAnalysis = order.map((id) => analysis[valid.findIndex((layer) => layer.id === id)]);
   const densityProfiles = options.densityProfileBins === undefined
     ? undefined
@@ -109,6 +122,7 @@ export function runPipeline(layers: Layer[], options: PipelineOptions): Pipeline
   return {
     validation,
     pid,
+    layoutOrder: order,
     uncertainty,
     base,
     braided,

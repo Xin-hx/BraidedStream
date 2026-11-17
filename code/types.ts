@@ -269,6 +269,8 @@ export interface CostReport {
 export interface PipelineResult {
   validation: ValidationResult;
   pid: PidResult;
+  /** Bottom-to-top order used to build the rendered layout. */
+  layoutOrder: string[];
   uncertainty: UncertaintyResult;
   base: BaseLayout;
   braided: BraidedLayout;

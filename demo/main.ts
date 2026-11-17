@@ -6,7 +6,6 @@ import { DEFAULT_COVID_STATES, parseCovidCaseJson, type CovidStateSelection } fr
 import { parseIllustrationCsv } from "../code/data/illustration";
 import { parseTcmCsv } from "../code/data/tcm";
 import {
-  colorForLayer,
   diseaseDay,
   exportSvg,
   renderChart,
@@ -16,6 +15,7 @@ import {
   H,
   type VisMethod,
 } from "./render";
+import { createLegendController } from "./legend";
 import type {
   BraidedStreamOptions,
   Layer,
@@ -67,6 +67,7 @@ interface State {
   collapseBranches: boolean;
   hover: number | null;
   highlight: string | null;
+  selectedLayer: string | null;
   timeStart: number;
   timeEnd: number;
 }
@@ -85,6 +86,7 @@ const state: State = {
   collapseBranches: false,
   hover: null,
   highlight: null,
+  selectedLayer: null,
   timeStart: 0,
   timeEnd: 1,
 };
@@ -99,7 +101,15 @@ const svgEl = $<SVGSVGElement>("chart");
 const timeFilterEl = $<SVGSVGElement>("time-filter");
 const tooltip = $("tooltip");
 const costsEl = $("costs");
-const legendEl = $("legend");
+const legend = createLegendController({
+  onLayoutOrderChange: () => run(),
+  onAppearanceChange: () => render(),
+  onLayerSelect: (layerId) => {
+    state.selectedLayer = layerId;
+    render();
+    updateLegend();
+  },
+});
 
 async function loadData(): Promise<void> {
   const spec = DATASETS[state.dataset];
@@ -111,13 +121,16 @@ async function loadData(): Promise<void> {
   state.timeEnd = Math.max(0, dataCache.times.length - 1);
   state.hover = null;
   state.highlight = null;
+  state.selectedLayer = null;
 }
 
 function run(): void {
   if (!dataCache || dataCache.times.length < 2) return;
   const t0 = performance.now();
+  const layoutOrder = legend.getLayoutOrder(dataCache.layers.map((layer) => layer.id));
 
   result = runPipeline(dataCache.layers, {
+    layoutOrder,
     baselineMode: state.baseline,
     densityProfileBins: state.showDensityGradient ? DENSITY_GRADIENT_BINS : undefined,
     braided: {
@@ -128,11 +141,12 @@ function run(): void {
 
   render();
   renderCosts();
-  renderLegend();
+  updateLegend();
 }
 
 function render(): void {
   if (!dataCache || !result) return;
+  const legendAppearance = legend.getAppearance(state.dataset);
   const braided = state.visMethod === "braided";
   const collapse = $<HTMLButtonElement>("btn-collapse");
   collapse.hidden = !braided;
@@ -154,6 +168,8 @@ function render(): void {
     layers: dataCache.layers,
     times: dataCache.times,
     result,
+    colorOverrides: legendAppearance.colorOverrides,
+    palette: legendAppearance.palette,
     start: state.timeStart,
     end: state.timeEnd,
     visMethod: state.visMethod,
@@ -166,11 +182,14 @@ function render(): void {
     showDensityGradient: state.showDensityGradient,
     collapseBranches: state.collapseBranches,
     hover: state.hover,
-    highlightLayer: state.highlight,
+    highlightLayer: state.highlight ?? state.selectedLayer,
   });
   renderTimeFilter(timeFilterEl, {
     layers: dataCache!.layers,
     times: dataCache!.times,
+    layoutOrder: result.layoutOrder,
+    colorOverrides: legendAppearance.colorOverrides,
+    palette: legendAppearance.palette,
     start: state.timeStart,
     end: state.timeEnd,
     onChange: updateTimeRange,
@@ -181,21 +200,21 @@ function renderCosts(): void {
   costsEl.innerHTML = `<b>recompute</b> in ${perfMs.toFixed(1)} ms`;
 }
 
-function renderLegend(): void {
-  if (!result) return;
-  const html = result.pid.ranking
-    .map((id, idx) => {
-      const color = colorForLayer(dataCache!.layers, id);
-      const depthLabel = result!.pid.defined
-        ? `TPID=${result!.pid.depth[id].toFixed(6)}`
-        : "TPID undefined";
-      return `<span class="sw" style="background:${color}"></span>#${idx + 1} ${id} <span style="opacity:.6">${depthLabel}</span>`;
-    })
-    .join("&nbsp;&nbsp;");
-  const densityKey = state.visMethod === "braided" && state.showDensityGradient && !state.collapseBranches
-    ? "<div>branch color intensity = KDE density (one scale per layer, shared across time)</div>"
-    : "";
-  legendEl.innerHTML = `${densityKey}${html}`;
+function updateLegend(): void {
+  if (!result || !dataCache) return;
+  legend.update({
+    datasetId: state.dataset,
+    layers: dataCache.layers,
+    layoutOrder: result.layoutOrder,
+    tpidRanking: result.pid.ranking,
+    tpidDepth: result.pid.depth,
+    tpidDefined: result.pid.defined,
+    selectedLayerId: state.selectedLayer,
+    note:
+      state.visMethod === "braided" && state.showDensityGradient && !state.collapseBranches
+        ? "Branch color intensity represents KDE density."
+        : "",
+  });
 }
 
 function fmt(v: number): string {
@@ -206,10 +225,12 @@ function fmt(v: number): string {
 
 function onHoverMove(evt: MouseEvent): void {
   if (!dataCache || !result) return;
-  const rect = svgEl.getBoundingClientRect();
-  const scaleX = W / rect.width;
-  const px = (evt.clientX - rect.left) * scaleX;
-  const py = (evt.clientY - rect.top) * scaleX;
+  const matrix = svgEl.getScreenCTM();
+  if (!matrix) return;
+  const point = svgEl.createSVGPoint();
+  point.x = evt.clientX;
+  point.y = evt.clientY;
+  const { x: px, y: py } = point.matrixTransform(matrix.inverse());
   if (px < M.left || px > W - M.right) {
     state.hover = null;
     state.highlight = null;
@@ -249,7 +270,7 @@ function onHoverMove(evt: MouseEvent): void {
   const top = braided
     ? result.braided.layers.map((layer) => layer.slotY1)
     : result.base.yTop;
-  const ids = result.pid.order;
+  const ids = result.layoutOrder;
   const target = (evt.target as Element).closest?.(
     "[data-owner-layer]",
   ) as SVGElement | null;
@@ -302,7 +323,7 @@ function showTooltip(
     tt.classList.remove("hidden");
     return;
   }
-  const i = result.pid.order.indexOf(layer.id);
+  const i = result.layoutOrder.indexOf(layer.id);
   const geometry = result.braided.layers[i];
   const point = geometry.debug?.[t];
   const magnitude = result.base.yTop[i][t] - result.base.yBottom[i][t];
@@ -362,6 +383,7 @@ function bindControls(): void {
     state.collapseBranches = false;
     $("btn-collapse").classList.remove("active");
     render();
+    updateLegend();
   });
   bind("ctl-baseline", (v) => {
     state.baseline = v as State["baseline"];
@@ -417,7 +439,7 @@ function bindControls(): void {
     state.hover = null;
     tooltip.classList.add("hidden");
     render();
-    renderLegend();
+    updateLegend();
   });
   $("btn-svg").addEventListener("click", () => exportSvg(svgEl));
   // collapsible left panel
