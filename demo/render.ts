@@ -85,12 +85,15 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
     ? input.result.braided.layers.map((layer) => layer.slotY1)
     : input.result.base.yTop;
   const layerIds = input.result.pid.order;
-  const values = [...bottom.flat(), ...top.flat()];
+  const indices = visibleTimeIndices(tLen, input.start, input.end);
+  const values = [
+    ...bottom.flatMap((layer) => indices.map((time) => layer[time])),
+    ...top.flatMap((layer) => indices.map((time) => layer[time])),
+  ];
   const pad = (Math.max(...values) - Math.min(...values)) * 0.06 || 1;
   const y = scaleLinear()
     .domain([Math.min(...values) - pad, Math.max(...values) + pad])
     .range([H - M.bottom, M.top]);
-  const indices = visibleTimeIndices(tLen, input.start, input.end);
   const firstTime = indices[0];
   const lastTime = indices.at(-1)!;
   const eventDays = input.times.map(diseaseDay);
@@ -131,7 +134,7 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
         xValues,
         firstTime,
         lastTime,
-        input.smoothContours ? 8 : 1,
+        input.smoothContours ? 32 : 1,
         input.smoothContours,
       )
     : null;
