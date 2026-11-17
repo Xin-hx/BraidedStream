@@ -2,15 +2,11 @@ node_modules/
 dist/
 coverage/
 .vite/
-*.log
-public/*
-outputs/
+artifacts/
 .tmp_check/
-scripts/
-output/*
-!output/*.ts
-!output/*.d.ts
-!output/tsconfig.json
-!output/covid-selection.json
-!output/measure-refactor-report.md
+*.log
 *.zip
+
+# Private clinical records stay on this machine, including legacy locations.
+**/TCMRecord.csv
+examples/data/private/

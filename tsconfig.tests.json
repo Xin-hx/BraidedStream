@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vite/client"
+    ]
+  },
+  "include": [
+    "app/tests",
+    "app/src/env.d.ts",
+    "packages/braided-stream/tests",
+    "tests"
+  ]
+}

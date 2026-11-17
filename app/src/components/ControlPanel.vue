@@ -1,0 +1,51 @@
+<script setup lang="ts">
+import type { WorkspaceState } from "../composables/useWorkspace";
+defineProps<{ model: WorkspaceState }>();
+defineEmits<{ download: [] }>();
+const localTcm = __LOCAL_TCM__;
+const toggles = [
+  ["smoothContours", "smooth", "Smooth contours", false, false],
+  ["showEnvelopeStroke", "envelope-stroke", "Show envelope stroke", true, false],
+  ["showRepresentativeStroke", "representative-stroke", "Show representative layer stroke", true, false],
+  ["showTimeCell", "time-cell", "Show time cell", true, true],
+  ["showBranchStroke", "branch-stroke", "Show branch stroke", true, true],
+  ["showYAxis", "y-axis", "Show y-axis", false, false],
+  ["showDensityGradient", "density-gradient", "Density color gradient", true, true],
+] as const;
+</script>
+
+<template>
+  <aside id="panel" class="panel" :class="{ collapsed: model.panelCollapsed }">
+    <button class="panel-toggle" title="Toggle panel" @click="model.panelCollapsed = !model.panelCollapsed">{{ model.panelCollapsed ? '»' : '«' }}</button>
+    <div class="panel-body">
+      <div class="brand" aria-label="BraidedStream"><span class="brand-name">BraidedStream</span></div>
+      <div class="p-title">Controls</div>
+      <label>Dataset
+        <select id="ctl-dataset" v-model="model.datasetId">
+          <option value="illustration">Illustration ensembles</option>
+          <option v-if="localTcm" value="tcm">TCM prescriptions (local only)</option>
+          <option value="covid-inc">COVID-inc</option>
+        </select>
+      </label>
+      <label>Vis method
+        <select id="ctl-vis-method" v-model="model.visMethod">
+          <option value="braided">Braided stream</option><option value="star">markers</option><option value="color-blur">Color + blur</option>
+        </select>
+      </label>
+      <label>Baseline
+        <select id="ctl-baseline" v-model="model.baseline"><option value="wiggle">L2 wiggle</option><option value="sine">Sine (Gaussian L2)</option></select>
+      </label>
+      <label>KDE bandwidth control
+        <input id="ctl-bandwidth-ratio" v-model.number="model.bandwidthRatio" type="range" min="0.1" max="1.5" step="0.05" />
+      </label>
+      <label v-for="[key, id, label, braidedOnly, expandedOnly] in toggles" :key="key" class="chk">
+        <input :id="`ctl-${id}`" v-model="model[key]" type="checkbox" :disabled="(braidedOnly && model.visMethod !== 'braided') || (expandedOnly && model.collapseBranches)" />{{ label }}
+      </label>
+      <label class="chk"><input id="ctl-legend" v-model="model.legendVisible" type="checkbox" />Show legend</label>
+      <div class="actions">
+        <button v-show="model.visMethod === 'braided'" id="btn-collapse" :class="{ active: model.collapseBranches }" @click="model.collapseBranches = !model.collapseBranches">{{ model.collapseBranches ? 'Expand branches' : 'Collapse branches' }}</button>
+        <button id="btn-svg" :disabled="!model.result" @click="$emit('download')">SVG</button>
+      </div>
+    </div>
+  </aside>
+</template>

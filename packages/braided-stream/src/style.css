@@ -1,0 +1,21 @@
+.braided-stream .layer { cursor: pointer; }
+.braided-stream .layer.dim { opacity: 0.28; }
+.braided-stream .density-bands.dim { opacity: 0.28; }
+.braided-stream .envelope-stroke.dim,
+.braided-stream .representative-stroke.dim,
+.braided-stream .branch-stroke.dim,
+.braided-stream .time-cell.dim { opacity: 0.28; }
+.braided-stream .allocated-space.dim { opacity: 0.28; }
+.braided-stream .envelope-hit { cursor: pointer; }
+.braided-stream .space-hit { cursor: help; }
+.braided-stream .dynamic-slot-boundary { fill: none; stroke-width: 1.2; stroke-dasharray: 4 3; opacity: .9; pointer-events: none; }
+.braided-stream text {
+  fill: var(--muted, #6b7280);
+  font-size: var(--font-small, 12px);
+}
+.braided-stream .axis line, .braided-stream .axis path { stroke: var(--line, #e5e7eb); }
+.braided-stream .grid line { stroke: var(--line, #e5e7eb); }
+.braided-stream .hover-line { stroke: var(--accent, #0072b2); stroke-width: 1; opacity: 0.5; }
+
+
+.braided-stream { font-family: sans-serif; }

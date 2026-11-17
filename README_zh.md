@@ -1,157 +1,104 @@
+# BraidedStream：分类时间序列集合分布的河流图
 
-# BraidedStream：分类时间序列集合分布的河流图可视化
+[English](README.md)
 
-[English](README.md) | **简体中文**
+本项目以河流厚度表达代表值，通过空间扩展和几何形变表达分布的偏态、多峰等特征。算法与可视化封装为独立的 TypeScript + D3 package；交互前端使用 Vue 3，包本身不依赖 Vue。
 
-> 本项目将传统河流图的应用数据范围从标量拓展到集合（ensemble）或分布，在用河流厚度展示传统代表值（中位数、均值）的同时，通过空间扩展和几何形变方法，映射数据分布的偏态、多峰等特征。
+## 启动与验证
 
-![项目演示](assets/demo.png)
+使用 Node 26+，或满足所安装 jsdom 要求的 Node 版本，以及 npm：
 
-## 项目简介
-
-本项目旨在解决 [具体问题]。
-
-现有方法通常采用 [已有方案]，但在
-[具体场景或条件] 下仍存在 [局限性]。
-
-为此，本项目提出/实现了 [核心方法]，
-通过 [关键技术] 实现 [预期功能或效果]。
-
-当前仓库可以直接通过https网页使用，支持用户自主上传数据集；
-也可以自行下载代码进行进一步的修改。
-
-### 主要功能
-
-- **功能一**：简要描述。
-- **功能二**：简要描述。
-- **功能三**：简要描述。
-
-### 项目状态
-
-> 当前状态：原型开发 / 实验验证 / 稳定版本
-
-已实现：
-- [x] 核心算法
-- [x] 基础测试
-- [ ] 真实数据验证
-- [ ] 性能优化
-
-## 🚀 快速开始
-
-### 1. 环境要求
-
-- Python >= 3.10
-- 操作系统：Windows / Linux
-- GPU：可选
-
-### 2. 安装
-
-克隆仓库：
-
-```bash
-git clone https://github.com/username/project.git
-cd project
+```sh
+npm install
+npm run dev
 ```
 
-创建虚拟环境并安装依赖：
+打开终端显示的 Vite 地址。页面包含 Illustration、COVID 两个公开案例；本地存在私有文件时，开发模式额外提供 TCM 案例。支持可视化模式、基线、KDE 带宽、轮廓与密度编码、时间筛选和 SVG 下载。图例支持排序、选层和配色，配色保存在当前浏览器。
 
-```bash
-python -m venv .venv
-pip install -r requirements.txt
+```sh
+npm test
+npm run test:package
+npm run build
+npm run preview
 ```
 
-### 3. 运行示例
+构建依次完成独立包输出、TypeScript/Vue 类型检查和前端打包，生产产物仅包含 Illustration 和 COVID 公开数据，不包含 TCM。`test:package` 会在临时独立项目中安装打包产物，验证运行和严格 NodeNext 类型检查。
 
-```bash
-python main.py --config configs/default.yaml
+## 独立调用
+
+```ts
+import { select } from 'd3';
+import { braidedStream, streamTimeFilter } from 'braided-stream';
+import { runPipeline, type InputDataset } from 'braided-stream/core';
+import 'braided-stream/style.css';
+
+const dataset: InputDataset = {
+  times: ['t1', 't2'],
+  layers: [{ id: 'A', measures: [
+    { components: [{ kind: 'atom', value: 2, mass: 1 }] },
+    { components: [{ kind: 'uniform', low: 1, high: 5, mass: 1 }] },
+  ] }],
+};
+const result = runPipeline(dataset, { braided: { bandwidthRatio: 0.3 } });
+const prepared = { dataset, result };
+const chart = braidedStream()
+  .options({ width: 1180, height: 620 })
+  .on('hover.app', event => { /* 用事件数据展示 tooltip */ })
+  .on('leave.app', () => { /* 隐藏 tooltip */ });
+
+const main = select(svg).datum(prepared);
+main.call(chart);
+const filter = streamTimeFilter().on('rangechange.app', ({ start, end }) => {
+  main.call(chart.options({ start, end }));
+});
+select(filterSvg).datum(prepared).call(filter);
+
+// 卸载时清理 D3 节点和监听器：
+chart.destroy(main);
+filter.destroy(select(filterSvg));
 ```
 
-运行成功后，结果将保存在：
+也可直接把 `InputDataset` 绑定到主图，由包计算结果。传入预计算结果时，切换配色、显示选项和时间窗口不会重新计算算法。时间窗口为包含两端的索引区间；`null` measure 表示缺失观测。
 
-```text
-outputs/
+包输出 ESM、TypeScript 声明和图表 CSS，D3 7 为 peer dependency：
+
+```sh
+npm run build:package
+npm pack --workspace braided-stream
+# 在其他项目中：
+npm install /path/to/braided-stream-0.1.0.tgz d3@^7.9.0
 ```
 
-## 🛠️ 使用方法
+完整输入格式、配置项、事件、底层绘制入口及 Vue 接入方式见 [package 文档](packages/braided-stream/README.md)。以上命令不会发布 npm。
 
-### 基本使用
+## 代码边界
 
-描述典型使用场景，并提供可直接执行的命令。
+- `packages/braided-stream/`：输入验证、算法、SVG 绘制、悬停命中、时间刷选及图表样式；不依赖 Vue 或 demo。
+- `app/`：Vue 组件、数据加载、tooltip、图例与配色持久化、文件下载。
+- `examples/converters/`：案例转换器和业务元信息。
+- `examples/data/`：示例源数据。
+- `scripts/figures/`：使用独立包的论文图表生成脚本。
+- `docs/`：文档图片与报告。
+- `artifacts/`：不提交的生成产物和本地备份。
+- 测试跟随 app/package 放置；`tests/integration/` 存放跨模块回归、数据边界和独立安装验证。
 
-```bash
-python main.py --input data/example --output outputs/
+Vue 只管理 SVG 宿主，D3 管理其内部图表节点；大型计算结果使用浅响应式引用。需要其他框架时，直接复用同一个 package 即可。
+
+## 论文图表
+
+在仓库根目录执行：
+
+```sh
+npm run build:package
+npm run figures:covid
+npm run figures:tcm
+npm run typecheck
 ```
 
-### 参数配置
+生成文件写入 `artifacts/figures/`。脚本使用包的底层绘制入口，不引用 demo UI。TCM 与 COVID 案例描述观测或模型分布，不构成因果效果的证据。
 
-| 参数 | 说明 | 默认值 |
-|---|---|---|
-| `--input` | 输入数据路径 | `data/` |
-| `--output` | 输出目录 | `outputs/` |
-| `--config` | 配置文件路径 | `configs/default.yaml` |
+## TCM 数据仅限本地
 
+将有权使用的真实记录放在 `examples/data/private/TCMRecord.csv`。整个私有目录及所有 `TCMRecord.csv` 文件名均被 Git 忽略。不要复制到公开静态资源中，也不要使用强制添加绕过忽略规则。
 
-## 方法
-
-### 整体流程
-
-1. **数据准备**：描述输入与预处理。
-2. **核心处理**：描述主要算法模块。
-3. **结果生成**：描述输出结果。
-4. **评估分析**：描述评估方式。
-
-
-### 核心模块
-
-| 模块 | 功能 | 代码位置 |
-|---|---|---|
-| 模块 A | 数据预处理 | `src/preprocess.py` |
-| 模块 B | 核心算法 | `src/core.py` |
-| 模块 C | 结果评估 | `src/evaluate.py` |
-
-## 📊 实验与结果
-
-### 实验设置
-
-描述实验环境、数据集、对比方法及评估指标。
-
-### 运行实验
-
-```bash
-python scripts/run_experiment.py
-```
-
-### 实验结果
-
-| 方法 | 指标 A ↑ | 指标 B ↓ |
-|---|---|---|
-| Baseline A | - | - |
-| Baseline B | - | - |
-| Ours | - | - |
-
-> 注：↑ 表示越大越好，↓ 表示越小越好。
-
-### 结果可视化
-
-![实验结果](assets/results.png)
-
-## 📁 项目结构
-
-```text
-project/
-├── assets/             # 文档图片和演示资源
-├── configs/            # 配置文件
-├── data/               # 数据或示例数据
-├── src/                # 核心代码
-├── scripts/            # 运行和实验脚本
-├── tests/              # 测试代码
-├── outputs/            # 生成的结果
-├── requirements.txt    # Python 依赖
-├── README.md           # 英文文档
-└── README_zh.md        # 中文主文档
-```
-
-## ⚠️ 已知限制
-
-- 限制一：[描述及适用条件]
-- 限制二：[描述及适用条件]
+开发服务器绑定本机地址，仅对本机请求提供数据，并阻止直接通过文件系统 URL 读取。生产构建始终隐藏 TCM 选项，且不复制真实数据。没有私有文件的环境仍能构建和测试，真实 TCM 检查自动跳过，人工构造的转换器测试照常运行。TCM 导出图及样本 CSV 只写入忽略的 `artifacts/figures/`。详见[数据说明](examples/data/README.md)。

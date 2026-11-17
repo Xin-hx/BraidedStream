@@ -1,0 +1,34 @@
+{
+  "case": "covid",
+  "source": "examples/data/covid_inc_case_trained_members.json",
+  "range": [
+    "2022-01-29",
+    "2022-04-02"
+  ],
+  "snapshots": [
+    "2022-01-29",
+    "2022-02-19",
+    "2022-04-02"
+  ],
+  "analysis": {
+    "bandwidthRatio": 0.3,
+    "baselineMode": "wiggle",
+    "debug": true
+  },
+  "rendering": {
+    "width": "210mm",
+    "png_width_pixels": 2480,
+    "interpolation_subdivisions": 32,
+    "primary_text_size_px": 20,
+    "axis_text_size_px": 13,
+    "streamgraph_to_distribution_width_ratio": "approximately 1:2",
+    "per_cell_axes": "independent x and density domains; zero, midpoint, and upper-limit ticks"
+  },
+  "evidence": {
+    "Alabama": 3,
+    "Kentucky": 3,
+    "Mississippi": 3,
+    "Tennessee": 2
+  },
+  "detail_view": "artifacts/figures/covid-apr02-detail.svg"
+}
