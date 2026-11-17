@@ -36,7 +36,7 @@ try {
     const svg = dom.window.document.getElementById('chart');
     const filterSvg = dom.window.document.getElementById('filter');
     const chart = braidedStream().options({ width: 800, height: 400 });
-    for (const visMethod of ['braided', 'star', 'color-blur']) {
+    for (const visMethod of ['braided', 'streamgraph']) {
       select(svg).datum({ dataset, result }).call(chart.options({ visMethod }));
       assert(svg.querySelector('path'));
       assert(!/NaN|undefined/.test(svg.outerHTML));
@@ -60,6 +60,10 @@ try {
     chart.on('hover.test', event => { const typed: HoverEvent = event; console.log(typed.timeIndex); });
     // @ts-expect-error Fluent options must retain their types.
     chart.options({ visMethod: 'invalid' });
+    // @ts-expect-error Removed methods must not remain in the public API.
+    chart.options({ visMethod: 'star' });
+    // @ts-expect-error Streamgraph replaces the former collapse option.
+    chart.options({ collapseBranches: true });
     // @ts-expect-error Hover events must retain their types.
     chart.on('hover.test', event => console.log(event.nonexistent));
     select(svg).datum(dataset).call(chart);

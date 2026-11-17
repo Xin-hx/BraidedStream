@@ -38,7 +38,7 @@ export interface StreamTimeFilter {
 const defaults = {
   visMethod: "braided", smoothContours: true, showEnvelopeStroke: false,
   showRepresentativeStroke: false, showTimeCell: false, showBranchStroke: false,
-  showYAxis: true, showDensityGradient: false, collapseBranches: false,
+  showYAxis: true, showDensityGradient: false,
   highlightLayer: null,
 } satisfies ChartOptions;
 

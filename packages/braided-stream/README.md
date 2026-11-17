@@ -1,6 +1,6 @@
 # braided-stream
 
-Framework-independent D3 streamgraphs for probability distributions. Includes the analysis pipeline, braided, star and color-blur SVG renderers, hover events, and a time-range brush. Vue is used only by the repository application.
+Framework-independent D3 streamgraphs for probability distributions. Includes the analysis pipeline, braided and streamgraph SVG renderers, hover events, and a time-range brush. Vue is used only by the repository application.
 
 ## Install
 
@@ -80,7 +80,7 @@ overview.destroy(select(filterSvg));
 
 `start`/`end` are inclusive time indices, clamped to the dataset. The overview requires `{ dataset, result }`. Programmatic range updates do not emit `rangechange`. For raw datasets, analysis is cached per SVG until the bound datum reference or pipeline options change; replace the datum object after editing data. Precomputed results must correspond to the supplied dataset.
 
-Options merge into the chart configuration. They include `width`, `height`, `margin`, `start`, `end`, `visMethod`, `layers` (`{ id, color? }[]`), `palette`, `colorOverrides`, `highlightLayer`, `smoothContours`, `showYAxis`, `showEnvelopeStroke`, `showRepresentativeStroke`, `showTimeCell`, `showBranchStroke`, `showDensityGradient` and `collapseBranches`. Defaults match the application. Palette IDs: `reference`, `tableau10`, `set2`, `paired`.
+Options merge into the chart configuration. They include `width`, `height`, `margin`, `start`, `end`, `visMethod`, `layers` (`{ id, color? }[]`), `palette`, `colorOverrides`, `highlightLayer`, `smoothContours`, `showYAxis`, `showEnvelopeStroke`, `showRepresentativeStroke`, `showTimeCell`, `showBranchStroke`, `showDensityGradient`. Defaults match the application. Palette IDs: `reference`, `tableau10`, `set2`, `paired`.
 
 Hover events include `timeIndex`, nullable `layerId`, optional `spaceKind`, and `sourceEvent`. Chart interactions update only hover marks and highlighting. Listeners use D3 namespaces; pass `null` to remove a registered listener. `destroy` removes only the chart's nodes/listeners, preserving consumer-owned SVG children. A chart factory can be called on multiple SVGs; each SVG has independent analysis and interaction state.
 
@@ -91,3 +91,5 @@ In Vue, create factories once during setup, call them after mounting or changing
 `renderChart(svg, input)` and `renderTimeFilter(svg, input)` accept existing `PipelineResult` values and directly replace the SVG contents. They use `svg.ownerDocument`, making them suitable for jsdom-based SVG export. Unlike the chart factory, these lower-level functions own the entire supplied SVG. `renderTimeFilter` returns a cleanup function; call it before replacing/removing the filter, including during an active drag. `hitTest(input, x, y)` accepts coordinates in SVG viewBox units and returns the nearest time and layer, or `null` outside the plot.
 
 Graph CSS is scoped to `.braided-stream` and provides fallback values for `--ink`, `--muted`, `--line`, `--accent`, `--accent-soft` and `--font-small`. Tooltips, legends, data loading, local storage and file downloads belong to the consuming application.
+
+`visMethod` accepts `braided` (default) or `streamgraph`. Streamgraph draws each envelope as one unsplit band, matching the former collapsed-branches view. Both methods share geometry and coordinates; density gradients, branch strokes and time cells apply only to braided mode. The former `collapseBranches` option and star/color-blur methods have been removed.

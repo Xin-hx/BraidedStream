@@ -14,7 +14,9 @@ const chart = ref<InstanceType<typeof ChartHost>>();
   <div class="layout">
     <ControlPanel :model="model" @download="chart?.download()" />
     <main class="content">
-      <ChartHost ref="chart" :model="model" :options="chartOptions" />
+      <ChartHost ref="chart" :model="model" :options="chartOptions">
+        <LayerLegend :model="model" :colors="colors" @save="save" />
+      </ChartHost>
       <ChartTooltip :model="model" />
       <div id="costs" class="costs" role="status">
         <template v-if="model.error">{{ model.error }}</template>
@@ -22,6 +24,5 @@ const chart = ref<InstanceType<typeof ChartHost>>();
         <template v-else><b>recompute</b> in {{ model.perfMs.toFixed(1) }} ms</template>
       </div>
     </main>
-    <LayerLegend :model="model" :colors="colors" @save="save" />
   </div>
 </template>

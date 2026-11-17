@@ -37,6 +37,9 @@ defineExpose({ download: () => { if (svg.value) exportSvg(svg.value); } });
 </script>
 
 <template>
-  <svg id="chart" ref="svg" role="img" aria-label="Braided streamgraph" />
+  <div class="chart-stage">
+    <svg id="chart" ref="svg" role="img" aria-label="Braided streamgraph" />
+    <slot />
+  </div>
   <svg id="time-filter" ref="filter" role="group" aria-label="Time range filter" />
 </template>

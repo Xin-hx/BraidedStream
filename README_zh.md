@@ -60,6 +60,8 @@ filter.destroy(select(filterSvg));
 
 也可直接把 `InputDataset` 绑定到主图，由包计算结果。传入预计算结果时，切换配色、显示选项和时间窗口不会重新计算算法。时间窗口为包含两端的索引区间；`null` measure 表示缺失观测。
 
+Vis method 提供 `Streamgraph` 基础色带和 `Braided stream` 编织分支两种模式；基础版使用 `.options({ visMethod: 'streamgraph' })`。密度渐变、分支描边和时间截面仅用于编织模式。
+
 包输出 ESM、TypeScript 声明和图表 CSS，D3 7 为 peer dependency：
 
 ```sh

@@ -24,7 +24,7 @@ export function useWorkspace() {
     visMethod: "braided" as VisMethod, baseline: "wiggle" as "wiggle" | "sine", bandwidthRatio: 0.3,
     smoothContours: true, showEnvelopeStroke: false, showRepresentativeStroke: false,
     showTimeCell: false, showBranchStroke: false, showYAxis: true, showDensityGradient: false,
-    collapseBranches: false, selectedLayer: null as string | null,
+    selectedLayer: null as string | null,
     start: 0, end: 1, sort: "tpid" as "tpid" | "category",
     appearance: loadAppearance(), status: "", error: "", loading: false, perfMs: 0,
     panelCollapsed: false, legendVisible: true, legendMinimized: false,
@@ -89,8 +89,7 @@ export function useWorkspace() {
       model.error = error instanceof Error ? error.message : String(error);
     }
   });
-  watch(() => model.visMethod, () => { model.collapseBranches = false; model.hover = null; });
-  watch(() => [model.start, model.end, model.collapseBranches], () => { model.hover = null; });
+  watch(() => [model.start, model.end, model.visMethod], () => { model.hover = null; });
   watch(() => model.legendVisible, () => { model.legendMinimized = false; });
   const colors = computed(() => {
     const prefix = `${model.datasetId}:`;
@@ -102,7 +101,7 @@ export function useWorkspace() {
     start: model.start, end: model.end, visMethod: model.visMethod, smoothContours: model.smoothContours,
     showEnvelopeStroke: model.showEnvelopeStroke, showRepresentativeStroke: model.showRepresentativeStroke,
     showTimeCell: model.showTimeCell, showBranchStroke: model.showBranchStroke, showYAxis: model.showYAxis,
-    showDensityGradient: model.showDensityGradient, collapseBranches: model.collapseBranches,
+    showDensityGradient: model.showDensityGradient,
     highlightLayer: model.selectedLayer,
   }));
   function save() { model.status = saveAppearance(model.appearance); }

@@ -4,13 +4,13 @@ defineProps<{ model: WorkspaceState }>();
 defineEmits<{ download: [] }>();
 const localTcm = __LOCAL_TCM__;
 const toggles = [
-  ["smoothContours", "smooth", "Smooth contours", false, false],
-  ["showEnvelopeStroke", "envelope-stroke", "Show envelope stroke", true, false],
-  ["showRepresentativeStroke", "representative-stroke", "Show representative layer stroke", true, false],
-  ["showTimeCell", "time-cell", "Show time cell", true, true],
-  ["showBranchStroke", "branch-stroke", "Show branch stroke", true, true],
-  ["showYAxis", "y-axis", "Show y-axis", false, false],
-  ["showDensityGradient", "density-gradient", "Density color gradient", true, true],
+  ["smoothContours", "smooth", "Smooth contours", false],
+  ["showEnvelopeStroke", "envelope-stroke", "Show envelope stroke", false],
+  ["showRepresentativeStroke", "representative-stroke", "Show representative layer stroke", false],
+  ["showTimeCell", "time-cell", "Show time cell", true],
+  ["showBranchStroke", "branch-stroke", "Show branch stroke", true],
+  ["showYAxis", "y-axis", "Show y-axis", false],
+  ["showDensityGradient", "density-gradient", "Density color gradient", true],
 ] as const;
 </script>
 
@@ -29,7 +29,7 @@ const toggles = [
       </label>
       <label>Vis method
         <select id="ctl-vis-method" v-model="model.visMethod">
-          <option value="braided">Braided stream</option><option value="star">markers</option><option value="color-blur">Color + blur</option>
+          <option value="streamgraph">Streamgraph</option><option value="braided">Braided stream</option>
         </select>
       </label>
       <label>Baseline
@@ -38,12 +38,11 @@ const toggles = [
       <label>KDE bandwidth control
         <input id="ctl-bandwidth-ratio" v-model.number="model.bandwidthRatio" type="range" min="0.1" max="1.5" step="0.05" />
       </label>
-      <label v-for="[key, id, label, braidedOnly, expandedOnly] in toggles" :key="key" class="chk">
-        <input :id="`ctl-${id}`" v-model="model[key]" type="checkbox" :disabled="(braidedOnly && model.visMethod !== 'braided') || (expandedOnly && model.collapseBranches)" />{{ label }}
+      <label v-for="[key, id, label, braidedOnly] in toggles" :key="key" class="chk">
+        <input :id="`ctl-${id}`" v-model="model[key]" type="checkbox" :disabled="braidedOnly && model.visMethod !== 'braided'" />{{ label }}
       </label>
       <label class="chk"><input id="ctl-legend" v-model="model.legendVisible" type="checkbox" />Show legend</label>
       <div class="actions">
-        <button v-show="model.visMethod === 'braided'" id="btn-collapse" :class="{ active: model.collapseBranches }" @click="model.collapseBranches = !model.collapseBranches">{{ model.collapseBranches ? 'Expand branches' : 'Collapse branches' }}</button>
         <button id="btn-svg" :disabled="!model.result" @click="$emit('download')">SVG</button>
       </div>
     </div>

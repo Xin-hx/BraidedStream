@@ -108,6 +108,52 @@ describe("Vue app consumer", () => {
     await flushPromises();
     expect(vi.mocked(runPipeline).mock.calls.length).toBe(count + 1);
   });
+
+  it("keeps legend order and focus consistent when collapsing, expanding and hiding", async () => {
+    const { wrapper, pending } = setup();
+    pending[0].resolve(ok("category,time,value\na,t1,1\na,t2,2\nb,t1,2\nb,t2,3\nc,t1,4\nc,t2,2"));
+    await flushPromises();
+    const names = () => wrapper.findAll(".legend-name").map(item => item.text());
+    const expandedOrder = names();
+    const header = wrapper.get(".legend-header").element;
+    expect(wrapper.get("#legend").element.parentElement).toBe(wrapper.get(".chart-stage").element);
+    await wrapper.get('[aria-label="Minimize legend"]').trigger("click");
+    expect(names()).toEqual(expandedOrder);
+    expect(wrapper.get(".legend-header").element).toBe(header);
+    expect(wrapper.get('[aria-label="Restore legend"]').attributes("aria-expanded")).toBe("false");
+    await wrapper.get('[aria-label="Focus layer a"]').trigger("click");
+    expect(wrapper.get('[aria-label="Focus layer a"]').attributes("aria-pressed")).toBe("true");
+    await wrapper.get('[aria-label="Restore legend"]').trigger("click");
+    expect(names()).toEqual(expandedOrder);
+    expect(wrapper.get('[aria-label="Focus layer a"]').attributes("aria-pressed")).toBe("true");
+    expect(wrapper.findAll(".legend-color")).toHaveLength(3);
+    await wrapper.get('[aria-label="Hide legend"]').trigger("click");
+    expect(wrapper.get("#legend").isVisible()).toBe(false);
+    await wrapper.get("#ctl-legend").setValue(true);
+    expect(wrapper.get("#legend").isVisible()).toBe(true);
+  });
+
+  it("offers streamgraph as the base method without a collapse button or legacy effects", async () => {
+    const { wrapper, pending } = setup();
+    pending[0].resolve(ok("category,time,value\na,t1,1\na,t2,2\nb,t1,2\nb,t2,3"));
+    await flushPromises();
+    expect(wrapper.findAll("#ctl-vis-method option").map(option => option.attributes("value"))).toEqual(["streamgraph", "braided"]);
+    expect(wrapper.find("#btn-collapse").exists()).toBe(false);
+    await wrapper.get("#ctl-density-gradient").setValue(true);
+    const count = vi.mocked(runPipeline).mock.calls.length;
+    await wrapper.get("#ctl-vis-method").setValue("streamgraph");
+    expect(wrapper.findAll(".streamgraph")).toHaveLength(2);
+    for (const id of ["time-cell", "branch-stroke", "density-gradient"]) {
+      expect(wrapper.get(`#ctl-${id}`).attributes("disabled")).toBeDefined();
+    }
+    expect(wrapper.find(".density-bands").exists()).toBe(false);
+    expect(vi.mocked(runPipeline).mock.calls).toHaveLength(count);
+    await wrapper.get("#ctl-vis-method").setValue("braided");
+    expect(wrapper.findAll(".branch")).toHaveLength(2);
+    expect(wrapper.find(".density-bands").exists()).toBe(true);
+    expect(wrapper.get("#ctl-density-gradient").attributes("disabled")).toBeUndefined();
+    expect(vi.mocked(runPipeline).mock.calls).toHaveLength(count);
+  });
 });
 
 function ok(text: string) { return { ok: true, status: 200, text: async () => text }; }

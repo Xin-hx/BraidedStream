@@ -4,7 +4,6 @@ import {
   axisBottom,
   axisLeft,
   brushX,
-  curveBasis,
   curveLinear,
   dragEnable,
   hsl,
@@ -15,8 +14,6 @@ import {
   schemePaired,
   schemeSet2,
   schemeTableau10,
-  symbol,
-  symbolStar,
 } from "d3";
 import type { PipelineResult } from "./engine/types.js";
 
@@ -24,7 +21,7 @@ export const W = 1180;
 export const H = 620;
 export const M = { top: 24, right: 28, bottom: 64, left: 64 };
 const NS = "http://www.w3.org/2000/svg";
-export type VisMethod = "braided" | "star" | "color-blur";
+export type VisMethod = "braided" | "streamgraph";
 export interface DisplayLayer { readonly id: string; readonly color?: string }
 
 
@@ -83,8 +80,6 @@ export interface RenderInput extends Dimensions {
   showBranchStroke: boolean;
   showYAxis: boolean;
   showDensityGradient: boolean;
-  /** Render each envelope as a single, unsplit band. */
-  collapseBranches: boolean;
   hover: number | null;
   highlightLayer: string | null;
 }
@@ -128,68 +123,38 @@ export function visibleTimeIndices(length: number, start: number, end: number): 
 }
 
 export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
+  if (input.visMethod !== "braided" && input.visMethod !== "streamgraph") {
+    throw new Error("visMethod must be braided or streamgraph");
+  }
   const { width: W, height: H, margin: M } = dimensions(input);
   const IW = W - M.left - M.right;
-  const { indices, bottom, top, xValues, x, y, firstTime, lastTime } = chartCoordinates(input);
+  const { indices, xValues, x, y, firstTime, lastTime } = chartCoordinates(input);
   const braided = input.visMethod === "braided";
-  const layerIds = input.result.layoutOrder;
   const prefix = svgId(svg);
-  const xAt = (time: number) => {
-    const left = Math.max(firstTime, Math.min(lastTime, Math.floor(time)));
-    const right = Math.min(lastTime, left + 1);
-    return x(xValues[left] + (xValues[right] - xValues[left]) * (time - left));
-  };
-  const curve = input.smoothContours ? curveBasis : curveLinear;
-  const makeArea = (lo: number[], hi: number[], defined?: boolean[]) =>
-    area<number>()
-      .defined((t) => (defined ? defined[t] : true) && Number.isFinite(lo[t]) && Number.isFinite(hi[t]))
-      .curve(curve)
-      .x((t) => x(xValues[t]))
-      .y0((t) => y(lo[t]))
-      .y1((t) => y(hi[t]))(indices) ?? "";
-  const makeAreaRange = (
-    lo: number[],
-    hi: number[],
-    start: number,
-    end: number,
-    defined?: boolean[],
-  ) =>
-    area<number>()
-      .defined((t) => (defined ? defined[t] : true) && Number.isFinite(lo[t]) && Number.isFinite(hi[t]))
-      .curve(curve)
-      .x((t) => x(xValues[t]))
-      .y0((t) => y(lo[t]))
-      .y1((t) => y(hi[t]))(indices.filter((t) => t >= start && t <= end)) ?? "";
-  const interpolated = braided
-    ? interpolateBraidedGeometry(
-        input.result.braided,
-        xValues,
-        firstTime,
-        lastTime,
-        input.smoothContours ? 32 : 1,
-        input.smoothContours,
-      )
-    : null;
-  const renderIndices = interpolated?.x.map((_, index) => index) ?? [];
+  const interpolated = interpolateBraidedGeometry(
+    input.result.braided, xValues, firstTime, lastTime,
+    input.smoothContours ? 32 : 1, input.smoothContours,
+  );
+  const renderIndices = interpolated.x.map((_, index) => index);
   const makeBraidedArea = (band: RenderBand, defined: boolean[]) =>
-    interpolated!.segments.map(([start, end]) => area<number>()
+    interpolated.segments.map(([start, end]) => area<number>()
       .defined((index) => defined[index])
       .curve(curveLinear)
-      .x((index) => x(interpolated!.x[index]))
+      .x((index) => x(interpolated.x[index]))
       .y0((index) => y(band.y0[index]))
       .y1((index) => y(band.y1[index]))(renderIndices.slice(start, end)) ?? "").join("");
   const makeBraidedLine = (values: number[], defined: boolean[]) =>
-    interpolated!.segments.map(([start, end]) => line<number>()
+    interpolated.segments.map(([start, end]) => line<number>()
       .defined((index) => defined[index] && Number.isFinite(values[index]))
       .curve(curveLinear)
-      .x((index) => x(interpolated!.x[index]))
+      .x((index) => x(interpolated.x[index]))
       .y((index) => y(values[index]))(renderIndices.slice(start, end)) ?? "").join("");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("width", "100%");
   const root = select(svg);
   root.classed("braided-stream", true);
   root.selectAll("*").remove();
-  const densityEnabled = braided && input.showDensityGradient && !input.collapseBranches &&
+  const densityEnabled = braided && input.showDensityGradient &&
     Boolean(input.result.densityProfiles);
   const definitions = densityEnabled ? root.append("defs") : null;
   const ticks = 5;
@@ -234,10 +199,10 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
       .call(
         axisLeft(y)
           .ticks(ticks)
-          .tickFormat((value) => braided ? "" : fmtNum(Number(value))),
+          .tickFormat(() => ""),
       );
   }
-  if (braided && input.showYAxis) {
+  if (input.showYAxis) {
     const maxThickness = Math.max(...input.result.base.yTop.flatMap((row, i) =>
       row.map((top, t) => top - input.result.base.yBottom[i][t])
     ));
@@ -259,225 +224,177 @@ export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
       .attr("text-anchor", "end").attr("class", "axis-label")
       .text("high-value side ↑");
   }
-  const colorOf = (idx: number): string =>
-    colorForLayer(input.layers, layerIds[idx], input.colorOverrides, input.palette);
-  if (braided) {
-    const layers = root.append("g").attr("class", "layers");
-    for (const [i, geometry] of input.result.braided.layers.entries()) {
-      const visual = interpolated!.layers[i];
-      const layerColor = colorForLayer(
-        input.layers,
-        geometry.layerId,
-        input.colorOverrides,
-        input.palette,
-      );
-      const dim =
-        input.highlightLayer && geometry.layerId !== input.highlightLayer
-          ? " dim"
-          : "";
-      layers
+  const layers = root.append("g").attr("class", "layers");
+  for (const [i, geometry] of input.result.braided.layers.entries()) {
+    const visual = interpolated.layers[i];
+    const layerColor = colorForLayer(
+      input.layers,
+      geometry.layerId,
+      input.colorOverrides,
+      input.palette,
+    );
+    const dim =
+      input.highlightLayer && geometry.layerId !== input.highlightLayer
+        ? " dim"
+        : "";
+    layers
+      .append("path")
+      .attr("d", makeBraidedArea(visual.envelope, visual.defined))
+      .attr("class", "envelope-hit")
+      .attr("fill", "transparent")
+      .attr("stroke", "none")
+      .attr("pointer-events", "all")
+      .attr("data-owner-layer", geometry.layerId);
+    const branchAreas = !braided
+      ? [makeBraidedArea(visual.envelope, visual.defined)]
+      : visual.branches.map((branch) =>
+          renderIndices.some((sample) => branch.y1[sample] > branch.y0[sample])
+            ? makeBraidedArea(branch, visual.defined)
+            : "",
+        );
+    layers
+      .append("path")
+      .attr("d", branchAreas.join(""))
+      .attr("class", `layer ${braided ? "branch" : "streamgraph"}${dim}`)
+      .attr("data-visual-layer", geometry.layerId)
+      .attr("fill", densityEnabled ? densityColor(layerColor, 0) : layerColor)
+      .attr("fill-opacity", densityEnabled ? 1 : 0.82)
+      .attr("stroke", "none")
+      .attr("data-id", geometry.layerId)
+      .attr("data-owner-layer", geometry.layerId);
+    if (densityEnabled) {
+      const clipId = `${prefix}-density-clip-${i}`;
+      definitions!
+        .append("clipPath")
+        .attr("id", clipId)
         .append("path")
-        .attr("d", makeBraidedArea(visual.envelope, visual.defined))
-        .attr("class", "envelope-hit")
-        .attr("fill", "transparent")
-        .attr("stroke", "none")
-        .attr("pointer-events", "all")
-        .attr("data-owner-layer", geometry.layerId);
-      const branchAreas = input.collapseBranches
-        ? [makeBraidedArea(visual.envelope, visual.defined)]
-        : visual.branches.map((branch) =>
-            renderIndices.some((sample) => branch.y1[sample] > branch.y0[sample])
-              ? makeBraidedArea(branch, visual.defined)
-              : "",
-          );
-      layers
-        .append("path")
-        .attr("d", branchAreas.join(""))
-        .attr("class", `layer branch${dim}`)
+        .attr("d", branchAreas.join(""));
+      const densityGroup = layers
+        .append("g")
+        .attr("class", `density-bands${dim}`)
         .attr("data-visual-layer", geometry.layerId)
-        .attr("fill", densityEnabled ? densityColor(layerColor, 0) : layerColor)
-        .attr("fill-opacity", densityEnabled ? 1 : 0.82)
-        .attr("stroke", "none")
-        .attr("data-id", geometry.layerId)
-        .attr("data-owner-layer", geometry.layerId);
-      if (densityEnabled) {
-        const clipId = `${prefix}-density-clip-${i}`;
-        definitions!
-          .append("clipPath")
-          .attr("id", clipId)
-          .append("path")
-          .attr("d", branchAreas.join(""));
-        const densityGroup = layers
-          .append("g")
-          .attr("class", `density-bands${dim}`)
-        .attr("data-visual-layer", geometry.layerId)
-          .attr("clip-path", `url(#${clipId})`)
-          .attr("pointer-events", "none");
-        const profiles = input.result.densityProfiles?.[i] ?? [];
-        const bins = profiles.find((profile) => profile !== null)?.length ?? 0;
-        for (let bin = 0; bin < bins; bin += 1) {
-          const gradientId = `${prefix}-density-gradient-${i}-${bin}`;
-          const gradient = definitions!
-            .append("linearGradient")
-            .attr("id", gradientId)
-            .attr("gradientUnits", "userSpaceOnUse")
-            .attr("x1", x(xValues[firstTime]))
-            .attr("x2", x(xValues[lastTime]));
-          for (const time of indices) {
-            gradient
-              .append("stop")
-              .attr("offset", `${100 * (x(xValues[time]) - M.left) / IW}%`)
-              .attr("stop-color", densityColor(colorOf(i), profiles[time]?.[bin] ?? 0));
-          }
-          densityGroup
-            .append("path")
-            .attr("d", makeBraidedArea(
-              densityQuantileBand(visual.branches, bin / bins, (bin + 1) / bins),
-              visual.defined,
-            ))
-            .attr("fill", `url(#${gradientId})`)
-            .attr("fill-opacity", 1)
-            .attr("stroke", "none");
-        }
-      }
-      if (!input.collapseBranches) {
-        const tint = lighterFamilyColor(layerColor);
-        for (const [spaceIndex, space] of geometry.spaces.entries()) {
-          const visualSpace = visual.spaces[spaceIndex];
-          layers
-            .append("path")
-            .attr("d", makeBraidedArea(visualSpace, visual.defined))
-            .attr("class", `allocated-space${dim}`)
-        .attr("data-visual-layer", geometry.layerId)
-            .attr("fill", tint)
-            .attr("fill-opacity", 0.68)
-            .attr("stroke", "none")
-            .attr("pointer-events", "none");
-          layers
-            .append("path")
-            .attr("d", makeBraidedArea(visualSpace, visual.defined))
-            .attr("class", "space-hit")
-            .attr("fill", "transparent")
-            .attr("stroke", "none")
-            .attr("pointer-events", "all")
-            .attr("data-owner-layer", space.ownerLayerId)
-            .attr("data-space-kind", space.kind)
-            .attr("data-gap-index", space.gapIndex);
-        }
-      }
-      if (input.showEnvelopeStroke) {
-        for (const boundary of [visual.envelope.y0, visual.envelope.y1]) {
-          layers
-            .append("path")
-            .attr("d", makeBraidedLine(boundary, visual.defined))
-            .attr("class", `envelope-stroke${dim}`)
-        .attr("data-visual-layer", geometry.layerId)
-            .attr("fill", "none")
-            .attr("stroke", "var(--muted, #6b7280)")
-            .attr("stroke-width", 0.9)
-            .attr("vector-effect", "non-scaling-stroke")
-            .attr("pointer-events", "none")
-            .attr("data-owner-layer", geometry.layerId);
-        }
-      }
-      if (input.showBranchStroke && !input.collapseBranches) {
-        for (const branch of visual.branches) {
-          const defined = visual.defined.map((value, sample) =>
-            value && branch.y1[sample] > branch.y0[sample]
-          );
-          if (!defined.some(Boolean)) continue;
-          for (const boundary of [branch.y0, branch.y1]) {
-            layers
-              .append("path")
-              .attr("d", makeBraidedLine(boundary, defined))
-              .attr("class", `branch-stroke${dim}`)
-        .attr("data-visual-layer", geometry.layerId)
-              .attr("fill", "none")
-              .attr("stroke", densityColor(layerColor, 1))
-              .attr("stroke-width", 0.75)
-              .attr("stroke-opacity", 0.82)
-              .attr("vector-effect", "non-scaling-stroke")
-              .attr("pointer-events", "none");
-          }
-        }
-      }
-      if (input.showRepresentativeStroke) {
-        const boundaries = representativeBoundaries(visual.branches);
-        for (const boundary of [boundaries.lower, boundaries.upper]) {
-          layers
-            .append("path")
-            .attr("d", makeBraidedLine(boundary, visual.defined))
-            .attr("class", `representative-stroke${dim}`)
-        .attr("data-visual-layer", geometry.layerId)
-            .attr("fill", "none")
-            .attr("stroke", "var(--ink, #1a1a1a)")
-            .attr("stroke-width", 0.9)
-            .attr("vector-effect", "non-scaling-stroke")
-            .attr("pointer-events", "none");
-        }
-      }
-      if (input.showTimeCell && !input.collapseBranches) {
+        .attr("clip-path", `url(#${clipId})`)
+        .attr("pointer-events", "none");
+      const profiles = input.result.densityProfiles?.[i] ?? [];
+      const bins = profiles.find((profile) => profile !== null)?.length ?? 0;
+      for (let bin = 0; bin < bins; bin += 1) {
+        const gradientId = `${prefix}-density-gradient-${i}-${bin}`;
+        const gradient = definitions!
+          .append("linearGradient")
+          .attr("id", gradientId)
+          .attr("gradientUnits", "userSpaceOnUse")
+          .attr("x1", x(xValues[firstTime]))
+          .attr("x2", x(xValues[lastTime]));
         for (const time of indices) {
-          const sample = interpolated!.x.findIndex((value) => value === xValues[time]);
-          if (sample < 0 || !visual.defined[sample]) continue;
+          gradient
+            .append("stop")
+            .attr("offset", `${100 * (x(xValues[time]) - M.left) / IW}%`)
+            .attr("stop-color", densityColor(layerColor, profiles[time]?.[bin] ?? 0));
+        }
+        densityGroup
+          .append("path")
+          .attr("d", makeBraidedArea(
+            densityQuantileBand(visual.branches, bin / bins, (bin + 1) / bins),
+            visual.defined,
+          ))
+          .attr("fill", `url(#${gradientId})`)
+          .attr("fill-opacity", 1)
+          .attr("stroke", "none");
+      }
+    }
+    if (braided) {
+      const tint = lighterFamilyColor(layerColor);
+      for (const [spaceIndex, space] of geometry.spaces.entries()) {
+        const visualSpace = visual.spaces[spaceIndex];
+        layers
+          .append("path")
+          .attr("d", makeBraidedArea(visualSpace, visual.defined))
+          .attr("class", `allocated-space${dim}`)
+          .attr("data-visual-layer", geometry.layerId)
+          .attr("fill", tint)
+          .attr("fill-opacity", 0.68)
+          .attr("stroke", "none")
+          .attr("pointer-events", "none");
+        layers
+          .append("path")
+          .attr("d", makeBraidedArea(visualSpace, visual.defined))
+          .attr("class", "space-hit")
+          .attr("fill", "transparent")
+          .attr("stroke", "none")
+          .attr("pointer-events", "all")
+          .attr("data-owner-layer", space.ownerLayerId)
+          .attr("data-space-kind", space.kind)
+          .attr("data-gap-index", space.gapIndex);
+      }
+    }
+    if (input.showEnvelopeStroke) {
+      for (const boundary of [visual.envelope.y0, visual.envelope.y1]) {
+        layers
+          .append("path")
+          .attr("d", makeBraidedLine(boundary, visual.defined))
+          .attr("class", `envelope-stroke${dim}`)
+          .attr("data-visual-layer", geometry.layerId)
+          .attr("fill", "none")
+          .attr("stroke", "var(--muted, #6b7280)")
+          .attr("stroke-width", 0.9)
+          .attr("vector-effect", "non-scaling-stroke")
+          .attr("pointer-events", "none")
+          .attr("data-owner-layer", geometry.layerId);
+      }
+    }
+    if (input.showBranchStroke && braided) {
+      for (const branch of visual.branches) {
+        const defined = visual.defined.map((value, sample) =>
+          value && branch.y1[sample] > branch.y0[sample]
+        );
+        if (!defined.some(Boolean)) continue;
+        for (const boundary of [branch.y0, branch.y1]) {
           layers
-            .append("line")
-            .attr("class", `time-cell${dim}`)
-        .attr("data-visual-layer", geometry.layerId)
-            .attr("x1", x(xValues[time])).attr("x2", x(xValues[time]))
-            .attr("y1", y(visual.envelope.y0[sample])).attr("y2", y(visual.envelope.y1[sample]))
-            .attr("stroke", "var(--ink, #1a1a1a)")
-            .attr("stroke-width", 0.7)
-            .attr("stroke-opacity", 0.55)
+            .append("path")
+            .attr("d", makeBraidedLine(boundary, defined))
+            .attr("class", `branch-stroke${dim}`)
+            .attr("data-visual-layer", geometry.layerId)
+            .attr("fill", "none")
+            .attr("stroke", densityColor(layerColor, 1))
+            .attr("stroke-width", 0.75)
+            .attr("stroke-opacity", 0.82)
             .attr("vector-effect", "non-scaling-stroke")
             .attr("pointer-events", "none");
         }
       }
     }
-  } else {
-    root
-      .append("g")
-      .attr("class", "layers")
-      .selectAll("path")
-      .data(layerIds)
-      .join("path")
-      .attr("d", (_, i) => makeArea(
-        bottom[i],
-        top[i],
-        input.result.braided.layers[i].missing.map((missing) => !missing),
-      ))
-      .attr(
-        "class",
-        (id) =>
-          `layer${input.highlightLayer && id !== input.highlightLayer ? " dim" : ""}`,
-      )
-      .attr("fill", (_, i) => colorOf(i))
-      .attr("fill-opacity", 0.82)
-      .attr("stroke", "none")
-      .attr("stroke-width", 0)
-      .attr("data-idx", (_, i) => i)
-      .attr("data-id", (id) => id)
-      .attr("data-owner-layer", (id) => id);
-    const exposure = layerIds.map(
-      (id) =>
-        input.result.uncertainty.exposure[
-          input.layers.findIndex((layer) => layer.id === id)
-        ],
-    );
-    if (input.visMethod === "star")
-      drawStars(svg, bottom, top, exposure, indices, xAt, y, colorOf, layerIds, input.highlightLayer);
-    else if (input.visMethod === "color-blur")
-      drawColorBlur(
-        svg,
-        bottom,
-        top,
-        exposure,
-        input.result.braided.layers.map((layer) => layer.missing.map((missing) => !missing)),
-        firstTime,
-        lastTime,
-        makeAreaRange,
-        colorOf, layerIds, input.highlightLayer,
-      );
+    if (input.showRepresentativeStroke) {
+      const boundaries = representativeBoundaries(visual.branches);
+      for (const boundary of [boundaries.lower, boundaries.upper]) {
+        layers
+          .append("path")
+          .attr("d", makeBraidedLine(boundary, visual.defined))
+          .attr("class", `representative-stroke${dim}`)
+          .attr("data-visual-layer", geometry.layerId)
+          .attr("fill", "none")
+          .attr("stroke", "var(--ink, #1a1a1a)")
+          .attr("stroke-width", 0.9)
+          .attr("vector-effect", "non-scaling-stroke")
+          .attr("pointer-events", "none");
+      }
+    }
+    if (input.showTimeCell && braided) {
+      for (const time of indices) {
+        const sample = interpolated.x.findIndex((value) => value === xValues[time]);
+        if (sample < 0 || !visual.defined[sample]) continue;
+        layers
+          .append("line")
+          .attr("class", `time-cell${dim}`)
+          .attr("data-visual-layer", geometry.layerId)
+          .attr("x1", x(xValues[time])).attr("x2", x(xValues[time]))
+          .attr("y1", y(visual.envelope.y0[sample])).attr("y2", y(visual.envelope.y1[sample]))
+          .attr("stroke", "var(--ink, #1a1a1a)")
+          .attr("stroke-width", 0.7)
+          .attr("stroke-opacity", 0.55)
+          .attr("vector-effect", "non-scaling-stroke")
+          .attr("pointer-events", "none");
+      }
+    }
   }
   if (input.hover !== null)
     svg.appendChild(
@@ -812,97 +729,6 @@ function solidQuantileY(
   return branches[0]?.y0[sample] ?? 0;
 }
 
-function drawStars(
-  svg: SVGSVGElement,
-  bottom: number[][],
-  top: number[][],
-  u: number[][],
-  indices: number[],
-  x: (t: number) => number,
-  y: (v: number) => number,
-  colorOf: (i: number) => string,
-  layerIds: string[],
-  highlightLayer: string | null,
-): void {
-  for (let i = 0; i < bottom.length; i += 1) {
-    for (const t of indices) {
-      if (t % 6 !== 0) continue;
-      const radius = 1.5 + 9 * u[i][t];
-      if (radius < 2) continue;
-      svg.appendChild(
-        el(svg.ownerDocument, "path", {
-          d:
-            symbol()
-              .type(symbolStar)
-              .size(radius * radius * 7)() ?? "",
-          transform: `translate(${x(t)},${y((bottom[i][t] + top[i][t]) / 2)})`,
-          fill: colorOf(i),
-          class: `layer${highlightLayer && highlightLayer !== layerIds[i] ? " dim" : ""}`,
-          "data-visual-layer": layerIds[i],
-          "pointer-events": "none",
-          stroke: "var(--accent-soft, #e8f1f8)",
-          "stroke-width": 0.8,
-          "fill-opacity": 0.9,
-        }),
-      );
-    }
-  }
-}
-
-function drawColorBlur(
-  svg: SVGSVGElement,
-  bottom: number[][],
-  top: number[][],
-  u: number[][],
-  defined: boolean[][],
-  firstTime: number,
-  lastTime: number,
-  areaRange: (lo: number[], hi: number[], start: number, end: number, defined?: boolean[]) => string,
-  colorOf: (i: number) => string,
-  layerIds: string[],
-  highlightLayer: string | null,
-): void {
-  const defs = el(svg.ownerDocument, "defs", {});
-  svg.appendChild(defs);
-  const length = bottom[0].length;
-  const segment = Math.max(1, Math.ceil(length / 14));
-  for (let i = 0; i < bottom.length; i += 1) {
-    const mean = u[i].reduce((sum, value) => sum + value, 0) / length;
-    const filterId = `${svgId(svg)}-color-blur-${i}`;
-    const filter = el(svg.ownerDocument, "filter", {
-      id: filterId,
-      x: "-20%",
-      y: "-20%",
-      width: "140%",
-      height: "140%",
-    });
-    filter.appendChild(
-      el(svg.ownerDocument, "feGaussianBlur", { stdDeviation: 0.4 + 3.2 * mean }),
-    );
-    defs.appendChild(filter);
-    const { h, l } = hsl(colorOf(i));
-    for (let start = Math.floor(firstTime / segment) * segment; start <= lastTime; start += segment) {
-      const end = Math.min(length - 1, start + segment);
-      const visibleStart = Math.max(firstTime, start);
-      const visibleEnd = Math.min(lastTime, end);
-      const local =
-        u[i].slice(start, end + 1).reduce((sum, value) => sum + value, 0) /
-        (end - start + 1);
-      svg.appendChild(
-        el(svg.ownerDocument, "path", {
-          d: areaRange(bottom[i], top[i], visibleStart, visibleEnd, defined[i]),
-          fill: `hsl(${h}, ${(12 + 78 * local).toFixed(0)}%, ${(l * 100).toFixed(0)}%)`,
-          "fill-opacity": 0.85,
-          filter: `url(#${filterId})`,
-          class: `layer${highlightLayer && highlightLayer !== layerIds[i] ? " dim" : ""}`,
-          "data-visual-layer": layerIds[i],
-          "pointer-events": "none",
-        }),
-      );
-    }
-  }
-}
-
 function tickLabel(label: string): string {
   if (!/^\d{4}-\d{2}-\d{2}/.test(label)) return label;
   const [year, month] = label.split("-");
@@ -983,13 +809,8 @@ function el(document: Document, tag: string, attrs: Record<string, string | numb
 export function chartCoordinates(input: RenderInput) {
   const { width: W, height: H, margin: M } = dimensions(input);
   const tLen = input.times.length;
-  const braided = input.visMethod === "braided";
-  const bottom = braided
-    ? input.result.braided.layers.map((layer) => layer.slotY0)
-    : input.result.base.yBottom;
-  const top = braided
-    ? input.result.braided.layers.map((layer) => layer.slotY1)
-    : input.result.base.yTop;
+  const bottom = input.result.braided.layers.map((layer) => layer.slotY0);
+  const top = input.result.braided.layers.map((layer) => layer.slotY1);
   const indices = visibleTimeIndices(tLen, input.start, input.end);
   const values = [
     ...bottom.flatMap((layer) => indices.map((time) => layer[time])),

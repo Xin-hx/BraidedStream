@@ -37,6 +37,8 @@ select(svg).datum(dataset).call(chart);
 
 For independent analysis, use `runPipeline` from `braided-stream/core`. Bind `{ dataset, result }` to reuse computed geometry. Hover and brush events connect the chart to your own UI. No framework adapter is required.
 
+Vis method offers `Streamgraph` (one unsplit envelope per layer) and `Braided stream` (distribution branches). Use `.options({ visMethod: 'streamgraph' })` for the base view. Density gradients, branch strokes and time cells are available in braided mode.
+
 ```sh
 npm run build:package
 npm pack --workspace braided-stream

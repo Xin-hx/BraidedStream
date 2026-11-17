@@ -661,7 +661,6 @@ function renderBase(
     showBranchStroke: false,
     showYAxis,
     showDensityGradient: false,
-    collapseBranches: false,
     hover: null,
     highlightLayer: null,
   });

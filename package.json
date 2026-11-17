@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "npm run build:package && npm run dev --workspace @braided-stream/app",
+    "dev": "vite app --config app/vite.config.ts --host 127.0.0.1",
     "build": "npm run build:package && npm run build --workspace @braided-stream/app",
     "preview": "npm run preview --workspace @braided-stream/app",
     "build:package": "npm run build --workspace braided-stream",

@@ -52,6 +52,33 @@ describe("D3 package", () => {
     expect(b.querySelectorAll(".branch")).toHaveLength(2);
   });
 
+  it("renders streamgraph as unsplit envelopes and restores braided-only marks when switching back", () => {
+    const svg = host();
+    const datum = prepared();
+    const before = JSON.stringify(datum.result);
+    const hover = vi.fn();
+    const chart = braidedStream().options({
+      visMethod: "streamgraph", showDensityGradient: true, showBranchStroke: true, showTimeCell: true,
+    }).on("hover.test", hover);
+    const selection = select(svg).datum(datum);
+    selection.call(chart);
+    expect(svg.querySelectorAll(".streamgraph")).toHaveLength(dataset.layers.length);
+    for (const path of svg.querySelectorAll(".streamgraph")) {
+      const id = path.getAttribute("data-owner-layer");
+      expect(path.getAttribute("d")).toBe(svg.querySelector(`.envelope-hit[data-owner-layer="${id}"]`)!.getAttribute("d"));
+    }
+    expect(svg.querySelector(".branch, .space-hit, .allocated-space, .branch-stroke, .time-cell, .density-bands")).toBeNull();
+    const path = svg.querySelector(".streamgraph")!;
+    path.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 100, clientY: 200 }));
+    expect(hover.mock.calls[0][0].layerId).toBe(path.getAttribute("data-owner-layer"));
+    selection.call(chart.options({ visMethod: "braided" }));
+    expect(svg.querySelector(".streamgraph")).toBeNull();
+    for (const mark of [".branch", ".space-hit", ".branch-stroke", ".time-cell", ".density-bands"]) {
+      expect(svg.querySelector(mark)).not.toBeNull();
+    }
+    expect(JSON.stringify(datum.result)).toBe(before);
+  });
+
   it("uses the cropped Y domain and actual nonuniform dates for hit testing", () => {
     const { result } = prepared();
     const input: RenderInput = {
@@ -59,7 +86,7 @@ describe("D3 package", () => {
       start: 0, end: 1, visMethod: "braided", smoothContours: true,
       showEnvelopeStroke: false, showRepresentativeStroke: false, showTimeCell: false,
       showBranchStroke: false, showYAxis: true, showDensityGradient: false,
-      collapseBranches: false, hover: null, highlightLayer: null,
+      hover: null, highlightLayer: null,
     };
     const crop = chartCoordinates(input);
     const mid = (crop.bottom[0][1] + crop.top[0][1]) / 2;
@@ -123,7 +150,7 @@ describe("D3 package", () => {
     const { result } = prepared();
     const chart = braidedStream();
     vi.stubGlobal("document", undefined);
-    for (const visMethod of ["braided", "star", "color-blur"] as const) {
+    for (const visMethod of ["braided", "streamgraph"] as const) {
       select(svg).datum({ dataset, result }).call(chart.options({ visMethod }));
       expect(svg.querySelector("path")).not.toBeNull();
       expect(svg.outerHTML).not.toMatch(/NaN|undefined/);
@@ -141,5 +168,9 @@ describe("D3 package", () => {
     select(svg).datum(single).call(braidedStream());
     expect(svg.outerHTML).not.toMatch(/NaN|undefined/);
     expect(() => select(svg).datum(dataset).call(braidedStream().options({ width: 10 }))).toThrow(/dimensions/);
+    expect(() => {
+      // @ts-expect-error Exercise a removed method supplied by an old JavaScript caller.
+      select(svg).datum(dataset).call(braidedStream().options({ visMethod: "star" }));
+    }).toThrow(/visMethod/);
   });
 });
