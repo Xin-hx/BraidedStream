@@ -1,0 +1,1 @@
+`custom-data.xlsx` is a small, synthetic workbook for import tests. It contains two sheets, weighted toy observations, a title/header row, native Excel dates, zeros and blank cells. It contains no real patient or project data.

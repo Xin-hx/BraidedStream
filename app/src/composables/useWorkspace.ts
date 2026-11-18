@@ -5,6 +5,7 @@ import { DEFAULT_COVID_STATES, convertCovidCase } from "../../../examples/conver
 import { convertIllustrationCase } from "../../../examples/converters/illustration";
 import { convertTcmCase, TCM_COLORS } from "../../../examples/converters/tcmConverter";
 import { loadAppearance, saveAppearance } from "../lib/appearance";
+import { createAnalysisTask, type ImportAcceptance, type AnalysisResult } from "../lib/analysis-task";
 
 const datasets = {
   illustration: { path: "dataset/illustration.csv", parse: convertIllustrationCase },
@@ -19,7 +20,8 @@ interface LoadedData {
 
 export function useWorkspace() {
   const model = reactive({
-    datasetId: "illustration" as keyof typeof datasets,
+    datasetId: "illustration" as keyof typeof datasets | "custom",
+    customName: "", customAvailable: false, computing: false,
     data: shallowRef<LoadedData | null>(null), result: shallowRef<PipelineResult | null>(null),
     visMethod: "braided" as VisMethod, baseline: "wiggle" as "wiggle" | "sine", bandwidthRatio: 0.3,
     smoothContours: true, showEnvelopeStroke: false, showRepresentativeStroke: false,
@@ -30,12 +32,22 @@ export function useWorkspace() {
     panelCollapsed: false, legendVisible: true, legendMinimized: false,
     hover: shallowRef<HoverEvent | null>(null),
   });
+  const customData = shallowRef<LoadedData | null>(null);
+  const analysisTask = createAnalysisTask();
+  let computeVersion = 0;
+  let primed: { data: LoadedData; analysis: AnalysisResult } | undefined;
+  const analysisOptions = computed<import("braided-stream/core").PipelineOptions>(() => ({
+    baselineMode: model.baseline,
+    braided: { bandwidthRatio: model.bandwidthRatio, debug: true },
+    densityProfileBins: model.showDensityGradient ? 16 : undefined,
+  }));
   let version = 0;
   let controller: AbortController | undefined;
 
   async function loadData() {
     const current = ++version;
     controller?.abort();
+    analysisTask.cancel(); computeVersion++; model.computing = false;
     controller = new AbortController();
     const id = model.datasetId;
     model.loading = true;
@@ -45,6 +57,12 @@ export function useWorkspace() {
     model.data = null;
     model.result = null;
     try {
+      if (id === "custom") {
+        if (!customData.value) throw new Error("Import a file before choosing custom data.");
+        model.data = customData.value;
+        model.start = 0; model.end = customData.value.dataset.times.length - 1; model.selectedLayer = null;
+        return;
+      }
       if (id === "tcm" && !__LOCAL_TCM__) throw new Error("TCM records are available only in a local development session");
       const spec = datasets[id];
       const response = await fetch(spec.path, { signal: controller.signal });
@@ -70,24 +88,31 @@ export function useWorkspace() {
   }
 
   watch(() => model.datasetId, loadData, { immediate: true, flush: "sync" });
-  watch(() => [model.data, model.baseline, model.bandwidthRatio, model.sort, model.showDensityGradient], () => {
-    if (!model.data) return;
+  watch(() => [model.data, model.baseline, model.bandwidthRatio, model.sort, model.showDensityGradient], async () => {
+    const current = ++computeVersion;
+    analysisTask.cancel();
+    const source = model.data;
+    if (!source) { model.computing = false; return; }
     model.hover = null;
+    model.computing = model.datasetId === "custom";
     try {
-      const started = performance.now();
-      const layoutOrder = model.sort === "category"
-        ? model.data.layers.map(layer => layer.id).sort((a, b) => a.localeCompare(b)) : undefined;
-      model.result = runPipeline(model.data.dataset, {
-        layoutOrder, baselineMode: model.baseline,
-        braided: { bandwidthRatio: model.bandwidthRatio, debug: true },
-        densityProfileBins: model.showDensityGradient ? 16 : undefined,
-      });
-      model.perfMs = performance.now() - started;
+      const options = { ...analysisOptions.value, layoutOrder: model.sort === "category"
+        ? source.layers.map(layer => layer.id).sort((a, b) => a.localeCompare(b)) : undefined };
+      let analysis: AnalysisResult;
+      if (primed?.data === source) { analysis = primed.analysis; primed = undefined; }
+      else if (model.datasetId === "custom") analysis = await analysisTask.run({ dataset: source.dataset, options });
+      else {
+        const started = performance.now();
+        analysis = { result: runPipeline(source.dataset, options), perfMs: performance.now() - started };
+      }
+      if (current !== computeVersion || source !== model.data) return;
+      model.result = analysis.result;
+      model.perfMs = analysis.perfMs;
       model.error = "";
     } catch (error) {
-      model.result = null;
+      if (current !== computeVersion || (error instanceof Error && error.name === "AbortError")) return;
       model.error = error instanceof Error ? error.message : String(error);
-    }
+    } finally { if (current === computeVersion) model.computing = false; }
   });
   watch(() => [model.start, model.end, model.visMethod], () => { model.hover = null; });
   watch(() => model.legendVisible, () => { model.legendMinimized = false; });
@@ -104,8 +129,24 @@ export function useWorkspace() {
     showDensityGradient: model.showDensityGradient,
     highlightLayer: model.selectedLayer,
   }));
-  function save() { model.status = saveAppearance(model.appearance); }
-  onBeforeUnmount(() => { version++; controller?.abort(); });
-  return { model, colors, chartOptions, save };
+  function save() {
+    const colors = Object.fromEntries(Object.entries(model.appearance.colors).filter(([key]) => !key.startsWith("custom:")));
+    model.status = saveAppearance({ palette: model.appearance.palette, colors });
+  }
+  function acceptImport(acceptance: ImportAcceptance) {
+    const loaded: LoadedData = { dataset: acceptance.data.dataset, layers: acceptance.data.dataset.layers.map(layer => ({ id: layer.id })), sampleSize: acceptance.data.sampleSize };
+    primed = { data: loaded, analysis: acceptance.analysis };
+    customData.value = loaded; model.customName = acceptance.name; model.customAvailable = true;
+    model.appearance.colors = Object.fromEntries(Object.entries(model.appearance.colors).filter(([key]) => !key.startsWith("custom:")));
+    if (model.datasetId !== "custom") model.datasetId = "custom";
+    else { model.data = loaded; model.start = 0; model.end = loaded.dataset.times.length - 1; model.selectedLayer = null; model.hover = null; }
+  }
+  function clearImport() {
+    customData.value = null; primed = undefined; model.customAvailable = false; model.customName = "";
+    model.appearance.colors = Object.fromEntries(Object.entries(model.appearance.colors).filter(([key]) => !key.startsWith("custom:")));
+    if (model.datasetId === "custom") model.datasetId = "illustration";
+  }
+  onBeforeUnmount(() => { version++; computeVersion++; controller?.abort(); analysisTask.cancel(); });
+  return { model, colors, chartOptions, analysisOptions, save, acceptImport, clearImport };
 }
 export type WorkspaceState = ReturnType<typeof useWorkspace>["model"];

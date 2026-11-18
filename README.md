@@ -24,6 +24,8 @@ npm run preview
 
 Production builds include only the public Illustration and COVID datasets. TCM records are local only and are excluded even when present on disk. `npm run build` builds the package, checks TypeScript/Vue types and builds the frontend. `test:package` packs and installs the package in a temporary project, then checks runtime behavior and strict NodeNext types.
 
+Use **Import your data** to import CSV, XLSX or JSON entirely in the browser: choose a file, preview/map columns, review validation and visualize. Parsing/analysis run in cancellable workers with progress indicators; custom datasets stay in memory for the current tab. See the [import guide](docs/data-import.md) for layouts, JSON schema and limits.
+
 ## Reusable package
 
 ```ts

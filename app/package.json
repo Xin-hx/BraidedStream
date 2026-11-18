@@ -12,9 +12,12 @@
     "@lucide/vue": "^1.74.0",
     "braided-stream": "0.1.0",
     "d3": "^7.9.0",
+    "papaparse": "^5.7.1",
+    "read-excel-file": "^9.3.17",
     "vue": "^3.5.0"
   },
   "devDependencies": {
+    "@types/papaparse": "^5.5.2",
     "@vitejs/plugin-vue": "^5.2.0",
     "typescript": "^5.5.4",
     "vite": "^5.4.0",

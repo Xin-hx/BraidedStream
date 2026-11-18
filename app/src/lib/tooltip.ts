@@ -23,7 +23,7 @@ export function tooltipRows(result: PipelineResult, t: number, layerId: string,
     ...(spaceKind ? [["space owner", `${spaceKind} · ${layer.id}`]] : []),
     ...(sampleSize === null || sampleSize === undefined
       ? []
-      : [[datasetId === "covid-inc"
+      : [[datasetId === "custom" ? "samples" : datasetId === "covid-inc"
         ? "model members"
         : datasetId === "illustration" ? "ensemble members" : "patient sample", String(sampleSize)]]),
   ];

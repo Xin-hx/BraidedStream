@@ -77,12 +77,12 @@ function reset(id: string) { delete props.model.appearance.colors[`${props.model
   min-width: 0;
   overflow: hidden auto;
   overscroll-behavior: contain;
-  color: #1e293b;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  color: var(--ink);
+  background: var(--background);
+  border: 1px solid var(--line);
   border-radius: 14px;
-  box-shadow: 0 2px 6px rgb(15 23 42 / 3%), 0 12px 32px -12px rgb(15 23 42 / 18%);
-  font-size: 12px;
+  box-shadow: 0 12px 32px -12px var(--shadow-color);
+  font-size: var(--font-small);
   line-height: 1.5;
   transition: width 160ms ease;
 }
@@ -95,9 +95,9 @@ function reset(id: string) { delete props.model.appearance.colors[`${props.model
   padding: 12px 12px 10px 16px;
 }
 .legend-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.legend-title > svg { flex: 0 0 auto; color: #64748b; }
-.legend-title h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -.015em; }
-.legend-count { padding: 1px 6px; border-radius: 5px; background: #f1f5f9; color: #475569; font-size: 11px; font-variant-numeric: tabular-nums; }
+.legend-title > svg { flex: 0 0 auto; color: var(--muted); }
+.legend-title h2 { margin: 0; font-size: var(--font-small); font-weight: var(--font-weight-emphasis); letter-spacing: -.015em; }
+.legend-count { padding: 1px 6px; border-radius: 5px; background: var(--surface-subtle); color: var(--muted); font-size: var(--font-small); font-variant-numeric: tabular-nums; }
 .legend-actions { display: flex; align-items: center; gap: 2px; }
 .legend-icon-button {
   display: inline-flex;
@@ -110,45 +110,45 @@ function reset(id: string) { delete props.model.appearance.colors[`${props.model
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: #64748b;
+  color: var(--muted);
   cursor: pointer;
 }
-.legend-icon-button:hover { background: #f1f5f9; color: #0f172a; }
-.legend-icon-button:active { background: #e2e8f0; }
-.legend :is(button, select, input):focus-visible { outline: 2px solid #475569; outline-offset: 2px; }
-.legend-details { flex: 0 0 auto; padding: 0 16px 12px; border-bottom: 1px solid #f1f5f9; }
+.legend-icon-button:hover { background: var(--surface-subtle); color: var(--ink); }
+.legend-icon-button:active { background: var(--line); }
+.legend :is(button, select, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.legend-details { flex: 0 0 auto; padding: 0 16px 12px; border-bottom: 1px solid var(--surface-subtle); }
 .legend-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.legend-tools label { display: grid; gap: 5px; min-width: 0; font-size: 11px; font-weight: 500; color: #64748b; }
+.legend-tools label { display: grid; gap: 5px; min-width: 0; font-size: var(--font-small); font-weight: var(--font-weight-regular); color: var(--muted); }
 .legend-field { position: relative; display: flex; min-width: 0; }
-.legend-field select { appearance: none; width: 100%; min-width: 0; height: 32px; padding: 0 28px 0 10px; overflow: hidden; text-overflow: ellipsis; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; color: #334155; font-size: 12px; cursor: pointer; }
-.legend-field select:hover { border-color: #cbd5e1; }
-.legend-field > svg { position: absolute; right: 9px; top: 9px; pointer-events: none; color: #94a3b8; }
-.legend-note { margin: 10px 0 0; font-size: 11px; color: #64748b; }
-.legend-list { flex: 0 1 auto; min-height: 32px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; padding: 8px; }
+.legend-field select { appearance: none; width: 100%; min-width: 0; height: 32px; padding: 0 28px 0 10px; overflow: hidden; text-overflow: ellipsis; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); color: var(--ink); font-size: var(--font-small); cursor: pointer; }
+.legend-field select:hover { border-color: var(--line); }
+.legend-field > svg { position: absolute; right: 9px; top: 9px; pointer-events: none; color: var(--muted); }
+.legend-note { margin: 10px 0 0; font-size: var(--font-small); color: var(--muted); }
+.legend-list { flex: 0 1 auto; min-height: 32px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding: 8px; }
 .legend-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 6px; min-width: 0; padding: 3px 5px; border: 1px solid transparent; border-radius: 8px; }
 .legend-item + .legend-item { margin-top: 2px; }
-.legend-item:hover { background: #f8fafc; }
-.legend-item.is-selected { border-color: #cbd5e1; background: #f1f5f9; }
+.legend-item:hover { background: var(--surface-subtle); }
+.legend-item.is-selected { border-color: var(--accent); background: var(--accent-soft); }
 .legend-swatch { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; }
 .legend-color { appearance: none; display: block; width: 24px; height: 24px; min-width: 0; padding: 0; overflow: hidden; border: 0; border-radius: 5px; background: transparent; cursor: pointer; }
 .legend-color::-webkit-color-swatch-wrapper { padding: 0; }
-.legend-color::-webkit-color-swatch { border: 1px solid rgb(15 23 42 / 10%); border-radius: 5px; }
-.legend-color::-moz-color-swatch { border: 1px solid rgb(15 23 42 / 10%); border-radius: 5px; }
-.legend-select { display: flex; flex-direction: column; justify-content: center; gap: 1px; width: 100%; min-width: 0; min-height: 44px; padding: 4px 0; border: 0; border-radius: 4px; background: transparent; color: #334155; text-align: left; }
-.legend-select:hover, .legend-select:active { background: transparent; color: #0f172a; }
-.legend-item.is-selected .legend-name { font-weight: 600; color: #0f172a; }
-.legend-name { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
-.legend-meta { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; color: #64748b; font-size: 11px; font-variant-numeric: tabular-nums; }
-.legend-depth { color: #475569; }
+.legend-color::-webkit-color-swatch { border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); border-radius: 5px; }
+.legend-color::-moz-color-swatch { border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); border-radius: 5px; }
+.legend-select { display: flex; flex-direction: column; justify-content: center; gap: 1px; width: 100%; min-width: 0; min-height: 44px; padding: 4px 0; border: 0; border-radius: 4px; background: transparent; color: var(--ink); text-align: left; }
+.legend-select:hover, .legend-select:active { background: transparent; color: var(--ink); }
+.legend-item.is-selected .legend-name { font-weight: var(--font-weight-emphasis); color: var(--ink); }
+.legend-name { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-small); font-weight: var(--font-weight-regular); }
+.legend-meta { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; color: var(--muted); font-size: var(--font-small); font-variant-numeric: tabular-nums; }
+.legend-depth { color: var(--muted); }
 .legend-reset { width: 24px; height: 24px; }
-.legend-footer { flex: 0 0 auto; padding: 10px 16px; border-top: 1px solid #f1f5f9; color: #64748b; font-size: 11px; overflow-wrap: anywhere; }
-.legend-status { color: #64748b; }
-.legend-empty { margin: 6px 8px; color: #64748b; }
+.legend-footer { flex: 0 0 auto; padding: 10px 16px; border-top: 1px solid var(--surface-subtle); color: var(--muted); font-size: var(--font-small); overflow-wrap: anywhere; }
+.legend-status { color: var(--muted); }
+.legend-empty { margin: 6px 8px; color: var(--muted); }
 .legend.is-minimized { width: min(216px, calc(100% - 32px)); }
 .legend.is-minimized .legend-header { padding-bottom: 6px; }
 .legend.is-minimized .legend-list { padding-top: 0; }
 .legend.is-minimized .legend-select { min-height: 30px; padding-block: 3px; }
-.legend-dot { width: 10px; height: 10px; border-radius: 3px; background: var(--layer-color); box-shadow: inset 0 0 0 1px rgb(15 23 42 / 8%); }
+.legend-dot { width: 10px; height: 10px; border-radius: 3px; background: var(--layer-color); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent); }
 @container (max-width: 400px) {
   .legend { inset: 12px 12px auto auto; width: min(280px, calc(100% - 24px)); max-height: calc(100% - 24px); }
   .legend.is-minimized { width: min(200px, calc(100% - 24px)); }

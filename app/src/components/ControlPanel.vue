@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { WorkspaceState } from "../composables/useWorkspace";
+import { Upload } from "@lucide/vue";
 defineProps<{ model: WorkspaceState }>();
-defineEmits<{ download: [] }>();
+defineEmits<{ download: []; import: []; clearImport: [] }>();
 const localTcm = __LOCAL_TCM__;
 const toggles = [
   ["smoothContours", "smooth", "Smooth contours", false],
@@ -25,8 +26,11 @@ const toggles = [
           <option value="illustration">Illustration ensembles</option>
           <option v-if="localTcm" value="tcm">TCM prescriptions (local only)</option>
           <option value="covid-inc">COVID-inc</option>
+          <option v-if="model.customAvailable" value="custom">{{ model.customName }}</option>
         </select>
       </label>
+      <button id="btn-import" class="import-entry" type="button" @click="$emit('import')"><Upload :size="15" />Import your data<span>CSV · XLSX · JSON</span></button>
+      <div v-if="model.datasetId === 'custom'" class="custom-data-note"><span>This session only</span><button type="button" @click="$emit('clearImport')">Remove data</button></div>
       <label>Vis method
         <select id="ctl-vis-method" v-model="model.visMethod">
           <option value="streamgraph">Streamgraph</option><option value="braided">Braided stream</option>

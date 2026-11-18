@@ -41,4 +41,5 @@ export default defineConfig(({ command }) => ({
     fs: { deny: ["**/examples/data/private/**", "**/TCMRecord.csv", "**/artifacts/**", ".env", ".env.*", "*.{crt,pem}", "**/.git/**"] },
   },
   build: { target: "es2022" },
+  worker: { format: "es" },
 }));
