@@ -1,6 +1,5 @@
 .braided-stream .layer { cursor: pointer; }
 .braided-stream .layer.dim { opacity: 0.28; }
-.braided-stream .density-bands.dim { opacity: 0.28; }
 .braided-stream .envelope-stroke.dim,
 .braided-stream .representative-stroke.dim,
 .braided-stream .branch-stroke.dim,

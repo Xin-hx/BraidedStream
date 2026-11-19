@@ -1,5 +1,5 @@
-import { dispatch, pointer, select } from "d3";
-import { runPipeline, type InputDataset, type PipelineOptions, type PipelineResult } from "./core.js";
+import { bisectCenter, dispatch, pointer, select } from "d3";
+import { preparePipeline, type InputDataset, type PipelineOptions, type PipelineResult } from "./core.js";
 import {
   chartCoordinates, dimensions, renderChart, renderTimeFilter,
   type RenderInput, type TimeFilterInput,
@@ -38,7 +38,7 @@ export interface StreamTimeFilter {
 const defaults = {
   visMethod: "braided", smoothContours: true, showEnvelopeStroke: false,
   showRepresentativeStroke: false, showTimeCell: false, showBranchStroke: false,
-  showYAxis: true, showDensityGradient: false,
+  showYAxis: true,
   highlightLayer: null,
 } satisfies ChartOptions;
 
@@ -50,15 +50,16 @@ export function timeRange(length: number, start = 0, end = length - 1): [number,
   return [first, Math.max(first, Math.min(length - 1, Math.floor(end)))];
 }
 
-function prepare(datum: ChartDatum, options: PipelineOptions) {
+function prepare(datum: ChartDatum, options: PipelineOptions, previous?: ReturnType<typeof preparePipeline>) {
   const dataset = "dataset" in datum ? datum.dataset : datum;
-  const result = "dataset" in datum ? datum.result : runPipeline(dataset, options);
+  const pipeline = "dataset" in datum ? undefined : previous ?? preparePipeline(dataset);
+  const result = "dataset" in datum ? datum.result : pipeline!.run(options);
   if (!dataset.times.length || result.layoutOrder.length !== dataset.layers.length ||
       result.layoutOrder.some(id => !dataset.layers.some(layer => layer.id === id)) ||
       result.base.yTop.some(row => row.length !== dataset.times.length)) {
     throw new Error("precomputed result must match its dataset");
   }
-  return { dataset, result };
+  return { dataset, result, pipeline };
 }
 
 function surface(host: SVGSVGElement, className: string) {
@@ -72,7 +73,7 @@ function chartInput(dataset: InputDataset, result: PipelineResult, options: Char
   const [start, end] = timeRange(dataset.times.length, options.start, options.end);
   return {
     ...defaults, ...options, layers: options.layers ?? dataset.layers,
-    times: [...dataset.times], result, start, end, hover: null,
+    times: dataset.times, result, start, end, hover: null,
   };
 }
 
@@ -85,7 +86,7 @@ function hitCoordinates(input: RenderInput, coords: ReturnType<typeof chartCoord
   const { width, height, margin } = dimensions(input);
   if (px < margin.left || px > width - margin.right || py < margin.top || py > height - margin.bottom) return null;
   const { indices, x, xValues, y, bottom, top } = coords;
-  const timeIndex = indices.reduce((best, t) => Math.abs(x(xValues[t]) - px) < Math.abs(x(xValues[best]) - px) ? t : best);
+  const timeIndex = bisectCenter(xValues, x.invert(px), indices[0], indices.at(-1)! + 1);
   const value = y.invert(py);
   const layer = input.result.layoutOrder.findIndex((_, i) =>
     !input.result.braided.layers[i].missing[timeIndex] && value >= bottom[i][timeIndex] && value <= top[i][timeIndex]);
@@ -100,6 +101,7 @@ export function braidedStream(): BraidedStreamChart {
   const states = new WeakMap<SVGSVGElement, {
     svg: SVGSVGElement; datum: ChartDatum; revision: number;
     prepared: ReturnType<typeof prepare>;
+    dispose: () => void;
   }>();
 
   function chart(selection: SVGSelection<ChartDatum>): void {
@@ -107,24 +109,27 @@ export function braidedStream(): BraidedStreamChart {
       let state = states.get(this);
       if (!state) {
         const prepared = prepare(datum, pipelineOptions);
-        state = { svg: surface(this, "braided-stream-surface"), datum, revision, prepared };
+        state = { svg: surface(this, "braided-stream-surface"), datum, revision, prepared, dispose: () => undefined };
         states.set(this, state);
       } else if (state.datum !== datum || state.revision !== revision) {
-        state.prepared = prepare(datum, pipelineOptions);
+        state.prepared = prepare(datum, pipelineOptions, state.datum === datum ? state.prepared.pipeline : undefined);
         state.datum = datum;
         state.revision = revision;
       }
       const { dataset, result } = state.prepared;
+      state.dispose();
       const input = chartInput(dataset, result, options);
       const { width, height } = dimensions(input);
       this.setAttribute("viewBox", `0 0 ${width} ${height}`);
       const host = this;
       const svg = state.svg;
-      renderChart(svg, input);
+      const coords = renderChart(svg, input);
       svg.setAttribute("height", String(height));
       const root = select(svg);
-      const coords = chartCoordinates(input);
+      let highlighted = input.highlightLayer;
       function highlight(id: string | null) {
+        if (highlighted === id) return;
+        highlighted = id;
         root.selectAll<SVGElement, unknown>("[data-owner-layer]")
           .filter(function() { return !this.classList.contains("envelope-hit") && !this.classList.contains("space-hit"); })
           .classed("dim", function() { return Boolean(id && this.dataset.ownerLayer !== id); });
@@ -132,12 +137,21 @@ export function braidedStream(): BraidedStreamChart {
         root.selectAll<SVGElement, unknown>("[data-visual-layer]")
           .classed("dim", function() { return Boolean(id && this.dataset.visualLayer !== id); });
       }
+      const view = svg.ownerDocument.defaultView;
+      let frame: number | undefined;
+      let latest: MouseEvent | undefined;
+      const stop = () => {
+        if (frame !== undefined) view?.cancelAnimationFrame(frame);
+        frame = undefined; latest = undefined;
+      };
+      state.dispose = stop;
       const leave = (event: MouseEvent) => {
+        stop();
         root.selectAll(".hover-line").remove();
         highlight(input.highlightLayer);
         events.call("leave", host, event);
       };
-      root.on("mousemove.braided-stream", (event: MouseEvent) => {
+      const move = (event: MouseEvent) => {
         const [px, py] = pointer(event, svg);
         const hit = hitCoordinates(input, coords, px, py);
         if (!hit) { leave(event); return; }
@@ -152,6 +166,16 @@ export function braidedStream(): BraidedStreamChart {
           .attr("y1", margin.top).attr("y2", height - margin.bottom);
         highlight(layerId ?? input.highlightLayer);
         events.call("hover", host, { ...hit, layerId, spaceKind, sourceEvent: event } satisfies HoverEvent);
+      };
+      root.on("mousemove.braided-stream", (event: MouseEvent) => {
+        latest = event;
+        if (!view?.requestAnimationFrame) { move(event); return; }
+        if (frame !== undefined) return;
+        frame = view.requestAnimationFrame(() => {
+          frame = undefined;
+          const event = latest; latest = undefined;
+          if (event) move(event);
+        });
       }).on("mouseleave.braided-stream", leave);
     });
   }
@@ -167,7 +191,7 @@ export function braidedStream(): BraidedStreamChart {
   chart.destroy = (selection: SVGSelection<unknown>) => {
     selection.each(function() {
       const state = states.get(this);
-      if (state) { select(state.svg).on(".braided-stream", null); state.svg.remove(); states.delete(this); }
+      if (state) { state.dispose(); select(state.svg).on(".braided-stream", null); state.svg.remove(); states.delete(this); }
     });
   };
   return chart;

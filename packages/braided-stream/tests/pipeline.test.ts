@@ -82,7 +82,7 @@ describe("unified measure pipeline", () => {
         { id: "split", measures: [measure(uniform(0, 4, 0.4), uniform(4, 10, 0.6))] },
       ],
     };
-    const result = runPipeline(dataset, { braided: { debug: true }, densityProfileBins: 9 });
+    const result = runPipeline(dataset, { braided: { debug: true } });
     const whole = result.braided.layers.find((layer) => layer.layerId === "whole")!.debug![0];
     const split = result.braided.layers.find((layer) => layer.layerId === "split")!.debug![0];
     for (const key of ["H", "mean", "deviationLow", "deviationHigh", "dispersion", "bandwidth"] as const) {
@@ -90,7 +90,6 @@ describe("unified measure pipeline", () => {
     }
     expect(split.branchCount).toBe(whole.branchCount);
     expect(split.branchMasses).toEqual(whole.branchMasses);
-    expect(result.densityProfiles![0][0]).toEqual(result.densityProfiles![1][0]);
   });
 
   it("preserves prototype-named layer ids in PID records", () => {

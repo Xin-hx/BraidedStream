@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL. The app includes illustration ensembles and COVID model members. TCM prescriptions are available only in local development when private records are present. Controls cover visualization method, baseline, KDE bandwidth, contours, density encoding, time filtering and SVG download. The legend supports sorting, layer focus and browser-local color settings.
+Open the Vite URL. The app includes illustration ensembles and COVID model members. TCM prescriptions are available only in local development when private records are present. Controls cover visualization method, baseline, KDE bandwidth, contours, time filtering and SVG download. The legend supports sorting, layer focus and browser-local color settings.
 
 ```sh
 npm test
@@ -37,9 +37,9 @@ const chart = braidedStream().options({ width: 1180, height: 620 });
 select(svg).datum(dataset).call(chart);
 ```
 
-For independent analysis, use `runPipeline` from `braided-stream/core`. Bind `{ dataset, result }` to reuse computed geometry. Hover and brush events connect the chart to your own UI. No framework adapter is required.
+For independent analysis, use `runPipeline` from `braided-stream/core`, or `preparePipeline(dataset).run(options)` to reuse analysis across baseline and ordering changes. Bind `{ dataset, result }` to reuse computed geometry. Hover and brush events connect the chart to your own UI. No framework adapter is required. See [performance notes](docs/performance.md) for the computation stages and measurements.
 
-Vis method offers `Streamgraph` (one unsplit envelope per layer) and `Braided stream` (distribution branches). Use `.options({ visMethod: 'streamgraph' })` for the base view. Density gradients, branch strokes and time cells are available in braided mode.
+Vis method offers `Streamgraph` (one unsplit envelope per layer) and `Braided stream` (distribution branches). Use `.options({ visMethod: 'streamgraph' })` for the base view. Branch strokes and time cells are available in braided mode. Layer colors remain configurable through palettes and per-layer overrides.
 
 ```sh
 npm run build:package

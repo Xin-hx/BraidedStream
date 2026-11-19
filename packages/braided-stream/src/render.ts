@@ -7,7 +7,6 @@ import {
   curveLinear,
   dragEnable,
   hsl,
-  interpolateLab,
   line,
   scaleLinear,
   select,
@@ -56,17 +55,9 @@ export function dimensions(input: Dimensions) {
   return { width, height, margin };
 }
 
-let nextId = 0;
-const ids = new WeakMap<SVGSVGElement, string>();
-function svgId(svg: SVGSVGElement): string {
-  let id = ids.get(svg);
-  if (!id) { id = `braided-stream-${++nextId}`; ids.set(svg, id); }
-  return id;
-}
-
 export interface RenderInput extends Dimensions {
   layers: readonly DisplayLayer[];
-  times: string[];
+  times: readonly string[];
   result: PipelineResult;
   colorOverrides?: Readonly<Record<string, string>>;
   palette?: PaletteId;
@@ -79,14 +70,13 @@ export interface RenderInput extends Dimensions {
   showTimeCell: boolean;
   showBranchStroke: boolean;
   showYAxis: boolean;
-  showDensityGradient: boolean;
   hover: number | null;
   highlightLayer: string | null;
 }
 
 export interface TimeFilterInput extends Dimensions {
   layers: readonly DisplayLayer[];
-  times: string[];
+  times: readonly string[];
   result: PipelineResult;
   layoutOrder?: string[];
   colorOverrides?: Readonly<Record<string, string>>;
@@ -122,291 +112,145 @@ export function visibleTimeIndices(length: number, start: number, end: number): 
   return Array.from({ length: last - first + 1 }, (_, offset) => first + offset);
 }
 
-export function renderChart(svg: SVGSVGElement, input: RenderInput): void {
-  if (input.visMethod !== "braided" && input.visMethod !== "streamgraph") {
-    throw new Error("visMethod must be braided or streamgraph");
+type ChartCoordinates = ReturnType<typeof chartCoordinates>;
+type RenderCache = {
+  key: unknown[];
+  coords: ChartCoordinates;
+  geometry: InterpolatedBraidedGeometry;
+  paths: Map<string, string>;
+  axes?: boolean;
+};
+const renderCaches = new WeakMap<SVGSVGElement, RenderCache>();
+
+function layerColorScale(input: Pick<RenderInput, "layers" | "colorOverrides" | "palette">) {
+  const paletteId = input.palette ?? "reference";
+  const palette = LAYER_PALETTES[paletteId];
+  const ids = input.layers.filter(layer => paletteId !== "reference" || !layer.color).map(layer => layer.id).sort();
+  const colors = new Map(ids.map((id, i) => [id, palette[i % palette.length]]));
+  for (const layer of input.layers) {
+    if (paletteId === "reference" && layer.color) colors.set(layer.id, layer.color);
+    if (input.colorOverrides && Object.hasOwn(input.colorOverrides, layer.id) && input.colorOverrides[layer.id]) colors.set(layer.id, input.colorOverrides[layer.id]);
   }
+  return (id: string) => colors.get(id) ?? palette[0];
+}
+
+export function renderChart(svg: SVGSVGElement, input: RenderInput): ChartCoordinates {
+  if (input.visMethod !== "braided" && input.visMethod !== "streamgraph") throw new Error("visMethod must be braided or streamgraph");
   const { width: W, height: H, margin: M } = dimensions(input);
   const IW = W - M.left - M.right;
-  const { indices, xValues, x, y, firstTime, lastTime } = chartCoordinates(input);
   const braided = input.visMethod === "braided";
-  const prefix = svgId(svg);
-  const interpolated = interpolateBraidedGeometry(
-    input.result.braided, xValues, firstTime, lastTime,
-    input.smoothContours ? 32 : 1, input.smoothContours,
-  );
+  const envelopeOnly = !braided && !input.showRepresentativeStroke;
+  const key = [input.result, input.times, input.start, input.end, input.smoothContours, envelopeOnly, W, H, M.top, M.right, M.bottom, M.left];
+  let cached = renderCaches.get(svg);
+  if (!cached || key.some((value, i) => value !== cached!.key[i])) {
+    const coords = chartCoordinates(input);
+    const { xValues, x, firstTime, lastTime } = coords;
+    const geometry = interpolateBraidedGeometry(input.result.braided, xValues, firstTime, lastTime,
+      input.smoothContours ? time => Math.max(1, Math.min(32, Math.ceil(Math.abs(x(xValues[time + 1]) - x(xValues[time])) / 2))) : 1,
+      input.smoothContours, envelopeOnly);
+    cached = { key, coords, geometry, paths: new Map() };
+    renderCaches.set(svg, cached);
+  }
+  const cache = cached;
+  const { indices, xValues, x, y, firstTime, lastTime } = cache.coords;
+  const interpolated = cache.geometry;
   const renderIndices = interpolated.x.map((_, index) => index);
-  const makeBraidedArea = (band: RenderBand, defined: boolean[]) =>
-    interpolated.segments.map(([start, end]) => area<number>()
-      .defined((index) => defined[index])
-      .curve(curveLinear)
-      .x((index) => x(interpolated.x[index]))
-      .y0((index) => y(band.y0[index]))
-      .y1((index) => y(band.y1[index]))(renderIndices.slice(start, end)) ?? "").join("");
-  const makeBraidedLine = (values: number[], defined: boolean[]) =>
-    interpolated.segments.map(([start, end]) => line<number>()
-      .defined((index) => defined[index] && Number.isFinite(values[index]))
-      .curve(curveLinear)
-      .x((index) => x(interpolated.x[index]))
-      .y((index) => y(values[index]))(renderIndices.slice(start, end)) ?? "").join("");
+  const path = (id: string, build: () => string) => {
+    let value = cache.paths.get(id);
+    if (value === undefined) { value = build(); cache.paths.set(id, value); }
+    return value;
+  };
+  const bandPath = (id: string, band: RenderBand, defined: boolean[]) => path(id, () => interpolated.segments.map(([start, end]) => area<number>()
+    .defined(index => defined[index]).curve(curveLinear)
+    .x(index => x(interpolated.x[index])).y0(index => y(band.y0[index])).y1(index => y(band.y1[index]))(renderIndices.slice(start, end)) ?? "").join(""));
+  const linePath = (id: string, values: number[], defined: boolean[]) => path(id, () => interpolated.segments.map(([start, end]) => line<number>()
+    .defined(index => defined[index] && Number.isFinite(values[index])).curve(curveLinear)
+    .x(index => x(interpolated.x[index])).y(index => y(values[index]))(renderIndices.slice(start, end)) ?? "").join(""));
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("width", "100%");
-  const root = select(svg);
-  root.classed("braided-stream", true);
-  root.selectAll("*").remove();
-  const densityEnabled = braided && input.showDensityGradient &&
-    Boolean(input.result.densityProfiles);
-  const definitions = densityEnabled ? root.append("defs") : null;
-  const ticks = 5;
-  if (input.showYAxis) {
-    root
-      .append("g")
-      .attr("class", "grid")
-      .attr("transform", `translate(${M.left},0)`)
-      .call(
-        axisLeft(y)
-          .ticks(ticks)
-          .tickSize(-IW)
-          .tickFormat(() => ""),
-      )
-      .select(".domain")
-      .remove();
+  const root = select(svg).classed("braided-stream", true);
+  const axes = root.selectAll<SVGGElement, null>("g.chart-axes").data([null]).join("g").attr("class", "chart-axes");
+  if (cache.axes !== input.showYAxis) {
+    cache.axes = input.showYAxis;
+    axes.selectAll("*").remove();
+    if (input.showYAxis) axes.append("g").attr("class", "grid").attr("transform", `translate(${M.left},0)`)
+      .call(axisLeft(y).ticks(5).tickSize(-IW).tickFormat(() => "")).select(".domain").remove();
+    const xTicks: number[] = [];
+    const step = Math.max(1, Math.ceil(indices.length / 10));
+    for (let t = firstTime; t <= lastTime; t += step) xTicks.push(t);
+    if (xTicks.at(-1) !== lastTime) xTicks.push(lastTime);
+    const labels = new Map(xTicks.map(t => [xValues[t], tickLabel(input.times[t] ?? "")]));
+    axes.append("g").attr("class", "axis").attr("transform", `translate(0,${H - M.bottom})`)
+      .call(axisBottom(x).tickValues(xTicks.map(t => xValues[t])).tickFormat(value => labels.get(Number(value)) ?? ""));
+    if (input.showYAxis) {
+      axes.append("g").attr("class", "axis axis-y").attr("transform", `translate(${M.left},0)`)
+        .call(axisLeft(y).ticks(5).tickFormat(() => ""));
+      const maxThickness = Math.max(...input.result.base.yTop.flatMap((row, i) => row.map((top, t) => top - input.result.base.yBottom[i][t])));
+      const rulerValue = niceRuler(maxThickness);
+      const rulerPixels = Math.abs(y(rulerValue) - y(0));
+      const rulerX = W - M.right - 8;
+      const rulerBottom = H - M.bottom - 12;
+      axes.append("line").attr("x1", rulerX).attr("x2", rulerX).attr("y1", rulerBottom).attr("y2", rulerBottom - rulerPixels)
+        .attr("stroke", "var(--muted, #6b7280)").attr("stroke-width", 2);
+      axes.append("text").attr("x", rulerX - 6).attr("y", rulerBottom - rulerPixels / 2).attr("text-anchor", "end")
+        .attr("dominant-baseline", "middle").attr("class", "axis-label").text(`${fmtNum(rulerValue)} thickness units`);
+      axes.append("text").attr("x", W - M.right).attr("y", M.top + 12).attr("text-anchor", "end").attr("class", "axis-label").text("high-value side ↑");
+    }
   }
-  const xTicks: number[] = [];
-  const step = Math.max(1, Math.ceil(indices.length / 10));
-  for (let t = firstTime; t <= lastTime; t += step) xTicks.push(t);
-  if (xTicks.at(-1) !== lastTime) xTicks.push(lastTime);
-  const xAxis = root
-    .append("g")
-    .attr("class", "axis")
-    .attr("transform", `translate(0,${H - M.bottom})`);
-  const coordinateTicks = xTicks.map((t) => xValues[t]);
-  xAxis.call(
-    axisBottom(x)
-      .tickValues(coordinateTicks)
-      .tickFormat((value) => {
-        const index = xValues.reduce((best, coordinate, candidate) =>
-          Math.abs(coordinate - Number(value)) < Math.abs(xValues[best] - Number(value)) ? candidate : best,
-        firstTime);
-        return tickLabel(input.times[index] ?? "");
-      }),
-  );
-  if (input.showYAxis) {
-    root
-      .append("g")
-      .attr("class", "axis axis-y")
-      .attr("transform", `translate(${M.left},0)`)
-      .call(
-        axisLeft(y)
-          .ticks(ticks)
-          .tickFormat(() => ""),
-      );
-  }
-  if (input.showYAxis) {
-    const maxThickness = Math.max(...input.result.base.yTop.flatMap((row, i) =>
-      row.map((top, t) => top - input.result.base.yBottom[i][t])
-    ));
-    const rulerValue = niceRuler(maxThickness);
-    const rulerPixels = Math.abs(y(rulerValue) - y(0));
-    const rulerX = W - M.right - 8;
-    const rulerBottom = H - M.bottom - 12;
-    root.append("line")
-      .attr("x1", rulerX).attr("x2", rulerX)
-      .attr("y1", rulerBottom).attr("y2", rulerBottom - rulerPixels)
-      .attr("stroke", "var(--muted, #6b7280)").attr("stroke-width", 2);
-    root.append("text")
-      .attr("x", rulerX - 6).attr("y", rulerBottom - rulerPixels / 2)
-      .attr("text-anchor", "end").attr("dominant-baseline", "middle")
-      .attr("class", "axis-label")
-      .text(`${fmtNum(rulerValue)} thickness units`);
-    root.append("text")
-      .attr("x", W - M.right).attr("y", M.top + 12)
-      .attr("text-anchor", "end").attr("class", "axis-label")
-      .text("high-value side ↑");
-  }
-  const layers = root.append("g").attr("class", "layers");
+  type Mark = { key: string; tag: "path" | "line"; attrs: Record<string, string | number> };
+  const marks: Mark[] = [];
+  const color = layerColorScale(input);
+  const sampleByX = new Map<number, number>();
+  if (input.showTimeCell && braided) interpolated.x.forEach((value, index) => { if (!sampleByX.has(value)) sampleByX.set(value, index); });
   for (const [i, geometry] of input.result.braided.layers.entries()) {
     const visual = interpolated.layers[i];
-    const layerColor = colorForLayer(
-      input.layers,
-      geometry.layerId,
-      input.colorOverrides,
-      input.palette,
-    );
-    const dim =
-      input.highlightLayer && geometry.layerId !== input.highlightLayer
-        ? " dim"
-        : "";
-    layers
-      .append("path")
-      .attr("d", makeBraidedArea(visual.envelope, visual.defined))
-      .attr("class", "envelope-hit")
-      .attr("fill", "transparent")
-      .attr("stroke", "none")
-      .attr("pointer-events", "all")
-      .attr("data-owner-layer", geometry.layerId);
-    const branchAreas = !braided
-      ? [makeBraidedArea(visual.envelope, visual.defined)]
-      : visual.branches.map((branch) =>
-          renderIndices.some((sample) => branch.y1[sample] > branch.y0[sample])
-            ? makeBraidedArea(branch, visual.defined)
-            : "",
-        );
-    layers
-      .append("path")
-      .attr("d", branchAreas.join(""))
-      .attr("class", `layer ${braided ? "branch" : "streamgraph"}${dim}`)
-      .attr("data-visual-layer", geometry.layerId)
-      .attr("fill", densityEnabled ? densityColor(layerColor, 0) : layerColor)
-      .attr("fill-opacity", densityEnabled ? 1 : 0.82)
-      .attr("stroke", "none")
-      .attr("data-id", geometry.layerId)
-      .attr("data-owner-layer", geometry.layerId);
-    if (densityEnabled) {
-      const clipId = `${prefix}-density-clip-${i}`;
-      definitions!
-        .append("clipPath")
-        .attr("id", clipId)
-        .append("path")
-        .attr("d", branchAreas.join(""));
-      const densityGroup = layers
-        .append("g")
-        .attr("class", `density-bands${dim}`)
-        .attr("data-visual-layer", geometry.layerId)
-        .attr("clip-path", `url(#${clipId})`)
-        .attr("pointer-events", "none");
-      const profiles = input.result.densityProfiles?.[i] ?? [];
-      const bins = profiles.find((profile) => profile !== null)?.length ?? 0;
-      for (let bin = 0; bin < bins; bin += 1) {
-        const gradientId = `${prefix}-density-gradient-${i}-${bin}`;
-        const gradient = definitions!
-          .append("linearGradient")
-          .attr("id", gradientId)
-          .attr("gradientUnits", "userSpaceOnUse")
-          .attr("x1", x(xValues[firstTime]))
-          .attr("x2", x(xValues[lastTime]));
-        for (const time of indices) {
-          gradient
-            .append("stop")
-            .attr("offset", `${100 * (x(xValues[time]) - M.left) / IW}%`)
-            .attr("stop-color", densityColor(layerColor, profiles[time]?.[bin] ?? 0));
-        }
-        densityGroup
-          .append("path")
-          .attr("d", makeBraidedArea(
-            densityQuantileBand(visual.branches, bin / bins, (bin + 1) / bins),
-            visual.defined,
-          ))
-          .attr("fill", `url(#${gradientId})`)
-          .attr("fill-opacity", 1)
-          .attr("stroke", "none");
-      }
-    }
-    if (braided) {
-      const tint = lighterFamilyColor(layerColor);
-      for (const [spaceIndex, space] of geometry.spaces.entries()) {
-        const visualSpace = visual.spaces[spaceIndex];
-        layers
-          .append("path")
-          .attr("d", makeBraidedArea(visualSpace, visual.defined))
-          .attr("class", `allocated-space${dim}`)
-          .attr("data-visual-layer", geometry.layerId)
-          .attr("fill", tint)
-          .attr("fill-opacity", 0.68)
-          .attr("stroke", "none")
-          .attr("pointer-events", "none");
-        layers
-          .append("path")
-          .attr("d", makeBraidedArea(visualSpace, visual.defined))
-          .attr("class", "space-hit")
-          .attr("fill", "transparent")
-          .attr("stroke", "none")
-          .attr("pointer-events", "all")
-          .attr("data-owner-layer", space.ownerLayerId)
-          .attr("data-space-kind", space.kind)
-          .attr("data-gap-index", space.gapIndex);
-      }
-    }
-    if (input.showEnvelopeStroke) {
-      for (const boundary of [visual.envelope.y0, visual.envelope.y1]) {
-        layers
-          .append("path")
-          .attr("d", makeBraidedLine(boundary, visual.defined))
-          .attr("class", `envelope-stroke${dim}`)
-          .attr("data-visual-layer", geometry.layerId)
-          .attr("fill", "none")
-          .attr("stroke", "var(--muted, #6b7280)")
-          .attr("stroke-width", 0.9)
-          .attr("vector-effect", "non-scaling-stroke")
-          .attr("pointer-events", "none")
-          .attr("data-owner-layer", geometry.layerId);
-      }
-    }
-    if (input.showBranchStroke && braided) {
-      for (const branch of visual.branches) {
-        const defined = visual.defined.map((value, sample) =>
-          value && branch.y1[sample] > branch.y0[sample]
-        );
-        if (!defined.some(Boolean)) continue;
-        for (const boundary of [branch.y0, branch.y1]) {
-          layers
-            .append("path")
-            .attr("d", makeBraidedLine(boundary, defined))
-            .attr("class", `branch-stroke${dim}`)
-            .attr("data-visual-layer", geometry.layerId)
-            .attr("fill", "none")
-            .attr("stroke", densityColor(layerColor, 1))
-            .attr("stroke-width", 0.75)
-            .attr("stroke-opacity", 0.82)
-            .attr("vector-effect", "non-scaling-stroke")
-            .attr("pointer-events", "none");
-        }
-      }
-    }
+    const layerColor = color(geometry.layerId);
+    const dim = input.highlightLayer && geometry.layerId !== input.highlightLayer ? " dim" : "";
+    const add = (key: string, className: string, attrs: Mark["attrs"], tag: Mark["tag"] = "path") => marks.push({ key: `${i}:${key}`, tag, attrs: { class: className, ...attrs } });
+    const envelope = () => bandPath(`${i}:envelope`, visual.envelope, visual.defined);
+    add("hit", "envelope-hit", { d: envelope(), fill: "transparent", stroke: "none", "pointer-events": "all", "data-owner-layer": geometry.layerId });
+    const branchArea = braided ? path(`${i}:branches`, () => visual.branches.map((band, b) => band.y1.some((value, s) => value > band.y0[s]) ? bandPath(`${i}:branch:${b}`, band, visual.defined) : "").join("")) : envelope();
+    add("fill", `layer ${braided ? "branch" : "streamgraph"}${dim}`, { d: branchArea, fill: layerColor, "fill-opacity": .82, stroke: "none", "data-id": geometry.layerId, "data-owner-layer": geometry.layerId, "data-visual-layer": geometry.layerId });
+    if (braided) geometry.spaces.forEach((space, s) => {
+      const d = bandPath(`${i}:space:${s}`, visual.spaces[s], visual.defined);
+      add(`space:${s}`, `allocated-space${dim}`, { d, fill: lighterFamilyColor(layerColor), "fill-opacity": .68, stroke: "none", "pointer-events": "none", "data-visual-layer": geometry.layerId });
+      add(`space-hit:${s}`, "space-hit", { d, fill: "transparent", stroke: "none", "pointer-events": "all", "data-owner-layer": space.ownerLayerId, "data-space-kind": space.kind, "data-gap-index": space.gapIndex });
+    });
+    const stroke = (key: string, className: string, d: string, color: string, width: number, extra: Mark["attrs"] = {}) =>
+      add(key, `${className}${dim}`, { d, fill: "none", stroke: color, "stroke-width": width, "vector-effect": "non-scaling-stroke", "pointer-events": "none", "data-visual-layer": geometry.layerId, ...extra });
+    if (input.showEnvelopeStroke) [visual.envelope.y0, visual.envelope.y1].forEach((values, side) =>
+      stroke(`outline:${side}`, "envelope-stroke", linePath(`${i}:outline:${side}`, values, visual.defined), "var(--muted, #6b7280)", .9, { "data-owner-layer": geometry.layerId }));
+    if (input.showBranchStroke && braided) visual.branches.forEach((branch, b) => {
+      const defined = visual.defined.map((value, s) => value && branch.y1[s] > branch.y0[s]);
+      if (!defined.some(Boolean)) return;
+      [branch.y0, branch.y1].forEach((values, side) => stroke(`branch-line:${b}:${side}`, "branch-stroke", linePath(`${i}:branch-line:${b}:${side}`, values, defined), hsl(layerColor).darker(1.6).formatHex(), .75, { "stroke-opacity": .82 }));
+    });
     if (input.showRepresentativeStroke) {
       const boundaries = representativeBoundaries(visual.branches);
-      for (const boundary of [boundaries.lower, boundaries.upper]) {
-        layers
-          .append("path")
-          .attr("d", makeBraidedLine(boundary, visual.defined))
-          .attr("class", `representative-stroke${dim}`)
-          .attr("data-visual-layer", geometry.layerId)
-          .attr("fill", "none")
-          .attr("stroke", "var(--ink, #1a1a1a)")
-          .attr("stroke-width", 0.9)
-          .attr("vector-effect", "non-scaling-stroke")
-          .attr("pointer-events", "none");
-      }
+      [boundaries.lower, boundaries.upper].forEach((values, side) => stroke(`representative:${side}`, "representative-stroke", linePath(`${i}:representative:${side}`, values, visual.defined), "var(--ink, #1a1a1a)", .9));
     }
-    if (input.showTimeCell && braided) {
-      for (const time of indices) {
-        const sample = interpolated.x.findIndex((value) => value === xValues[time]);
-        if (sample < 0 || !visual.defined[sample]) continue;
-        layers
-          .append("line")
-          .attr("class", `time-cell${dim}`)
-          .attr("data-visual-layer", geometry.layerId)
-          .attr("x1", x(xValues[time])).attr("x2", x(xValues[time]))
-          .attr("y1", y(visual.envelope.y0[sample])).attr("y2", y(visual.envelope.y1[sample]))
-          .attr("stroke", "var(--ink, #1a1a1a)")
-          .attr("stroke-width", 0.7)
-          .attr("stroke-opacity", 0.55)
-          .attr("vector-effect", "non-scaling-stroke")
-          .attr("pointer-events", "none");
-      }
+    if (input.showTimeCell && braided) for (const time of indices) {
+      const sample = sampleByX.get(xValues[time]);
+      if (sample === undefined || !visual.defined[sample]) continue;
+      add(`time:${time}`, `time-cell${dim}`, { x1: x(xValues[time]), x2: x(xValues[time]), y1: y(visual.envelope.y0[sample]), y2: y(visual.envelope.y1[sample]), stroke: "var(--ink, #1a1a1a)", "stroke-width": .7, "stroke-opacity": .55, "vector-effect": "non-scaling-stroke", "pointer-events": "none", "data-visual-layer": geometry.layerId }, "line");
     }
   }
-  if (input.hover !== null)
-    svg.appendChild(
-      el(svg.ownerDocument, "line", {
-        class: "hover-line",
-        x1: x(xValues[input.hover]),
-        x2: x(xValues[input.hover]),
-        y1: M.top,
-        y2: H - M.bottom,
-      }),
-    );
+  const layers = root.selectAll<SVGGElement, null>("g.layers").data([null]).join("g").attr("class", "layers");
+  layers.selectAll<SVGElement, Mark>(".chart-mark").data(marks, mark => mark.key).join(
+    enter => enter.append(mark => svg.ownerDocument.createElementNS(NS, mark.tag)),
+    update => update,
+    exit => exit.remove(),
+  ).each(function(mark) {
+    const attrs = { ...mark.attrs, class: `${mark.attrs.class} chart-mark` };
+    for (const attr of this.getAttributeNames()) if (!(attr in attrs)) this.removeAttribute(attr);
+    for (const [name, value] of Object.entries(attrs)) if (this.getAttribute(name) !== String(value)) this.setAttribute(name, String(value));
+  });
+  root.selectAll<SVGLineElement, number>(".hover-line").data(input.hover === null ? [] : [input.hover]).join("line")
+    .attr("class", "hover-line").attr("pointer-events", "none")
+    .attr("x1", t => x(xValues[t])).attr("x2", t => x(xValues[t])).attr("y1", M.top).attr("y2", H - M.bottom);
+  return cache.coords;
 }
+
 
 /** Full-range streamgraph overview with a D3 brush that selects the visible time window. */
 export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): () => void {
@@ -432,13 +276,18 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): ()
       })
     : input.layers;
   const overview = input.result.base;
-  const values = [...overview.yBottom.flat(), ...overview.yTop.flat()];
-  const pad = (Math.max(...values) - Math.min(...values)) * 0.08 || 1;
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const rows of [overview.yBottom, overview.yTop]) for (const row of rows) for (const value of row) {
+    minimum = Math.min(minimum, value); maximum = Math.max(maximum, value);
+  }
+  const pad = (maximum - minimum) * 0.08 || 1;
   const x = scaleLinear().domain([0, tLen - 1]).range([M.left, W - M.right]);
   const y = scaleLinear()
-    .domain([Math.min(...values) - pad, Math.max(...values) + pad])
+    .domain([minimum - pad, maximum + pad])
     .range([58, 12]);
   const indices = Array.from({ length: tLen }, (_, t) => t);
+  const color = layerColorScale({ ...input, layers: orderedLayers });
 
   root
     .append("rect")
@@ -462,7 +311,7 @@ export function renderTimeFilter(svg: SVGSVGElement, input: TimeFilterInput): ()
       )
       .attr(
         "fill",
-        colorForLayer(orderedLayers, orderedLayers[i].id, input.colorOverrides, input.palette),
+        color(orderedLayers[i].id),
       )
       .attr("fill-opacity", 0.76);
   }
@@ -584,13 +433,14 @@ export function interpolateBraidedGeometry(
   xValues: number[],
   start: number,
   end: number,
-  subdivisions = 8,
+  subdivisions: number | ((left: number) => number) = 8,
   smooth = true,
+  envelopeOnly = false,
 ): InterpolatedBraidedGeometry {
-  const steps = Math.max(1, Math.floor(subdivisions));
   const samples: Array<{ x: number; left: number; right: number; fraction: number }> = [];
   const segments: Array<[number, number]> = [];
   for (let time = start; time < end; time += 1) {
+    const steps = Math.max(1, Math.floor(typeof subdivisions === "number" ? subdivisions : subdivisions(time)));
     const segmentStart = samples.length;
     for (let step = 0; step <= steps; step += 1) {
       const fraction = step / steps;
@@ -609,7 +459,7 @@ export function interpolateBraidedGeometry(
   }
 
   const baseline = seriesInterpolator(xValues, layout.layers[0].slotY0, smooth);
-  const aligned = layout.layers.map((layer) => {
+  const aligned = envelopeOnly ? [] : layout.layers.map((layer) => {
     const endpoint = (time: number): GapEndpoint => {
       const count = Math.max(1, layer.branchCount[time]);
       return {
@@ -618,22 +468,22 @@ export function interpolateBraidedGeometry(
           .map((band) => Math.max(0, band.y1[time] - band.y0[time])),
       };
     };
+    const endpoints = Array.from({ length: end - start + 1 }, (_, index) => endpoint(start + index));
     return Array.from({ length: Math.max(1, end - start) }, (_, index) =>
-      alignGapEndpoints(endpoint(start + index), endpoint(Math.min(end, start + index + 1)))
+      alignGapEndpoints(endpoints[index], endpoints[Math.min(end - start, index + 1)])
     );
   });
   const layers = layout.layers.map((layer) => ({
     defined: new Array<boolean>(samples.length),
     envelope: { y0: new Array<number>(samples.length), y1: new Array<number>(samples.length) },
-    branches: layer.branches.map(() => ({ y0: new Array<number>(samples.length), y1: new Array<number>(samples.length) })),
-    spaces: layer.spaces.map(() => ({ y0: new Array<number>(samples.length), y1: new Array<number>(samples.length) })),
+    branches: envelopeOnly ? [] : layer.branches.map(() => ({ y0: new Array<number>(samples.length), y1: new Array<number>(samples.length) })),
+    spaces: envelopeOnly ? [] : layer.spaces.map(() => ({ y0: new Array<number>(samples.length), y1: new Array<number>(samples.length) })),
   }));
 
   samples.forEach((sample, sampleIndex) => {
-    let slotBottom = baseline(sample.x);
+    let slotBottom = baseline(sample.x, sample.left);
     layout.layers.forEach((layer, layerIndex) => {
       const output = layers[layerIndex];
-      const [left, right] = aligned[layerIndex][sample.left - start];
       const s = sample.fraction;
       const weight = smooth ? s * s * (3 - 2 * s) : s;
       const blend = (a: number, b: number) => (1 - weight) * a + weight * b;
@@ -642,6 +492,12 @@ export function interpolateBraidedGeometry(
         : sample.fraction === 1 ? !layer.missing[sample.right]
         : !layer.missing[sample.left] && !layer.missing[sample.right];
       output.envelope.y0[sampleIndex] = slotBottom;
+      if (envelopeOnly) {
+        slotBottom += blend(layer.slotY1[sample.left] - layer.slotY0[sample.left], layer.slotY1[sample.right] - layer.slotY0[sample.right]);
+        output.envelope.y1[sampleIndex] = slotBottom;
+        return;
+      }
+      const [left, right] = aligned[layerIndex][sample.left - start];
       let cursor = slotBottom;
       const lower = blend(left.gaps[0], right.gaps[0]);
       output.spaces[0].y0[sampleIndex] = cursor;
@@ -672,18 +528,6 @@ export function interpolateBraidedGeometry(
   return { x: samples.map((sample) => sample.x), segments, layers };
 }
 
-function densityQuantileBand(
-  branches: RenderBand[],
-  lower: number,
-  upper: number,
-): RenderBand {
-  const length = branches[0]?.y0.length ?? 0;
-  return {
-    y0: Array.from({ length }, (_, sample) => solidQuantileY(branches, sample, lower, false)),
-    y1: Array.from({ length }, (_, sample) => solidQuantileY(branches, sample, upper, true)),
-  };
-}
-
 function representativeBoundaries(branches: RenderBand[]): { lower: number[]; upper: number[] } {
   const length = branches[0]?.y0.length ?? 0;
   const boundaryAt = (sample: number, upper: boolean): number => {
@@ -701,32 +545,6 @@ function representativeBoundaries(branches: RenderBand[]): { lower: number[]; up
     lower: Array.from({ length }, (_, sample) => boundaryAt(sample, false)),
     upper: Array.from({ length }, (_, sample) => boundaryAt(sample, true)),
   };
-}
-
-/** Map a cumulative probability position onto packed branch thickness, skipping allocated gaps. */
-function solidQuantileY(
-  branches: RenderBand[],
-  sample: number,
-  probability: number,
-  upperEdge: boolean,
-): number {
-  const heights = branches.map((branch) => Math.max(0, branch.y1[sample] - branch.y0[sample]));
-  const total = heights.reduce((sum, height) => sum + height, 0);
-  if (!(total > 0)) return branches[0]?.y0[sample] ?? 0;
-  const target = Math.max(0, Math.min(1, probability)) * total;
-  let cumulative = 0;
-  for (let index = 0; index < branches.length; index += 1) {
-    const height = heights[index];
-    const end = cumulative + height;
-    if (height > 0 && (target < end || (upperEdge && target <= end))) {
-      return branches[index].y0[sample] + target - cumulative;
-    }
-    cumulative = end;
-  }
-  for (let index = branches.length - 1; index >= 0; index -= 1) {
-    if (heights[index] > 0) return branches[index].y1[sample];
-  }
-  return branches[0]?.y0[sample] ?? 0;
 }
 
 function tickLabel(label: string): string {
@@ -755,18 +573,7 @@ export function lighterFamilyColor(input: string): string {
   return tint.formatHex();
 }
 
-function densityColor(input: string, level: number): string {
-  const normalized = Math.max(0, Math.min(1, level));
-  const light = hsl(input);
-  light.s *= 0.45;
-  light.l = 0.95;
-  const dark = hsl(input);
-  dark.s = Math.min(1, dark.s * 1.12);
-  dark.l = Math.max(0.16, dark.l * 0.55);
-  return interpolateLab(light.formatHex(), dark.formatHex())(normalized ** 0.65);
-}
-
-function seriesInterpolator(x: number[], y: number[], smooth: boolean): (value: number) => number {
+function seriesInterpolator(x: number[], y: number[], smooth: boolean): (value: number, interval: number) => number {
   if (x.length !== y.length || !x.length) throw new Error("invalid interpolation series");
   if (x.length === 1) return () => y[0];
   const widths = x.slice(0, -1).map((value, index) => x[index + 1] - value);
@@ -784,9 +591,8 @@ function seriesInterpolator(x: number[], y: number[], smooth: boolean): (value: 
         (leftWeight / slopes[index - 1] + rightWeight / slopes[index]);
     }
   }
-  return (value) => {
-    let left = Math.max(0, Math.min(x.length - 2, x.findIndex((next) => next > value) - 1));
-    if (value >= x.at(-1)!) left = x.length - 2;
+  return (value, interval) => {
+    const left = Math.max(0, Math.min(x.length - 2, interval));
     const fraction = (value - x[left]) / widths[left];
     if (!smooth) return y[left] + fraction * (y[left + 1] - y[left]);
     const f2 = fraction * fraction;
@@ -798,13 +604,6 @@ function seriesInterpolator(x: number[], y: number[], smooth: boolean): (value: 
     return Math.max(Math.min(y[left], y[left + 1]), Math.min(Math.max(y[left], y[left + 1]), valueAt));
   };
 }
-function el(document: Document, tag: string, attrs: Record<string, string | number>): SVGElement {
-  const node = document.createElementNS(NS, tag);
-  for (const [key, value] of Object.entries(attrs))
-    node.setAttribute(key, String(value));
-  return node;
-}
-
 /** Shared visible-window coordinates for drawing and hit testing. */
 export function chartCoordinates(input: RenderInput) {
   const { width: W, height: H, margin: M } = dimensions(input);
@@ -812,13 +611,14 @@ export function chartCoordinates(input: RenderInput) {
   const bottom = input.result.braided.layers.map((layer) => layer.slotY0);
   const top = input.result.braided.layers.map((layer) => layer.slotY1);
   const indices = visibleTimeIndices(tLen, input.start, input.end);
-  const values = [
-    ...bottom.flatMap((layer) => indices.map((time) => layer[time])),
-    ...top.flatMap((layer) => indices.map((time) => layer[time])),
-  ];
-  const pad = (Math.max(...values) - Math.min(...values)) * 0.06 || 1;
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const rows of [bottom, top]) for (const row of rows) for (const time of indices) {
+    minimum = Math.min(minimum, row[time]); maximum = Math.max(maximum, row[time]);
+  }
+  const pad = (maximum - minimum) * 0.06 || 1;
   const y = scaleLinear()
-    .domain([Math.min(...values) - pad, Math.max(...values) + pad])
+    .domain([minimum - pad, maximum + pad])
     .range([H - M.bottom, M.top]);
   const firstTime = indices[0];
   const lastTime = indices.at(-1)!;

@@ -1,6 +1,6 @@
 /** Probability-measure analysis and layer geometry. */
 import type { InputLayer, MeasureComponent, ProbabilityMeasure } from "../input.js";
-import { measureDeviations, measureMoments, measureQuantile } from "./measure.js";
+import { measureDeviations, measureMoments, measureQuantiles } from "./measure.js";
 import type {
   BaseLayout,
   BraidedLayerGeometry,
@@ -69,16 +69,21 @@ export type DynamicSpaceRequests = {
 /** Exact quantile summary of the declared, unsmoothed probability measure. */
 export function getBraidedQuantiles(measure: ProbabilityMeasure | null): BraidedQuantiles {
   if (!measure) return zeroQuantiles();
+  const [qLow, q10, q25, q50, q75, q90, qHigh] = measureQuantiles(measure, [0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.975]);
+  return { qLow, q10, q25, q50, q75, q90, qHigh };
+}
+
+export function prepareDistribution(measure: ProbabilityMeasure) {
+  const quantiles = getBraidedQuantiles(measure);
   return {
-    qLow: measureQuantile(measure, 0.025),
-    q10: measureQuantile(measure, 0.1),
-    q25: measureQuantile(measure, 0.25),
-    q50: measureQuantile(measure, 0.5),
-    q75: measureQuantile(measure, 0.75),
-    q90: measureQuantile(measure, 0.9),
-    qHigh: measureQuantile(measure, 0.975),
+    quantiles,
+    ...measureDeviations(measure, quantiles.q50),
+    ...measureMoments(measure),
+    minimum: Math.min(...measure.components.map(part => part.kind === "atom" ? part.value : part.low)),
+    maximum: Math.max(...measure.components.map(part => part.kind === "atom" ? part.value : part.high)),
   };
 }
+type RawDistributionStatistics = ReturnType<typeof prepareDistribution>;
 
 /** Analyze the one public atom/uniform probability-measure representation. */
 export function analyzeDistribution(
@@ -92,21 +97,20 @@ export function analyzeDistribution(
 export function buildAnalysisDistribution(
   measure: ProbabilityMeasure | null,
   bandwidthRatio: number,
+  prepared?: RawDistributionStatistics,
 ): AnalysisDistribution | null {
   if (!measure) return null;
   if (!Number.isFinite(bandwidthRatio) || bandwidthRatio <= 0) {
     throw new Error("bandwidthRatio beta must be finite and positive");
   }
   const parts = measure.components;
-  const representative = measureQuantile(measure, 0.5);
-  const { deviationLow, deviationHigh } = measureDeviations(measure, representative);
+  const raw = prepared ?? prepareDistribution(measure);
+  const representative = raw.quantiles.q50;
+  const { deviationLow, deviationHigh, mean, variance, minimum, maximum } = raw;
   const dispersion = deviationLow + deviationHigh;
   const balance = dispersion > 0
     ? (deviationHigh - deviationLow) / dispersion
     : 0;
-  const { mean, variance } = measureMoments(measure);
-  const minimum = Math.min(...parts.map((part) => part.kind === "atom" ? part.value : part.low));
-  const maximum = Math.max(...parts.map((part) => part.kind === "atom" ? part.value : part.high));
   if (variance === 0) {
     const summary = {
       representative,
@@ -217,42 +221,17 @@ export function analysisOverlap(a: AnalysisDistribution, b: AnalysisDistribution
 export function computeAnalysisTopology(
   layers: readonly InputLayer[],
   bandwidthRatio: number,
+  prepared?: Array<Array<RawDistributionStatistics | null>>,
 ): AnalysisTopology {
-  return layers.map((layer) =>
-    layer.measures.map((measure) =>
-      buildAnalysisDistribution(measure, bandwidthRatio)
+  return layers.map((layer, i) =>
+    layer.measures.map((measure, t) =>
+      buildAnalysisDistribution(measure, bandwidthRatio, prepared?.[i][t] ?? undefined)
     )
   );
 }
 
 export function branchTopologyFromAnalysis(analysis: AnalysisTopology): BranchTopology {
   return analysis.map((layer) => layer.map((cell) => cell?.summary ?? null));
-}
-
-/** Sample true KDE density at equal-probability bins; one scale is shared across time per layer. */
-export function densityProfilesFromAnalysis(
-  analysis: AnalysisTopology,
-  bins: number,
-): Array<Array<number[] | null>> {
-  if (!Number.isInteger(bins) || bins < 2) {
-    throw new Error("density profile bins must be an integer >= 2");
-  }
-  return analysis.map((layer) => {
-    const raw = layer.map((cell) => {
-      if (!cell) return null;
-      if (cell.pointMass !== null) return new Array<number>(bins).fill(Number.NaN);
-      return Array.from({ length: bins }, (_, bin) => {
-        const probability = (bin + 0.5) / bins;
-        return cell.density(cell.quantile(probability));
-      });
-    });
-    const maximum = Math.max(0, ...raw.flatMap((profile) =>
-      profile?.filter(Number.isFinite) ?? []
-    ));
-    return raw.map((profile) => profile?.map((value) =>
-      Number.isNaN(value) ? 1 : maximum > 0 ? clamp(value / maximum, 0, 1) : 0
-    ) ?? null);
-  });
 }
 
 /** Allocate D=U once across A_-, d_1,...,d_(K-1), A_+. */

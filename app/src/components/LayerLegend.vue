@@ -11,7 +11,6 @@ const ids = computed(() => {
   const { result, sort } = props.model;
   return !result ? [] : sort === "tpid" ? result.pid.ranking : result.layoutOrder;
 });
-const densityNote = computed(() => props.model.visMethod === "braided" && props.model.showDensityGradient);
 function color(id: string) { return colorForLayer(props.model.data?.layers ?? [], id, props.colors, props.model.appearance.palette); }
 function reset(id: string) { delete props.model.appearance.colors[`${props.model.datasetId}:${id}`]; emit("save"); }
 </script>
@@ -37,7 +36,6 @@ function reset(id: string) { delete props.model.appearance.colors[`${props.model
           <span class="legend-field"><select id="ctl-legend-palette" v-model="model.appearance.palette" @change="$emit('save')"><option v-for="(label, id) in palettes" :key="id" :value="id">{{ label }}</option></select><ChevronDown :size="14" aria-hidden="true" /></span>
         </label>
       </div>
-      <p v-if="densityNote" class="legend-note">Color intensity shows KDE density.</p>
     </div>
 
     <div class="legend-list" aria-label="Layers">

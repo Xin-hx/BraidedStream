@@ -660,7 +660,6 @@ function renderBase(
     showTimeCell: false,
     showBranchStroke: false,
     showYAxis,
-    showDensityGradient: false,
     hover: null,
     highlightLayer: null,
   });

@@ -27,11 +27,15 @@ try {
     import { readFileSync } from 'node:fs';
     import { select } from 'd3';
     import { JSDOM } from 'jsdom';
-    import { runPipeline } from 'braided-stream/core';
+    import { runPipeline, preparePipeline } from 'braided-stream/core';
     import { braidedStream, streamTimeFilter } from 'braided-stream';
     assert.equal(typeof document, 'undefined');
     const dataset = { times: ['t1', 't2'], layers: [{ id: 'a', measures: [1, 3].map(value => ({ components: [{ kind: 'atom', value, mass: 1 }] })) }] };
     const result = runPipeline(dataset);
+    const pipeline = preparePipeline(dataset);
+    assert.deepEqual(pipeline.run(), result);
+    assert.deepEqual(pipeline.run({ baselineMode: 'sine' }), runPipeline(dataset, { baselineMode: 'sine' }));
+    assert.equal('densityProfiles' in result, false);
     const dom = new JSDOM('<svg id="chart"></svg><svg id="filter"></svg>');
     const svg = dom.window.document.getElementById('chart');
     const filterSvg = dom.window.document.getElementById('filter');
@@ -53,7 +57,7 @@ try {
   writeFileSync(join(dir, "consumer.ts"), `
     import { select } from 'd3';
     import { braidedStream, streamTimeFilter, type InputDataset, type HoverEvent } from 'braided-stream';
-    import { runPipeline } from 'braided-stream/core';
+    import { runPipeline, preparePipeline } from 'braided-stream/core';
     declare const svg: SVGSVGElement;
     declare const dataset: InputDataset;
     const chart = braidedStream().options({ width: 800 }).pipelineOptions({ baselineMode: 'wiggle' });
@@ -64,6 +68,11 @@ try {
     chart.options({ visMethod: 'star' });
     // @ts-expect-error Streamgraph replaces the former collapse option.
     chart.options({ collapseBranches: true });
+    // @ts-expect-error Density rendering was removed; layer color overrides remain supported.
+    chart.options({ showDensityGradient: true });
+    chart.options({ colorOverrides: { a: '#123456' } });
+    const pipeline = preparePipeline(dataset);
+    select(svg).datum({ dataset, result: pipeline.run({ baselineMode: 'sine' }) }).call(chart);
     // @ts-expect-error Hover events must retain their types.
     chart.on('hover.test', event => console.log(event.nonexistent));
     select(svg).datum(dataset).call(chart);

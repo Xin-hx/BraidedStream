@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runPipeline } from "braided-stream/core";
+import { createAnalysisProcessor } from "../src/lib/analysis-processor";
 import App from "../src/App.vue";
 import { parseImport } from "../src/lib/read-import";
 import { convertSource, makePreview, type ImportSource, type ImportPreview } from "../src/lib/import-data";
 import type { ImportCommand } from "../src/lib/import-task";
-import type { AnalysisRequest } from "../src/lib/analysis-task";
+import type { WorkerAnalysisRequest } from "../src/lib/analysis-task";
 import type { TaskRequest } from "../src/lib/worker-task";
 
 const workers: BrowserWorker[] = [];
@@ -18,16 +18,17 @@ class BrowserWorker {
   terminated = false;
   source?: ImportSource;
   preview?: ImportPreview;
+  process = createAnalysisProcessor();
   constructor() { workers.push(this); }
   terminate() { this.terminated = true; }
-  postMessage(request: TaskRequest<ImportCommand | AnalysisRequest>) {
+  postMessage(request: TaskRequest<ImportCommand | WorkerAnalysisRequest>) {
     queueMicrotask(async () => {
       if (this.terminated) return;
       const { id, payload } = request;
       const send = (data: unknown) => this.onmessage?.({ data: { id, ...data as object } } as MessageEvent);
       try {
         if (!("type" in payload)) {
-          const complete = () => send({ result: { result: runPipeline(payload.dataset, payload.options), perfMs: 5 } });
+          const complete = () => send({ result: this.process(payload) });
           if (holdAnalysis) waiting.push(complete); else complete();
         } else if (payload.type === "read") {
           const bytes = await new Promise<ArrayBuffer>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as ArrayBuffer); reader.readAsArrayBuffer(payload.file); });
@@ -82,13 +83,13 @@ describe("guided data import", () => {
     expect((view.get("#ctl-dataset").element as HTMLSelectElement).value).toBe("custom");
     expect(view.find('[data-id="Private cohort"]').exists()).toBe(true);
     expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
-    expect(workers).toHaveLength(2); // The computed import result is reused, rather than calculated twice.
+    expect(workers).toHaveLength(3); // Built-in analysis, file parsing, and import analysis have separate workers.
     await view.get('.legend-color[aria-label="Color for Private cohort"]').setValue("#123456");
     expect(localStorage.getItem("braidedstream:appearance:v1")).not.toContain("Private cohort");
     expect(localStorage.getItem("braidedstream:appearance:v1")).not.toContain("private-data.csv");
     await view.get("#ctl-bandwidth-ratio").setValue("0.5");
     await flushPromises();
-    expect(workers).toHaveLength(3);
+    expect(workers).toHaveLength(4);
     await button(view, "Remove data").trigger("click");
     await flushPromises();
     expect(view.find('#ctl-dataset option[value="custom"]').exists()).toBe(false);
@@ -112,7 +113,8 @@ describe("guided data import", () => {
     expect(view.find(".import-dialog").exists()).toBe(false);
     expect(view.get(".branch").attributes("d")).toBe(previous);
     expect((view.get("#ctl-dataset").element as HTMLSelectElement).value).toBe("illustration");
-    expect(workers.every(worker => worker.terminated)).toBe(true);
+    expect(workers[0].terminated).toBe(false);
+    expect(workers.slice(1).every(worker => worker.terminated)).toBe(true);
   });
 
   it("keeps malformed data out of the chart and renders preview labels as text", async () => {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { select } from "d3";
 import { JSDOM } from "jsdom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   braidedStream, streamTimeFilter, chartCoordinates, hitTest, timeRange,
   type ChartDatum, type RenderInput,
@@ -14,15 +14,64 @@ const dataset: InputDataset = {
     components: [{ kind: "uniform" as const, low: value, high: value * (2 + i), mass: 1 }],
   })) })),
 };
-function prepared() { return { dataset, result: runPipeline(dataset, { densityProfileBins: 4 }) }; }
+function prepared() { return { dataset, result: runPipeline(dataset) }; }
 function host() {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   document.body.append(svg);
   return svg;
 }
+beforeEach(() => { vi.stubGlobal("requestAnimationFrame", undefined); });
 afterEach(() => { vi.unstubAllGlobals(); document.body.replaceChildren(); });
 
 describe("D3 package", () => {
+  it("reuses nodes and path strings for colors, focus and decoration changes", () => {
+    const svg = host();
+    const chart = braidedStream();
+    const selection = select(svg).datum(prepared());
+    selection.call(chart);
+    const branch = svg.querySelector<SVGPathElement>(".branch")!;
+    const d = branch.getAttribute("d");
+    const set = vi.spyOn(branch, "setAttribute");
+    selection.call(chart.options({ colorOverrides: { [branch.dataset.id!]: "#123456" }, highlightLayer: branch.dataset.id! }));
+    expect(svg.querySelector(".branch")).toBe(branch);
+    expect(branch.getAttribute("fill")).toBe("#123456");
+    expect(set.mock.calls.some(([name]) => name === "d")).toBe(false);
+    selection.call(chart.options({ showEnvelopeStroke: true, showYAxis: false }));
+    expect(svg.querySelector(".branch")).toBe(branch);
+    expect(branch.getAttribute("d")).toBe(d);
+    expect(svg.querySelector(".envelope-stroke")).not.toBeNull();
+    expect(svg.querySelector(".axis-y")).toBeNull();
+    chart.destroy(selection);
+  });
+
+  it("coalesces pointer events per frame and cancels pending work on leave and destroy", () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => { frames.set(++next, callback); return next; }));
+    const cancel = vi.fn((id: number) => { frames.delete(id); });
+    vi.stubGlobal("cancelAnimationFrame", cancel);
+    const svg = host();
+    const hover = vi.fn();
+    const chart = braidedStream().on("hover.test", hover);
+    const selection = select(svg).datum(prepared());
+    selection.call(chart);
+    const branch = svg.querySelector(".branch")!;
+    for (const clientX of [100, 110, 120]) branch.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX, clientY: 200 }));
+    expect(frames.size).toBe(1);
+    expect(hover).not.toHaveBeenCalled();
+    frames.get(1)!(0); frames.delete(1);
+    expect(hover).toHaveBeenCalledOnce();
+    expect(hover.mock.calls[0][0].sourceEvent.clientX).toBe(120);
+    branch.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 200, clientY: 200 }));
+    svg.querySelector("svg")!.dispatchEvent(new MouseEvent("mouseleave"));
+    expect(frames.size).toBe(0);
+    branch.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 300, clientY: 200 }));
+    chart.destroy(selection);
+    expect(frames.size).toBe(0);
+    expect(cancel).toHaveBeenCalledTimes(2);
+    expect(hover).toHaveBeenCalledOnce();
+  });
+
   it("accepts raw input, updates a precomputed chart, and preserves consumer nodes", () => {
     const svg = host();
     const title = document.createElementNS(svg.namespaceURI, "title");
@@ -30,10 +79,10 @@ describe("D3 package", () => {
     const chart = braidedStream();
     select(svg).datum<ChartDatum>(dataset).call(chart);
     expect(svg.querySelectorAll(".branch")).toHaveLength(2);
-    select(svg).datum(prepared()).call(chart.options({ width: 800, height: 400, showDensityGradient: true }));
+    select(svg).datum(prepared()).call(chart.options({ width: 800, height: 400 }));
     expect(svg.getAttribute("viewBox")).toBe("0 0 800 400");
     expect(svg.querySelectorAll(".braided-stream-surface")).toHaveLength(1);
-    expect(svg.querySelector("linearGradient")).not.toBeNull();
+    expect(svg.querySelector("linearGradient")).toBeNull();
     chart.destroy(select(svg));
     chart.destroy(select(svg));
     expect([...svg.children]).toEqual([title]);
@@ -41,12 +90,12 @@ describe("D3 package", () => {
 
   it("isolates SVG definitions and event state across multiple hosts", () => {
     const a = host(), b = host();
-    const chart = braidedStream().options({ showDensityGradient: true });
+    const chart = braidedStream();
     select(a).datum(prepared()).call(chart);
     select(b).datum(prepared()).call(chart);
     const idsA = [...a.querySelectorAll("[id]")].map(node => node.id);
     const idsB = [...b.querySelectorAll("[id]")].map(node => node.id);
-    expect(idsA.length).toBeGreaterThan(0);
+    expect(a.querySelector("linearGradient")).toBeNull();
     expect(idsA.some(id => idsB.includes(id))).toBe(false);
     chart.destroy(select(a));
     expect(b.querySelectorAll(".branch")).toHaveLength(2);
@@ -58,7 +107,7 @@ describe("D3 package", () => {
     const before = JSON.stringify(datum.result);
     const hover = vi.fn();
     const chart = braidedStream().options({
-      visMethod: "streamgraph", showDensityGradient: true, showBranchStroke: true, showTimeCell: true,
+      visMethod: "streamgraph", showBranchStroke: true, showTimeCell: true,
     }).on("hover.test", hover);
     const selection = select(svg).datum(datum);
     selection.call(chart);
@@ -73,7 +122,7 @@ describe("D3 package", () => {
     expect(hover.mock.calls[0][0].layerId).toBe(path.getAttribute("data-owner-layer"));
     selection.call(chart.options({ visMethod: "braided" }));
     expect(svg.querySelector(".streamgraph")).toBeNull();
-    for (const mark of [".branch", ".space-hit", ".branch-stroke", ".time-cell", ".density-bands"]) {
+    for (const mark of [".branch", ".space-hit", ".branch-stroke", ".time-cell"]) {
       expect(svg.querySelector(mark)).not.toBeNull();
     }
     expect(JSON.stringify(datum.result)).toBe(before);
@@ -85,7 +134,7 @@ describe("D3 package", () => {
       layers: dataset.layers, times: [...dataset.times], result,
       start: 0, end: 1, visMethod: "braided", smoothContours: true,
       showEnvelopeStroke: false, showRepresentativeStroke: false, showTimeCell: false,
-      showBranchStroke: false, showYAxis: true, showDensityGradient: false,
+      showBranchStroke: false, showYAxis: true,
       hover: null, highlightLayer: null,
     };
     const crop = chartCoordinates(input);

@@ -27,7 +27,7 @@ function drawOverview() {
   select(filter.value).datum(datum.value).call(overview.options({ layers, colorOverrides, palette, start, end }));
 }
 watch(() => [datum.value, props.options], draw, { flush: "post" });
-watch(() => [datum.value, props.options.layers, props.options.colorOverrides, props.options.palette, props.options.start, props.options.end], drawOverview, { flush: "post" });
+watch([datum, () => props.options.layers, () => props.options.colorOverrides, () => props.options.palette, () => props.options.start, () => props.options.end], drawOverview, { flush: "post" });
 onMounted(() => { draw(); drawOverview(); });
 onBeforeUnmount(() => {
   if (svg.value) chart.destroy(select(svg.value));

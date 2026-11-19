@@ -36,7 +36,16 @@ export function computePidFromAnalysis(
   const inwardOverlap = new Array<number>(count).fill(0);
   const outwardInclusion = new Array<number>(count).fill(0);
   for (const time of referenceTimeIndices) {
-    const cells = analysis.map((layer) => layer[time]!);
+    // Pair-specific quadrature stays unchanged; repeated nodes share exact survival values.
+    const cells = analysis.map((layer) => {
+      const cell = layer[time]!;
+      const values = new Map<number, number>();
+      return { ...cell, survival(value: number) {
+        let result = values.get(value);
+        if (result === undefined) { result = cell.survival(value); values.set(value, result); }
+        return result;
+      } };
+    });
     for (let source = 0; source < count; source += 1) {
       for (let target = source; target < count; target += 1) {
         const overlap = analysisOverlap(cells[source], cells[target]);

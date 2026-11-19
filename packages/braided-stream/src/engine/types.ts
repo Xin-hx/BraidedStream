@@ -130,7 +130,6 @@ export interface PipelineResult {
   uncertainty: UncertaintyResult;
   base: BaseLayout;
   braided: BraidedLayout;
-  densityProfiles?: Array<Array<number[] | null>>;
   options: BraidedStreamOptions;
   costs: CostReport;
   yExtent: number;

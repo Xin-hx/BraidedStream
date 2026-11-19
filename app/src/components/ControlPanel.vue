@@ -11,7 +11,6 @@ const toggles = [
   ["showTimeCell", "time-cell", "Show time cell", true],
   ["showBranchStroke", "branch-stroke", "Show branch stroke", true],
   ["showYAxis", "y-axis", "Show y-axis", false],
-  ["showDensityGradient", "density-gradient", "Density color gradient", true],
 ] as const;
 </script>
 
@@ -40,7 +39,7 @@ const toggles = [
         <select id="ctl-baseline" v-model="model.baseline"><option value="wiggle">L2 wiggle</option><option value="sine">Sine (Gaussian L2)</option></select>
       </label>
       <label>KDE bandwidth control
-        <input id="ctl-bandwidth-ratio" v-model.number="model.bandwidthRatio" type="range" min="0.1" max="1.5" step="0.05" />
+        <input id="ctl-bandwidth-ratio" v-model.lazy.number="model.bandwidthRatio" type="range" min="0.1" max="1.5" step="0.05" />
       </label>
       <label v-for="[key, id, label, braidedOnly] in toggles" :key="key" class="chk">
         <input :id="`ctl-${id}`" v-model="model[key]" type="checkbox" :disabled="braidedOnly && model.visMethod !== 'braided'" />{{ label }}

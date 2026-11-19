@@ -26,29 +26,80 @@ export function measureCdf(measure: ProbabilityMeasure, value: number): number {
 
 /** Generalized lower inverse inf{x:F(x)>=p}, including jumps and flat CDF intervals. */
 export function measureQuantile(measure: ProbabilityMeasure, probability: number): number {
-  if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
+  return measureQuantiles(measure, [probability])[0];
+}
+
+/** Sweep atoms and interval endpoints once, preserving jumps and lower inverses. */
+export function measureQuantiles(measure: ProbabilityMeasure, probabilities: readonly number[]): number[] {
+  if (probabilities.some(p => !Number.isFinite(p) || p < 0 || p > 1)) {
     throw new Error("quantile probability must be in [0, 1]");
   }
-  const coordinates = [...new Set(measure.components.flatMap((component) => component.kind === "atom"
-    ? [component.value]
-    : [component.low, component.high]))].sort((a, b) => a - b);
-  if (!coordinates.length) return Number.NaN;
-  if (probability === 0) return coordinates[0];
-  for (let index = 0; index < coordinates.length; index += 1) {
-    const left = coordinates[index];
-    const leftCdf = measureCdf(measure, left);
-    if (leftCdf >= probability) return left;
-    const right = coordinates[index + 1];
-    if (right === undefined) return left;
-    const slope = compensatedSum(measure.components.map((component) => component.kind === "uniform" &&
-      component.low <= left && component.high >= right
-      ? component.mass / (component.high - component.low)
-      : 0));
-    if (slope > 0 && leftCdf + slope * (right - left) >= probability) {
-      return Math.min(right, left + (probability - leftCdf) / slope);
-    }
+  const events = measure.components.flatMap(component => component.kind === "atom"
+    ? [{ x: component.value, mass: component.mass, slope: 0, count: 0 }]
+    : [
+      { x: component.low, mass: 0, slope: component.mass / (component.high - component.low), count: 1 },
+      { x: component.high, mass: 0, slope: -component.mass / (component.high - component.low), count: -1 },
+    ]).sort((a, b) => a.x - b.x);
+  // Extreme interval widths can overflow or underflow a density; invert the CDF directly instead.
+  if (events.some(event => event.count !== 0 && (!Number.isFinite(event.slope) || event.slope === 0))) {
+    const coordinates = [...new Set(events.map(event => event.x))];
+    return probabilities.map(p => {
+      if (p === 0) return coordinates[0];
+      let left = 0;
+      let right = coordinates.length - 1;
+      while (left < right) {
+        const mid = (left + right) >>> 1;
+        if (measureCdf(measure, coordinates[mid]) >= p) right = mid; else left = mid + 1;
+      }
+      let low = coordinates[Math.max(0, left - 1)];
+      let high = coordinates[left];
+      for (;;) {
+        const mid = low + (high - low) / 2;
+        if (mid === low || mid === high) return high;
+        if (measureCdf(measure, mid) >= p) high = mid; else low = mid;
+      }
+    });
   }
-  return coordinates.at(-1)!;
+  const queries = probabilities.map((p, index) => ({ p, index })).sort((a, b) => a.p - b.p);
+  const values = new Array<number>(probabilities.length).fill(events.at(-1)?.x ?? Number.NaN);
+  const mass = accumulator();
+  let slope = accumulator();
+  let active = 0;
+  let previous = events[0]?.x ?? 0;
+  let query = 0;
+  for (let index = 0; index < events.length;) {
+    const x = events[index].x;
+    const before = mass.value();
+    const density = Math.max(0, slope.value());
+    mass.add(density * (x - previous));
+    while (query < queries.length && queries[query].p <= mass.value()) {
+      const { p, index: output } = queries[query++];
+      values[output] = density > 0 ? Math.min(x, previous + Math.max(0, p - before) / density) : previous;
+    }
+    do {
+      const event = events[index++];
+      mass.add(event.mass); slope.add(event.slope); active += event.count;
+    } while (index < events.length && events[index].x === x);
+    if (!active) slope = accumulator();
+    while (query < queries.length && queries[query].p <= mass.value()) {
+      values[queries[query++].index] = x;
+    }
+    previous = x;
+  }
+  return values;
+}
+
+function accumulator() {
+  let sum = 0;
+  let correction = 0;
+  return {
+    add(value: number) {
+      const next = sum + value;
+      correction += Math.abs(sum) >= Math.abs(value) ? sum - next + value : value - next + sum;
+      sum = next;
+    },
+    value: () => sum + correction,
+  };
 }
 
 export function measureMoments(measure: ProbabilityMeasure): MeasureMoments {
